@@ -17,25 +17,48 @@ export async function GET(_: Request, { params }: { params: { id: string } }){
   const { data, error } = await supabase.from('customers').select('*').eq('id', params.id).limit(1)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   const row = data?.[0]
-  const mapped = row ? ({
-    id: row.id,
-    full_name: row.full_name ?? row.name,
-    email: row.email,
-    plan: ((row.notes || '').includes('Term: 3y')) ? 'three_year' : (row.plan ?? row.subscription_type),
-    streams: row.streams,
-    start_date: row.start_date,
-    next_due_date: row.next_due_date ?? row.next_payment_date,
-    notes: row.notes,
-    plex_username: (row.notes || '').match(/Plex:\s*(.+)/i)?.[1] || undefined,
-    timezone: (row.notes || '').match(/Timezone:\s*(.+)/i)?.[1] || undefined,
-    status: row.status ?? row.subscription_status
-  }) : null
+  const mapped = row ? (()=>{
+    const plan = ((row.notes || '').includes('Term: 3y')) ? 'three_year' : (row.plan ?? row.subscription_type)
+    const rawNext = row.next_due_date ?? row.next_payment_date
+    const d = rawNext ? new Date(rawNext) : null
+    const year = d ? d.getFullYear() : 0
+    const safeNext = (!d || isNaN(d.getTime()) || year < 2000 || year > 2100) ? new Date().toISOString() : rawNext
+    return {
+      id: row.id,
+      full_name: row.full_name ?? row.name,
+      email: row.email,
+      plan,
+      streams: row.streams,
+      start_date: row.start_date,
+      next_due_date: safeNext,
+      notes: row.notes,
+      plex_username: (row.notes || '').match(/Plex:\s*(.+)/i)?.[1] || undefined,
+      timezone: (row.notes || '').match(/Timezone:\s*(.+)/i)?.[1] || undefined,
+      status: row.status ?? row.subscription_status
+    }
+  })() : null
   return NextResponse.json(mapped)
 }
 
 export async function PATCH(request: Request, { params }: { params: { id: string } }){
   const body = await request.json()
-  const parsed = CustomerUpdateSchema.safeParse({ ...body, id: params.id })
+  const normalize = (v: any)=>{
+    if (v === null || v === undefined) return v
+    if (typeof v !== 'string') return v
+    const s = v.trim()
+    if (s === '') return undefined
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)){
+      const [dd, mm, yyyy] = s.split('/').map(Number)
+      const d = new Date(yyyy, mm-1, dd)
+      return isNaN(d.getTime()) ? v : d.toISOString()
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(s).toISOString()
+    return v
+  }
+  const input = { ...body, id: params.id }
+  if (input.start_date !== undefined) input.start_date = normalize(input.start_date)
+  if (input.next_due_date !== undefined) input.next_due_date = normalize(input.next_due_date)
+  const parsed = CustomerUpdateSchema.safeParse(input)
   if (!parsed.success) return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 })
   const payload = parsed.data
   if (!supabase){
@@ -69,6 +92,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   if (payload.streams !== undefined) dbPayload.streams = payload.streams
   if (payload.start_date !== undefined) dbPayload.start_date = payload.start_date
   if (payload.next_due_date !== undefined) dbPayload.next_payment_date = payload.next_due_date
+  if (payload.subscription_status !== undefined) dbPayload.subscription_status = payload.subscription_status
   if (payload.notes !== undefined || payload.plex_username !== undefined || payload.timezone !== undefined) {
     const notes = (payload.notes ?? '').trim()
     const plex = payload.plex_username?.trim()

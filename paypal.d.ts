@@ -22,5 +22,9 @@ declare module '@paypal/checkout-server-sdk' {
       constructor(orderId: string)
       requestBody(body?: any): void
     }
+    class OrdersGetRequest {
+      constructor(orderId: string)
+      requestBody(body?: any): void
+    }
   }
 }

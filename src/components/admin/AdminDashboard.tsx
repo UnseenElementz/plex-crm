@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { useChatStore } from '@/stores/chatStore'
 import ConversationList from './ConversationList'
 import ChatArea from './ChatArea'
@@ -10,10 +11,14 @@ import { Conversation } from '@/stores/chatStore'
 export default function AdminDashboard() {
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
-  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'closed' | 'waiting'>('all')
+  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'closed' | 'waiting'>('active')
   const [isMobile, setIsMobile] = useState(false)
   const [chatOnline, setChatOnline] = useState<boolean | null>(null)
   const [saving, setSaving] = useState(false)
+  const [uploadingMusic, setUploadingMusic] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [musicMsg, setMusicMsg] = useState('')
+  const searchParams = useSearchParams()
   
   const {
     conversations,
@@ -21,6 +26,7 @@ export default function AdminDashboard() {
     refreshConversations,
     fetchMessages,
     refreshMessages,
+    createConversation,
     isLoading,
     error,
     connectSocket,
@@ -28,6 +34,13 @@ export default function AdminDashboard() {
   } = useChatStore()
 
   useEffect(() => {
+    try{
+      const hasCookie = typeof document !== 'undefined' && document.cookie.includes('admin_session=')
+      const localAdmin = typeof localStorage !== 'undefined' && !!localStorage.getItem('localAdmin')
+      if (localAdmin && !hasCookie) {
+        fetch('/api/admin/auth/session', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ mode: 'local', username: localStorage.getItem('localAdminUser') || '', password: localStorage.getItem('localAdminPass') || '' }) }).catch(()=>{})
+      }
+    }catch{}
     fetchConversations()
     connectSocket()
     ;(async()=>{ try{ const res = await fetch('/api/admin/settings'); if(res.ok){ const d = await res.json(); setChatOnline(Boolean(d?.chat_online ?? true)) } } catch{} })()
@@ -60,13 +73,73 @@ export default function AdminDashboard() {
     return () => clearInterval(interval)
   }, [selectedConversation])
 
+  // Preselect conversation from query param
+  useEffect(()=>{
+    const openId = searchParams?.get('open')
+    if (!openId) return
+    const c = conversations.find(c=> c.id === openId)
+    if (c) setSelectedConversation(c)
+  }, [searchParams, conversations])
+
+  useEffect(()=>{
+    if (selectedConversation) return
+    const byKey = new Map<string, Conversation>()
+    for (const c of conversations) {
+      const meta: any = (c as any).metadata || {}
+      const key = (meta.email || meta.full_name || c.id).toString().toLowerCase()
+      const existing = byKey.get(key)
+      if (!existing) {
+        byKey.set(key, c)
+      } else {
+        const a = new Date(existing.updated_at).getTime()
+        const b = new Date(c.updated_at).getTime()
+        if (b > a) byKey.set(key, c)
+      }
+    }
+    const arr = Array.from(byKey.values())
+      .filter(c => (filterStatus === 'all' || c.status === filterStatus))
+      .filter(c => {
+        const meta: any = (c as any).metadata || {}
+        const name = (meta.full_name || '').toLowerCase()
+        const email = (meta.email || '').toLowerCase()
+        const id = c.id.toLowerCase()
+        const q = searchTerm.toLowerCase()
+        return !q || name.includes(q) || email.includes(q) || id.includes(q)
+      })
+      .sort((a,b)=> new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+    const first = arr[0]
+    if (first) setSelectedConversation(first)
+  }, [conversations, filterStatus, searchTerm, selectedConversation])
+
   // Live updates come from realtime subscriptions; manual fetch occurs on selection only.
 
-  const filteredConversations = conversations.filter(conversation => {
-    const matchesSearch = conversation.id.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesFilter = filterStatus === 'all' || conversation.status === filterStatus
-    return matchesSearch && matchesFilter
-  })
+  const filteredConversations = (() => {
+    const byKey = new Map<string, Conversation>()
+    for (const c of conversations) {
+      const meta: any = (c as any).metadata || {}
+      const key = (meta.email || meta.full_name || c.id).toString().toLowerCase()
+      const existing = byKey.get(key)
+      if (!existing) {
+        byKey.set(key, c)
+      } else {
+        const a = new Date(existing.updated_at).getTime()
+        const b = new Date(c.updated_at).getTime()
+        if (b > a) byKey.set(key, c)
+      }
+    }
+    const arr = Array.from(byKey.values())
+    return arr
+      .filter(c => (filterStatus === 'all' || c.status === filterStatus))
+      .filter(c => {
+        const meta: any = (c as any).metadata || {}
+        const name = (meta.full_name || '').toLowerCase()
+        const email = (meta.email || '').toLowerCase()
+        const id = c.id.toLowerCase()
+        const q = searchTerm.toLowerCase()
+        return !q || name.includes(q) || email.includes(q) || id.includes(q)
+      })
+      .sort((a,b)=> new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+  })()
 
   const handleConversationSelect = (conversation: Conversation) => {
     setSelectedConversation(conversation)
@@ -81,6 +154,18 @@ export default function AdminDashboard() {
       const r = await fetch('/api/admin/settings', { method:'PUT', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(payload) })
       if (!r.ok) return
       setChatOnline(next)
+    } catch{}
+    finally{ setSaving(false) }
+  }
+
+  async function updateBgMusicUrl(url: string){
+    setSaving(true)
+    try{
+      const g = await fetch('/api/admin/settings')
+      const cur = g.ok ? await g.json() : {}
+      const payload = { ...cur, bg_music_url: url }
+      const r = await fetch('/api/admin/settings', { method:'PUT', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(payload) })
+      if (!r.ok) return
     } catch{}
     finally{ setSaving(false) }
   }
@@ -134,6 +219,69 @@ export default function AdminDashboard() {
             <option value="waiting">Waiting</option>
             <option value="closed">Closed</option>
           </select>
+          {!isLoading && !error && conversations.length === 0 && (
+            <div className="mt-2">
+              <button
+                className="btn w-full"
+                onClick={async()=>{
+                  try{
+                    const demo = await createConversation('127.0.0.1', { full_name: 'Demo User', email: 'demo@example.com' })
+                    if (demo) setSelectedConversation(demo)
+                  } catch{}
+                }}
+              >Start Demo Conversation</button>
+              <div className="text-[11px] text-slate-400 mt-1">Creates a test chat so the dashboard isn’t blank.</div>
+            </div>
+          )}
+
+          {/* removed demo conversation seed button */}
+
+          <div className="mt-2 p-2 rounded-lg border border-slate-800 bg-slate-900/40">
+            <div className="text-xs text-slate-400 mb-2">Background Music</div>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <input id="dash-mp3" type="file" accept="audio/mpeg,audio/mp3" className="hidden" onChange={async e=>{
+                  const file = e.target.files?.[0]
+                  if (!file) return
+                  setMusicMsg('')
+                  setUploadingMusic(true)
+                  setUploadProgress(0)
+                  try{
+                    const fd = new FormData()
+                    fd.append('file', file)
+                    await new Promise<void>((resolve, reject)=>{
+                      const xhr = new XMLHttpRequest()
+                      xhr.open('POST', '/api/admin/upload-mp3')
+                      xhr.upload.onprogress = (evt)=>{ if (evt.lengthComputable){ setUploadProgress(Math.round((evt.loaded/evt.total)*100)) } }
+                      xhr.onload = ()=>{
+                        try{
+                          const body = JSON.parse(xhr.responseText || '{}')
+                          if (xhr.status>=200 && xhr.status<300){
+                            const url = body?.url || ''
+                            if (url){ updateBgMusicUrl(url); setMusicMsg('Uploaded') }
+                            resolve()
+                          } else {
+                            setMusicMsg(body?.error || 'Upload failed')
+                            reject(new Error(body?.error || 'Upload failed'))
+                          }
+                        }catch(e){ setMusicMsg('Upload failed'); reject(e as any) }
+                      }
+                      xhr.onerror = ()=>{ setMusicMsg('Network error'); reject(new Error('network')) }
+                      xhr.send(fd)
+                    })
+                  } catch(e:any){}
+                  finally{ setUploadingMusic(false) }
+                }} />
+                <label htmlFor="dash-mp3" className="btn-xs-outline cursor-pointer">{uploadingMusic ? 'Uploading...' : 'Upload MP3'}</label>
+                {musicMsg && (<span className={`text-[11px] ${musicMsg.startsWith('Upload') ? 'text-emerald-400' : 'text-rose-400'}`}>{musicMsg}</span>)}
+              </div>
+              {uploadingMusic && (
+                <div className="w-full h-1 bg-slate-800 rounded">
+                  <div className="h-1 bg-cyan-500 rounded" style={{ width: `${uploadProgress}%` }}></div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Conversation List */}
@@ -182,6 +330,7 @@ export default function AdminDashboard() {
                       ← Back
                     </button>
                   )}
+                  {/* removed header MP3 uploader */}
                   <button onClick={() => useChatStore.getState().updateConversationStatus(selectedConversation.id, 'waiting')} className="px-3 py-1 bg-cyan-600 text-white rounded text-sm hover:bg-cyan-700">
                     Resolve
                   </button>
@@ -195,8 +344,9 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* Chat Messages */}
-            <ChatArea conversation={selectedConversation} />
+          {/* Chat Messages */}
+          <ChatArea conversation={selectedConversation} />
+          {/* removed header upload progress bar */}
           </>
         ) : (
           <div className="flex-1 flex items-center justify-center bg-slate-900/60">

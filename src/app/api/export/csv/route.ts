@@ -24,3 +24,6 @@ export async function GET(){
   const csv = [header, ...rows.map(r=> Object.values(r).join(','))].join('\n')
   return new NextResponse(csv, { headers: { 'Content-Type': 'text/csv' } })
 }
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'

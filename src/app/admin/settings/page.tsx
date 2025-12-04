@@ -21,7 +21,12 @@ export default function AdminSettingsPage() {
     monthly_price: '15',
     yearly_price: '85',
     stream_monthly_price: '5',
-    stream_yearly_price: '20'
+    stream_yearly_price: '20',
+    three_year_price: '180',
+    stream_three_year_price: '40',
+    bg_music_url: '',
+    bg_music_volume: '0.1',
+    bg_music_enabled: true
   })
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
@@ -33,6 +38,10 @@ export default function AdminSettingsPage() {
   const [newContent, setNewContent] = useState('')
   const [publishing, setPublishing] = useState(false)
   const [updateMsg, setUpdateMsg] = useState('')
+  const [musicMsg, setMusicMsg] = useState('')
+  const [uploadingMusic, setUploadingMusic] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [selectedFileName, setSelectedFileName] = useState('')
 
   useEffect(() => {
     checkAuth()
@@ -42,23 +51,15 @@ export default function AdminSettingsPage() {
 
   async function checkAuth() {
     try {
-      // Check for local admin session first
-      if (typeof window !== 'undefined') {
-        const localAdmin = sessionStorage.getItem('localAdmin')
-        if (localAdmin === 'true') {
-          setIsAuthenticated(true)
-          setAuthLoading(false)
-          setSupabaseStatus('connected')
-          return
-        }
-      }
-      
+      try{
+        const r = await fetch('/api/admin/auth/session')
+        if (r.ok){ setIsAuthenticated(true); setAuthLoading(false); return }
+      } catch{}
+      // do not infer admin from settings content
       const s = getSupabase()
       if (!s) {
         setAuthLoading(false)
         setSupabaseStatus('error')
-        // Allow access to settings even without Supabase for local admin, but show warning
-        setIsAuthenticated(true) // Allow access but show configuration warning
         return
       }
       
@@ -72,12 +73,7 @@ export default function AdminSettingsPage() {
         return
       }
       
-      // Check if user is admin - also handle local admin case
-      if (user.email === 'admin@streamzrus.local') {
-        setIsAuthenticated(true)
-        setAuthLoading(false)
-        return
-      }
+      
       
       // Check if user is admin from profiles
       const { data: profile, error: profileError } = await s.from('profiles').select('role').eq('email', user.email).single()
@@ -138,6 +134,20 @@ export default function AdminSettingsPage() {
     }
   }
 
+  
+
+  async function deleteUpdate(id?: string){
+    if (!id) return
+    try{
+      const res = await fetch(`/api/admin/service-updates?id=${encodeURIComponent(id)}`, { method:'DELETE' })
+      const body = await res.json().catch(()=>({}))
+      if (!res.ok){ setUpdateMsg(body?.error || 'Failed to delete'); return }
+      setUpdates(prev => prev.filter(u => (u as any).id !== id))
+      setUpdateMsg('Update deleted')
+      setTimeout(()=> setUpdateMsg(''), 3000)
+    } catch(e:any){ setUpdateMsg(e?.message || 'Failed to delete') }
+  }
+
   async function loadSettings() {
     try {
       try {
@@ -167,7 +177,12 @@ export default function AdminSettingsPage() {
                 monthly_price: (data.monthly_price ?? Number(prev.monthly_price)).toString(),
                 yearly_price: (data.yearly_price ?? Number(prev.yearly_price)).toString(),
                 stream_monthly_price: (data.stream_monthly_price ?? Number(prev.stream_monthly_price)).toString(),
-                stream_yearly_price: (data.stream_yearly_price ?? Number(prev.stream_yearly_price)).toString()
+                stream_yearly_price: (data.stream_yearly_price ?? Number(prev.stream_yearly_price)).toString(),
+                three_year_price: (data.three_year_price ?? Number(prev.three_year_price)).toString(),
+                stream_three_year_price: (data.stream_three_year_price ?? Number(prev.stream_three_year_price)).toString(),
+                bg_music_url: data.bg_music_url || prev.bg_music_url,
+                bg_music_volume: (data.bg_music_volume ?? Number(prev.bg_music_volume)).toString(),
+                bg_music_enabled: Boolean(data.bg_music_enabled ?? prev.bg_music_enabled)
               }))
             }
           }
@@ -193,7 +208,12 @@ export default function AdminSettingsPage() {
                 monthly_price: (data.monthly_price ?? Number(prev.monthly_price)).toString(),
                 yearly_price: (data.yearly_price ?? Number(prev.yearly_price)).toString(),
                 stream_monthly_price: (data.stream_monthly_price ?? Number(prev.stream_monthly_price)).toString(),
-                stream_yearly_price: (data.stream_yearly_price ?? Number(prev.stream_yearly_price)).toString()
+                stream_yearly_price: (data.stream_yearly_price ?? Number(prev.stream_yearly_price)).toString(),
+                three_year_price: (data.three_year_price ?? Number(prev.three_year_price)).toString(),
+                stream_three_year_price: (data.stream_three_year_price ?? Number(prev.stream_three_year_price)).toString(),
+                bg_music_url: data.bg_music_url || prev.bg_music_url,
+                bg_music_volume: (data.bg_music_volume ?? Number(prev.bg_music_volume)).toString(),
+                bg_music_enabled: Boolean(data.bg_music_enabled ?? prev.bg_music_enabled)
               }))
           }
         }
@@ -228,7 +248,12 @@ export default function AdminSettingsPage() {
         monthly_price: (data.monthly_price ?? Number(prev.monthly_price)).toString(),
         yearly_price: (data.yearly_price ?? Number(prev.yearly_price)).toString(),
         stream_monthly_price: (data.stream_monthly_price ?? Number(prev.stream_monthly_price)).toString(),
-        stream_yearly_price: (data.stream_yearly_price ?? Number(prev.stream_yearly_price)).toString()
+        stream_yearly_price: (data.stream_yearly_price ?? Number(prev.stream_yearly_price)).toString(),
+        three_year_price: (data.three_year_price ?? Number(prev.three_year_price)).toString(),
+        stream_three_year_price: (data.stream_three_year_price ?? Number(prev.stream_three_year_price)).toString(),
+        bg_music_url: data.bg_music_url || prev.bg_music_url,
+        bg_music_volume: (data.bg_music_volume ?? Number(prev.bg_music_volume)).toString(),
+        bg_music_enabled: Boolean(data.bg_music_enabled ?? prev.bg_music_enabled)
       }))
       try {
         if (typeof window !== 'undefined') {
@@ -238,6 +263,8 @@ export default function AdminSettingsPage() {
             yearly_price: data.yearly_price,
             stream_monthly_price: data.stream_monthly_price,
             stream_yearly_price: data.stream_yearly_price,
+            three_year_price: data.three_year_price,
+            stream_three_year_price: data.stream_three_year_price,
             smtp_host: data.smtp_host,
             smtp_port: data.smtp_port,
             smtp_user: data.smtp_user,
@@ -250,7 +277,10 @@ export default function AdminSettingsPage() {
             admin_user: data.admin_user,
             admin_pass: data.admin_pass,
             timezone: data.timezone,
-            company_name: data.company_name
+            company_name: data.company_name,
+            bg_music_url: data.bg_music_url,
+            bg_music_volume: data.bg_music_volume,
+            bg_music_enabled: data.bg_music_enabled
           }
           localStorage.setItem('admin_settings', JSON.stringify(toStore))
           document.cookie = `admin_settings=${encodeURIComponent(JSON.stringify(toStore))}; path=/; max-age=31536000`
@@ -278,6 +308,8 @@ export default function AdminSettingsPage() {
         yearly_price: parseFloat(settings.yearly_price) || 85,
         stream_monthly_price: parseFloat(settings.stream_monthly_price) || 5,
         stream_yearly_price: parseFloat(settings.stream_yearly_price) || 20,
+        three_year_price: parseFloat(settings.three_year_price) || 180,
+        stream_three_year_price: parseFloat(settings.stream_three_year_price) || 40,
         smtp_host: settings.smtp_host,
         smtp_port: settings.smtp_port,
         smtp_user: settings.smtp_user,
@@ -290,7 +322,10 @@ export default function AdminSettingsPage() {
         admin_user: settings.admin_user,
         admin_pass: settings.admin_pass,
         timezone: settings.timezone,
-        company_name: settings.company_name
+        company_name: settings.company_name,
+        bg_music_url: settings.bg_music_url,
+        bg_music_volume: parseFloat(settings.bg_music_volume) || 0.1,
+        bg_music_enabled: Boolean(settings.bg_music_enabled)
       }
       const res = await fetch('/api/admin/settings', { method:'PUT', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(settingsData) })
       const body = await res.json().catch(()=>({}))
@@ -344,6 +379,7 @@ export default function AdminSettingsPage() {
             >
               Go to Login
             </a>
+            
           </div>
         </div>
       </main>
@@ -364,9 +400,78 @@ export default function AdminSettingsPage() {
               {supabaseStatus === 'connected' ? 'Connected' : 
                supabaseStatus === 'error' ? 'Not Configured' : 'Checking...'}
             </span>
+            <a href="/admin" className="btn-xs-outline ml-3">← Back to Chat</a>
           </div>
         </div>
         
+        <div className="glass p-6 rounded-2xl mb-6">
+          <h2 className="text-xl font-semibold mb-4">Background Music</h2>
+          {/* removed settings CTA upload button */}
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="md:col-span-2">
+              <label className="label">Music MP3 Link (Google Drive or URL)</label>
+              <input className="input" placeholder="https://drive.google.com/file/d/ID/view?usp=sharing" value={settings.bg_music_url} onChange={e=> setSettings({ ...settings, bg_music_url: e.target.value })} />
+              <div className="mt-3 space-y-2">
+                <div className="flex items-center gap-3">
+                  <input id="bg-music-file" type="file" accept="audio/mpeg,audio/mp3" className="hidden" onChange={async e=>{
+                    const file = e.target.files?.[0]
+                    if (!file) return
+                    setSelectedFileName(file.name)
+                    setUploadProgress(0)
+                    setMusicMsg('')
+                    if (!isAuthenticated){ setMusicMsg('You must be admin to upload.'); return }
+                    setUploadingMusic(true)
+                    try{
+                      const fd = new FormData()
+                      fd.append('file', file)
+                      await new Promise<void>((resolve, reject)=>{
+                        const xhr = new XMLHttpRequest()
+                        xhr.open('POST', '/api/admin/upload-mp3')
+                        xhr.upload.onprogress = (evt)=>{ if (evt.lengthComputable){ setUploadProgress(Math.round((evt.loaded/evt.total)*100)) } }
+                        xhr.onload = ()=>{
+                          try{
+                            const body = JSON.parse(xhr.responseText || '{}')
+                            if (xhr.status>=200 && xhr.status<300){
+                              const url = body?.url || ''
+                              if (url){ setSettings({ ...settings, bg_music_url: url }); setMusicMsg('Uploaded') }
+                              resolve()
+                            } else {
+                              setMusicMsg(body?.error || 'Upload failed')
+                              reject(new Error(body?.error || 'Upload failed'))
+                            }
+                          }catch(e){ setMusicMsg('Upload failed'); reject(e as any) }
+                        }
+                        xhr.onerror = ()=>{ setMusicMsg('Network error'); reject(new Error('network')) }
+                        xhr.send(fd)
+                      })
+                    } catch(e:any){ /* message already set */ }
+                    finally{ setUploadingMusic(false) }
+                  }} />
+                  <label htmlFor="bg-music-file" className="btn cursor-pointer">{uploadingMusic ? 'Uploading...' : 'Upload MP3'}</label>
+                  {selectedFileName && (<span className="text-xs text-slate-400">{selectedFileName}</span>)}
+                </div>
+                {uploadingMusic && (
+                  <div className="w-full h-2 bg-slate-800 rounded">
+                    <div className="h-2 bg-cyan-500 rounded" style={{ width: `${uploadProgress}%` }}></div>
+                  </div>
+                )}
+                {musicMsg && (<div className={`text-xs ${musicMsg.startsWith('Upload') ? 'text-emerald-400' : 'text-rose-400'}`}>{musicMsg}</div>)}
+              </div>
+              <div className="text-xs text-slate-500 mt-1">We proxy the URL for smooth playback and CORS safety.</div>
+            </div>
+            <div>
+              <label className="label">Enabled</label>
+              <label className="inline-flex items-center gap-2">
+                <input type="checkbox" checked={settings.bg_music_enabled} onChange={e=> setSettings({ ...settings, bg_music_enabled: e.target.checked })} />
+                <span className="text-xs text-slate-400">When enabled, it plays once per session at low volume.</span>
+              </label>
+            </div>
+            <div>
+              <label className="label">Volume (0.0 – 1.0)</label>
+              <input className="input" type="number" step="0.05" min="0" max="1" value={settings.bg_music_volume} onChange={e=> setSettings({ ...settings, bg_music_volume: e.target.value })} />
+            </div>
+          </div>
+        </div>
         <div className="glass p-6 rounded-2xl mb-6">
           <h2 className="text-xl font-semibold mb-4">Service Updates</h2>
           <div className="space-y-3 mb-4">
@@ -385,7 +490,12 @@ export default function AdminSettingsPage() {
                 <div key={(u as any).id || idx} className="glass p-4 rounded-lg border border-cyan-500/20">
                   <div className="flex items-center justify-between mb-1">
                     <div className="font-semibold text-slate-200">{u.title}</div>
-                    <div className="text-xs text-slate-400">{new Date(u.created_at).toLocaleString()}</div>
+                    <div className="flex items-center gap-2">
+                      <div className="text-xs text-slate-400">{require('date-fns').format(new Date(u.created_at), 'dd/MM/yyyy')}</div>
+                      {(u as any).id && (
+                        <button className="btn-xs-outline" onClick={()=> deleteUpdate((u as any).id)}>Delete</button>
+                      )}
+                    </div>
                   </div>
                   <div className="text-slate-300 text-sm whitespace-pre-wrap">{u.content}</div>
                 </div>
@@ -608,6 +718,28 @@ export default function AdminSettingsPage() {
                 step="0.01"
                 value={settings.stream_yearly_price}
                 onChange={e=>setSettings({...settings, stream_yearly_price: e.target.value})}
+                onKeyPress={handleKeyPress}
+              />
+            </div>
+            <div>
+              <label className="label">Three-Year Base Price (£)</label>
+              <input 
+                className="input" 
+                type="number"
+                step="0.01"
+                value={settings.three_year_price}
+                onChange={e=>setSettings({...settings, three_year_price: e.target.value})}
+                onKeyPress={handleKeyPress}
+              />
+            </div>
+            <div>
+              <label className="label">Additional Stream (Three-Year) (£)</label>
+              <input 
+                className="input" 
+                type="number"
+                step="0.01"
+                value={settings.stream_three_year_price}
+                onChange={e=>setSettings({...settings, stream_three_year_price: e.target.value})}
                 onKeyPress={handleKeyPress}
               />
             </div>

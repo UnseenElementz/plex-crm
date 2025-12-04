@@ -12,6 +12,7 @@ function svc(){
 
 export async function POST(request: Request){
   try{
+    if (cookies().get('admin_session')?.value !== '1') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const body = await request.json().catch(()=>({}))
     const subject = String(body?.subject || '').trim()
     const message = String(body?.body || '').trim()

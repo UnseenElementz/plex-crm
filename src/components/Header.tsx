@@ -13,23 +13,21 @@ export default function Header(){
   
   useEffect(()=>{ 
     (async()=>{ 
-      // Local admin/session fallback
-      try {
-        const local = typeof window !== 'undefined' ? sessionStorage.getItem('localAdmin') : null
-        const stored = typeof window !== 'undefined' ? localStorage.getItem('admin_settings') : null
-        if (local === 'true' || stored) {
-          const parsed = stored ? JSON.parse(stored) : null
-          setEmail(parsed?.admin_user || 'Admin')
-          setUserRole('admin')
-          return
-        }
-      } catch {}
-
       const s = getSupabase(); 
-      if (!s) return; 
+      const alias = (process.env.NEXT_PUBLIC_ADMIN_ALIAS_EMAIL || 'admin@streamzrus.local').toLowerCase()
+      const cookieStr = typeof document !== 'undefined' ? (document.cookie || '') : ''
+      const isAdminCookie = cookieStr.split(';').map(s=>s.trim()).some(s=> s.startsWith('admin_session=1'))
+      if (!s){
+        if (isAdminCookie){ setEmail('Admin'); setUserRole('admin') }
+        return
+      }
       const { data } = await s.auth.getUser(); 
       const userEmail = data.user?.email ?? null
       setEmail(userEmail)
+      if (userEmail && (userEmail.toLowerCase() === alias || isAdminCookie)){
+        setUserRole('admin')
+        return
+      }
       if (userEmail) {
         const { data: profile } = await s.from('profiles').select('role').eq('email', userEmail).single()
         setUserRole(profile?.role || 'customer')
@@ -40,10 +38,7 @@ export default function Header(){
   const handleLogout = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    // Clear local admin session
-    if (typeof window !== 'undefined') {
-      sessionStorage.removeItem('localAdmin')
-    }
+    
     
     const s = getSupabase()
     if (s) {
@@ -127,6 +122,19 @@ export default function Header(){
             )}
             {userRole === 'customer' && (
               <Link 
+                href="/customer/recommendations" 
+                prefetch={false}
+                className={`px-3 py-1 rounded text-sm transition-colors ${
+                  pathname?.startsWith('/customer/recommendations') 
+                    ? 'bg-cyan-500/30 text-cyan-300' 
+                    : 'text-slate-400 hover:text-cyan-400 hover:bg-slate-800/30'
+                }`}
+              >
+                Recommendations
+              </Link>
+            )}
+            {userRole === 'customer' && (
+              <Link 
                 href="/customer/settings" 
                 prefetch={false}
                 className={`px-3 py-1 rounded text-sm transition-colors ${
@@ -157,8 +165,8 @@ export default function Header(){
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            <a className="btn-outline" href="/customer/login">Customer Login</a>
-            <a className="btn-outline" href="/login">Admin Login</a>
+            <Link className="btn-outline" href="/customer/login" prefetch={false}>Customer Login</Link>
+            <Link className="btn-outline" href="/login" prefetch={false}>Admin Login</Link>
           </div>
         )}
       </div>

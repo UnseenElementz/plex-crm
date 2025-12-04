@@ -4,7 +4,14 @@ import { createClient } from '@supabase/supabase-js'
 export async function GET(){
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY as string
-  if (!url || !key) return NextResponse.json({ error: 'Supabase not configured' }, { status: 500 })
+  if (!url || !key){
+    try{
+      const { cookies } = await import('next/headers')
+      const raw = cookies().get('admin_conversations')?.value
+      const list = raw ? JSON.parse(decodeURIComponent(raw)) : []
+      return NextResponse.json(Array.isArray(list) ? list : [])
+    } catch { return NextResponse.json([]) }
+  }
   const supabase = createClient(url, key)
   try {
     const { data, error } = await supabase
@@ -21,7 +28,21 @@ export async function GET(){
 export async function POST(request: Request){
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY as string
-  if (!url || !key) return NextResponse.json({ error: 'Supabase not configured' }, { status: 500 })
+  if (!url || !key){
+    try{
+      const body = await request.json()
+      const { customer_ip, metadata } = body || {}
+      const row = { id: crypto.randomUUID(), status: 'active', customer_ip: customer_ip || null, metadata: metadata || {}, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), closed_at: null }
+      const { cookies } = await import('next/headers')
+      const jar = cookies()
+      const raw = jar.get('admin_conversations')?.value
+      const list = raw ? JSON.parse(decodeURIComponent(raw)) : []
+      list.unshift(row)
+      const res = NextResponse.json(row)
+      res.cookies.set('admin_conversations', encodeURIComponent(JSON.stringify(list)), { path: '/', maxAge: 31536000 })
+      return res
+    } catch(e:any){ return NextResponse.json({ error: e?.message || 'Unknown error' }, { status: 500 }) }
+  }
   const supabase = createClient(url, key)
   try {
     const body = await request.json()

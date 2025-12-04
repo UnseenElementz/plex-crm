@@ -17,7 +17,8 @@ export const CustomerCreateSchema = z.object({
 export const CustomerUpdateSchema = CustomerCreateSchema.partial().extend({
   id: z.string().optional(),
   start_date: z.string().datetime().nullable().optional(),
-  next_due_date: z.string().datetime().nullable().optional()
+  next_due_date: z.string().datetime().nullable().optional(),
+  subscription_status: z.enum(['active','inactive']).optional()
 })
 
 export function formatZodError(err: z.ZodError){

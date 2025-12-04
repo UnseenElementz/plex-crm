@@ -12,19 +12,18 @@ export default function CustomerForm({ initial, onSaved, onCancel }: { initial?:
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const price = calculatePrice(c.plan, c.streams)
+  const [dueInput, setDueInput] = useState('')
+  const [startInput, setStartInput] = useState('')
   
-  // Better date handling for datetime-local input
   const formatDateForInput = (dateString: string | undefined): string => {
     if (!dateString) return ''
     try {
       const date = new Date(dateString)
-      // Convert to local datetime format (YYYY-MM-DDTHH:MM)
       const year = date.getFullYear()
+      if (year < 2000 || year > 2100) return ''
       const month = String(date.getMonth() + 1).padStart(2, '0')
       const day = String(date.getDate()).padStart(2, '0')
-      const hours = String(date.getHours()).padStart(2, '0')
-      const minutes = String(date.getMinutes()).padStart(2, '0')
-      return `${year}-${month}-${day}T${hours}:${minutes}`
+      return `${day}/${month}/${year}`
     } catch {
       return ''
     }
@@ -33,24 +32,71 @@ export default function CustomerForm({ initial, onSaved, onCancel }: { initial?:
   const parseDateFromInput = (inputValue: string): string => {
     if (!inputValue) return ''
     try {
-      // datetime-local input gives us YYYY-MM-DDTHH:MM format
-      // Convert to ISO string for storage
-      return new Date(inputValue).toISOString()
+      const parts = inputValue.split('/')
+      if (parts.length !== 3) return ''
+      const [dd, mm, yyyy] = parts
+      const d = parseInt(dd, 10)
+      const m = parseInt(mm, 10)
+      const y = parseInt(yyyy, 10)
+      if (!d || !m || !y) return ''
+      const date = new Date(y, m - 1, d)
+      if (isNaN(date.getTime())) return ''
+      return date.toISOString()
     } catch {
       return ''
     }
   }
   
-  useEffect(()=>{ if (!c.next_due_date) setC(v=>({ ...v, next_due_date: new Date().toISOString() })) }, [])
+  useEffect(()=>{ 
+    const now = new Date()
+    const dd = String(now.getDate()).padStart(2,'0')
+    const mm = String(now.getMonth()+1).padStart(2,'0')
+    const yyyy = String(now.getFullYear())
+    const midday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0)
+    setStartInput(prev=> prev || `${dd}/${mm}/${yyyy}`)
+    setC(v=>({ 
+      ...v, 
+      start_date: v.start_date || midday.toISOString(), 
+      next_due_date: v.next_due_date || calculateNextDue(v.plan || 'monthly', midday).toISOString() 
+    }))
+  }, [])
+  useEffect(()=>{ setDueInput(formatDateForInput(c.next_due_date)) }, [c.next_due_date])
+  useEffect(()=>{ setStartInput(formatDateForInput(c.start_date)) }, [c.start_date])
+  useEffect(()=>{ 
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(startInput)){
+      const iso = parseDateFromInput(startInput)
+      if (iso){
+        const d = new Date(iso)
+        const next = calculateNextDue(c.plan, d).toISOString()
+        setC(v=>({ ...v, start_date: iso, next_due_date: next }))
+        setDueInput(formatDateForInput(next))
+      }
+    }
+  }, [startInput])
 
   async function save(){
     setError(''); setSuccess(''); setLoading(true)
     try{
+      const draft: any = { ...c }
+      if (dueInput) {
+        if (!/^\d{2}\/\d{2}\/\d{4}$/.test(dueInput)) { setError('Next due date must be dd/MM/yyyy'); return }
+        const iso = parseDateFromInput(dueInput)
+        if (!iso) { setError('Invalid next due date'); return }
+        draft.next_due_date = iso
+      }
+      if (startInput) {
+        if (!/^\d{2}\/\d{2}\/\d{4}$/.test(startInput)) { setError('Start date must be dd/MM/yyyy'); return }
+        const iso = parseDateFromInput(startInput)
+        if (!iso) { setError('Invalid start date'); return }
+        draft.start_date = iso
+      } else {
+        delete draft.start_date
+      }
       const isUpdate = !!c.id
       const schema = isUpdate ? CustomerUpdateSchema : CustomerCreateSchema
-      const parsed = schema.safeParse(c)
+      const parsed = schema.safeParse(draft)
       if (!parsed.success) { setError(formatZodError(parsed.error)); return }
-      const url = isUpdate ? `/api/customers/${c.id}` : '/api/customers'
+      const url = isUpdate ? `/api/customers/${draft.id}` : '/api/customers'
       const method = isUpdate ? 'PATCH' : 'POST'
       const res = await fetch(url, { method, headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(parsed.data) })
       const data = await res.json()
@@ -87,17 +133,55 @@ export default function CustomerForm({ initial, onSaved, onCancel }: { initial?:
       </div>
       <label className="label">Streams</label>
       <input className="input" type="number" min={1} value={c.streams} onChange={e=>setC({ ...c, streams: parseInt(e.target.value||'1',10) })} />
+      <label className="label">Start date (optional)</label>
+      <input 
+        className="input"
+        type="text"
+        placeholder="dd/MM/yyyy"
+        value={startInput}
+        onChange={e=>{
+          const v = e.target.value
+          setStartInput(v)
+          if (/^\d{2}\/\d{2}\/\d{4}$/.test(v)){
+            const iso = parseDateFromInput(v)
+            if (iso) setC({ ...c, start_date: iso })
+          }
+        }}
+        onBlur={e=>{
+          const v = e.target.value
+          if (v && !/^\d{2}\/\d{2}\/\d{4}$/.test(v)){
+            setError('Start date must be dd/MM/yyyy')
+            setStartInput(formatDateForInput(c.start_date))
+          } else {
+            setError('')
+          }
+        }}
+        inputMode="numeric"
+      />
       <label className="label">Next due date</label>
       <input 
-        className="input" 
-        type="datetime-local" 
-        value={formatDateForInput(c.next_due_date)} 
+        className="input"
+        type="text"
+        placeholder="dd/MM/yyyy"
+        value={dueInput}
         onChange={e=>{
-          const parsedDate = parseDateFromInput(e.target.value)
-          if (parsedDate) {
-            setC({ ...c, next_due_date: parsedDate })
+          const v = e.target.value
+          setDueInput(v)
+          if (/^\d{2}\/\d{2}\/\d{4}$/.test(v)){
+            const iso = parseDateFromInput(v)
+            if (iso) setC({ ...c, next_due_date: iso })
           }
-        }} 
+        }}
+        onBlur={e=>{
+          const v = e.target.value
+          if (!/^\d{2}\/\d{2}\/\d{4}$/.test(v)){
+            setError('Next due date must be dd/MM/yyyy')
+            setDueInput(formatDateForInput(c.next_due_date))
+          } else {
+            setError('')
+          }
+        }}
+        inputMode="numeric"
       />
       <label className="label">Notes</label>
       <textarea className="input" value={c.notes || ''} onChange={e=>setC({ ...c, notes: e.target.value })} />

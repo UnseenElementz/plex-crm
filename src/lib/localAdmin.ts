@@ -37,7 +37,7 @@ export function loginLocalAdmin(user: string, pass: string){
   if (!expectUser) expectUser = envUser
   if (!expectPass) expectPass = envPass
   if (!expectUser && !expectPass) {
-    expectUser = 'Admin'
+    expectUser = 'Anfrax786'
     expectPass = 'Badaman1'
   }
   if ((!expectUser || !expectPass) && typeof window !== 'undefined'){
@@ -70,7 +70,11 @@ export function loginLocalAdmin(user: string, pass: string){
   const matchUser = (expectUser || '').toLowerCase() === inUser.toLowerCase()
   const matchPass = (expectPass || '') === inPass
   if (matchUser && matchPass && expectUser && expectPass) {
-    localStorage.setItem('localAdmin', '1')
+    try{
+      localStorage.setItem('localAdmin', '1')
+      localStorage.setItem('localAdminUser', inUser)
+      localStorage.setItem('localAdminPass', inPass)
+    }catch{}
     return true
   }
   return false

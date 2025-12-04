@@ -100,20 +100,28 @@ export async function sendRenewalEmail(to: string, template?: { subject: string;
 
 export function transcodeWarningTemplate() {
   return {
-    subject: 'Transcode Warning – Stream Usage Policy',
+    subject: 'Over Stream Warning – Concurrent Streams Notice',
     body:
 `Hello,
 
-This is a courtesy warning that your current plan only supports a specific number of concurrent streams, and it appears you are exceeding that limit. This is a violation of our server rules.
+We’ve detected that your account is using more than one stream at the same time. This is a breach of our Terms of Service.
 
-Please ensure you remain within the number of streams included in your plan. If you require additional streams, let us know and we can arrange an upgrade.
+Over-using streams puts extra strain on our servers because each user is assigned a capped bandwidth limit. When someone goes over that limit, it can cause buffering or performance issues for other users who are following the rules.
+To prevent this, each account is allowed 1 stream only, unless additional streams are purchased.
 
-If the misuse continues, disconnection may occur and no refund will be issued.
+Please either:
 
-If you need any assistance, we are here to help.
+Stick to the 1-stream limit,
+or
+
+Purchase an extra stream if you need more than one device.
+
+This is your final warning. We operate on a 2-strike policy, and any further violations may result in a temporary or permanent IP ban. Our datacentres have become very strict about excessive usage, and we must enforce these rules for everyone’s service quality.
+
+Please reply to confirm you understand the rules and acknowledge this last warning.
 
 Thank you,
-Streamz R Us`
+Streamz R Us Support`
   }
 }
 

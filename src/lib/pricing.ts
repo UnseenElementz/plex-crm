@@ -14,6 +14,8 @@ function readPricingConfig(){
       yearly_price: Number(s.yearly_price) || 85,
       stream_monthly_price: Number(s.stream_monthly_price) || 5,
       stream_yearly_price: Number(s.stream_yearly_price) || 20,
+      three_year_price: Number(s.three_year_price) || 180,
+      stream_three_year_price: Number(s.stream_three_year_price) || 40,
     }
   }catch{ return null }
 }
@@ -23,8 +25,8 @@ export function calculatePrice(plan: Plan, streams: number): number {
   const included = 1
   const extra = Math.max(0, streams - included)
   if (plan === 'three_year') {
-    const base = 160
-    const extraPrice = 40
+    const base = cfg?.three_year_price ?? 180
+    const extraPrice = cfg?.stream_three_year_price ?? 40
     return base + extra * extraPrice
   }
   const base = plan === 'yearly' ? (cfg?.yearly_price ?? 85) : (cfg?.monthly_price ?? 15)
@@ -42,9 +44,10 @@ export function calculateNextDue(plan: Plan, startDate: Date): Date {
   return plan === 'yearly' ? addYears(startDate, 1) : addMonths(startDate, 1)
 }
 
-export function getStatus(nextDue: Date): 'Active' | 'Due Soon' | 'Overdue' {
+export function getStatus(nextDue: Date): 'Active' | 'Due Soon' | 'Due Today' | 'Overdue' {
   const days = differenceInDays(nextDue, new Date())
   if (days < 0) return 'Overdue'
+  if (days === 0) return 'Due Today'
   if (days <= 7) return 'Due Soon'
   return 'Active'
 }

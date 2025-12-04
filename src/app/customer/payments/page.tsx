@@ -15,7 +15,7 @@ export default function CustomerPaymentsPage(){
           <tbody>
             {rows.map(r=> (
               <tr key={r.id} className="border-t border-slate-800">
-                <td className="p-2">{new Date(r.created_at).toLocaleString()}</td>
+                <td className="p-2">{require('date-fns').format(new Date(r.created_at), 'dd/MM/yyyy')}</td>
                 <td className="p-2">£{Number(r.amount).toFixed(2)}</td>
                 <td className="p-2">{r.provider}</td>
                 <td className="p-2">{r.status}</td>

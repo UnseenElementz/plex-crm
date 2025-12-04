@@ -74,3 +74,6 @@ export async function GET() {
     return NextResponse.json({ ok: false, message: e?.message || 'Unknown error' }, { status: 500 })
   }
 }
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'

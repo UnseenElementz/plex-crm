@@ -26,6 +26,7 @@ export default function CustomerPortal() {
   const [authState, setAuthState] = useState<'checking'|'unauth'|'ready'>('checking')
   const [hasSubscription, setHasSubscription] = useState(false)
   const [paymentLock, setPaymentLock] = useState(false)
+  const [updateModal, setUpdateModal] = useState<{ id?: string; title: string; content: string } | null>(null)
   const [customer, setCustomer] = useState<Customer>({
     id: 'demo',
     fullName: 'Demo User',
@@ -52,7 +53,7 @@ export default function CustomerPortal() {
             fullName: p.fullName || c.fullName,
             email: p.email || c.email,
             plan: p.plan || c.plan,
-            streams: p.streams || c.streams,
+            streams: Math.min(5, p.streams || c.streams),
             startDate: new Date().toISOString(),
             nextDueDate: p.nextDueDate || calculateNextDue(p.plan || 'monthly', new Date()).toISOString(),
           }))
@@ -64,6 +65,22 @@ export default function CustomerPortal() {
       if (!s) { setAuthState('unauth'); return }
       const { data } = await s.auth.getUser(); 
       if (!data.user) { setAuthState('unauth'); return }
+      try{
+        const res = await fetch('/api/admin/service-updates', { cache: 'no-store' })
+        if (res.ok){
+          const j = await res.json().catch(()=>({}))
+          const updates: any[] = j?.updates || []
+          if (updates.length){
+            const latest = updates.sort((a,b)=> new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
+            const key = `svc_updates_seen:${data.user.email}`
+            const seen = localStorage.getItem(key)
+            const latestId = latest.id || latest.created_at
+            if (!seen || seen !== String(latestId)){
+              setUpdateModal({ id: latest.id, title: latest.title, content: latest.content })
+            }
+          }
+        }
+      } catch{}
       try {
         const userEmail = data.user.email as string
         const { data: customerData, error } = await s
@@ -78,7 +95,7 @@ export default function CustomerPortal() {
             fullName: customerData.name,
             email: customerData.email,
             plan: customerData.subscription_type || 'monthly',
-            streams: customerData.streams || 1,
+            streams: Math.min(5, customerData.streams || 1),
             startDate: customerData.start_date || new Date().toISOString(),
             nextDueDate: customerData.next_payment_date || calculateNextDue(customerData.subscription_type || 'monthly', new Date()).toISOString(),
             notes: customerData.notes || ''
@@ -165,6 +182,19 @@ export default function CustomerPortal() {
     }
   }
 
+  function acknowledgeUpdate(){
+    try{
+      if (updateModal){
+        const s = getSupabase()
+        const email = (s as any)?._auth?.currentUser?.email || customer.email || 'anon'
+        const key = `svc_updates_seen:${email}`
+        const val = String(updateModal.id || updateModal.title)
+        localStorage.setItem(key, val)
+      }
+    }catch{}
+    setUpdateModal(null)
+  }
+
   if (authState === 'unauth') {
     return (
       <main className="p-6 flex items-center justify-center min-h-[80vh]">
@@ -190,8 +220,9 @@ export default function CustomerPortal() {
       <div className="glass p-6 rounded-2xl">
         <h2 className="text-2xl font-semibold">Customer Portal</h2>
         <p className="text-slate-300">Manage your Plex subscription</p>
-        <div className="mt-2">
-          <a href="/customer/service-updates" className="text-brand underline" data-no-prefetch>Service Updates</a>
+        <div className="mt-2 flex gap-4">
+          <a href="/customer/service-updates" className="cta-outline shimmer" data-no-prefetch>Service Updates</a>
+          <a href="/customer/recommendations" className="cta-btn shimmer" data-no-prefetch>Recommendations</a>
         </div>
         {paymentLock && !canPay && (
           <div className="glass p-4 rounded-lg mt-4 border border-cyan-500/30">
@@ -223,15 +254,24 @@ export default function CustomerPortal() {
                 }))}>3 Years</button>
               </div>
               <label className="label">Streams</label>
-              <input type="number" min={1} value={customer.streams} onChange={e=>setCustomer(c=>({...c,streams:parseInt(e.target.value||'1',10)}))} className="input" />
+              <select className="input" value={customer.streams} onChange={e=>setCustomer(c=>({
+                ...c,
+                streams: Math.min(5, Math.max(1, parseInt(e.target.value||'1',10)))
+              }))}>
+                <option value={1}>1</option>
+                <option value={2}>2</option>
+                <option value={3}>3</option>
+                <option value={4}>4</option>
+                <option value={5}>5</option>
+              </select>
               <div className="mt-2 text-slate-200">Total price: £{price.toFixed(2)}</div>
               <div className="text-xs text-slate-400">£{getTransactionFee(customer.plan)} transaction fee applies</div>
-              <div className="mt-1 text-slate-300">Next due: {format(new Date(customer.nextDueDate), 'PPP')}</div>
+              <div className="mt-1 text-slate-300">Next due: {format(new Date(customer.nextDueDate), 'dd/MM/yyyy')}</div>
               <div className={`mt-1 tag ${status.toLowerCase()}`}>Status: {status}</div>
             </div>
             <div className="mt-4 space-y-2" suppressHydrationWarning>
               {canPay ? (
-                <PayPalButton amount={price} customerEmail={customer.email} onSuccess={()=>{ }} />
+                <PayPalButton amount={price} plan={customer.plan} streams={customer.streams} customerEmail={customer.email} onSuccess={()=>{ }} />
               ) : (
                 <div className="glass p-4 rounded-lg border border-amber-500/30 bg-amber-900/20 text-amber-300 text-sm">
                   Payments are temporarily locked. Active subscribers can extend before their due date.
@@ -266,6 +306,22 @@ export default function CustomerPortal() {
           <p className="text-slate-300 text-xs">If you need to use multiple devices, please purchase additional streams to avoid a ban.</p>
         </div>
       </div>
+      {updateModal && (
+        <div className="fixed inset-0 modal-backdrop flex items-center justify-center p-4 z-50">
+          <div className="glass p-4 rounded-xl w-full max-w-md sm:max-w-lg border border-cyan-500/30 bg-slate-900/80 max-h-[80vh] overflow-hidden">
+            <div className="text-lg font-semibold text-slate-200 mb-2">{updateModal.title || 'Service Announcement'}</div>
+            <div className="mt-2 overflow-y-auto max-h-[55vh] sm:max-h-[60vh] pr-1 space-y-2">
+              {((updateModal.content || '').replace(/\\n/g, '\n').replace(/\r\n/g, '\n').split(/\n{2,}/).map(s=> s.trim()).filter(Boolean)).map((p, i)=> (
+                <p key={i} className="text-slate-300 text-sm leading-relaxed">{p}</p>
+              ))}
+            </div>
+            <div className="mt-3 flex justify-end gap-2">
+              <a href="/customer/service-updates" className="btn-xs-outline" onClick={acknowledgeUpdate} data-no-prefetch>View all updates</a>
+              <button className="btn-xs" onClick={acknowledgeUpdate}>Got it</button>
+            </div>
+          </div>
+        </div>
+      )}
       <ChatWidget position="bottom-right" />
     </main>
   )

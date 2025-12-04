@@ -2,49 +2,33 @@
 import Script from 'next/script'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-export default function PayPalButton({ amount, currency = 'GBP', customerEmail, onSuccess }: { amount: number; currency?: string; customerEmail?: string; onSuccess?: (orderId: string) => void }){
+export default function PayPalButton({ amount, currency = 'GBP', customerEmail, plan, streams, onSuccess }: { amount: number; currency?: string; customerEmail?: string; plan?: 'monthly'|'yearly'|'three_year'; streams?: number; onSuccess?: (orderId: string) => void }){
   const [ready, setReady] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const renderedRef = useRef(false)
+  const lastOrderIdRef = useRef<string | null>(null)
   const isWebView = typeof navigator !== 'undefined' && /Electron|Trae/i.test(navigator.userAgent || '')
 
   const createOrder = useCallback(async ()=>{
-    try {
-      const res = await fetch('/api/paypal/create-order', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ amount, currency }) })
-      const text = await res.text()
-      let data
-      try {
-        data = JSON.parse(text)
-      } catch {
-        throw new Error('Invalid response from payment server')
-      }
-      if (!res.ok) throw new Error(data?.error || 'Failed to create order')
-      if (!data.id) throw new Error('Invalid order ID received')
-      return data.id
-    } catch (error: any) {
-      console.error('Create order error:', error)
-      throw error
-    }
-  }, [amount, currency])
+    const res = await fetch('/api/paypal/create-order', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ amount, currency, plan, streams }) })
+    const text = await res.text()
+    let data
+    try { data = JSON.parse(text) } catch { throw new Error('Invalid response from payment server') }
+    if (!res.ok) throw new Error(data?.error || 'Failed to create order')
+    if (!data.id) throw new Error('Invalid order ID received')
+    lastOrderIdRef.current = data.id
+    return data.id
+  }, [amount, currency, plan, streams])
 
   const captureOrder = useCallback(async (orderId: string)=>{
-    try {
-      const res = await fetch('/api/paypal/capture-order', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ orderId, customerEmail }) })
-      const text = await res.text()
-      let data
-      try {
-        data = JSON.parse(text)
-      } catch {
-        throw new Error('Invalid response from payment server')
-      }
-      if (!res.ok) throw new Error(data?.error || 'Failed to capture order')
-      onSuccess?.(orderId)
-      return data
-    } catch (error: any) {
-      console.error('Capture order error:', error)
-      throw error
-    }
+    const res = await fetch('/api/paypal/capture-order', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ orderId, customerEmail }) })
+    const text = await res.text()
+    let data
+    try { data = JSON.parse(text) } catch { throw new Error('Invalid response from payment server') }
+    if (!res.ok) throw new Error(data?.error || 'Failed to capture order')
+    onSuccess?.(orderId)
+    return data
   }, [onSuccess, customerEmail])
 
   const clientId = useMemo(()=>process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || 'sb', [])
@@ -65,12 +49,12 @@ export default function PayPalButton({ amount, currency = 'GBP', customerEmail, 
     }
     try{
       paypal.Buttons({
+        style: { label: 'checkout', layout: 'vertical', color: 'gold', shape: 'rect', height: 48 },
         createOrder: async ()=> {
           try {
             return await createOrder()
           } catch (error: any) {
-            console.error('PayPal create order error:', error)
-            setError(error.message || 'Failed to create order')
+            setError(error?.message || 'Failed to create order')
             throw error
           }
         },
@@ -116,8 +100,33 @@ export default function PayPalButton({ amount, currency = 'GBP', customerEmail, 
       
       {!isWebView && isConfigured && (
         <>
-          <Script src={`https://www.paypal.com/sdk/js?client-id=${clientId}&currency=${currency}`} onReady={()=>setReady(true)} />
-          <div id="paypal-button-container" />
+          <Script 
+            src={`https://www.paypal.com/sdk/js?client-id=${clientId}&currency=${currency}&components=buttons&intent=CAPTURE&disable-funding=card,venmo`}
+            onLoad={()=>setReady(true)} 
+            onError={async ()=>{
+              setError('Failed to load PayPal SDK')
+              try {
+                const id = await createOrder()
+                lastOrderIdRef.current = id
+                setMessage('PayPal fallback link is ready')
+              } catch {}
+            }} 
+          />
+          {!ready && (
+            <div className="w-full flex justify-center mt-2">
+              <div className="h-12 w-64 rounded-lg bg-amber-500/20 animate-pulse" />
+            </div>
+          )}
+          <div className="w-full flex justify-center mt-2">
+            <div id="paypal-button-container" className="min-h-12" />
+          </div>
+          {lastOrderIdRef.current && (
+            <div className="w-full flex justify-center">
+              <a className="text-xs text-brand underline mt-2 inline-block" href={`https://www.paypal.com/checkoutnow?token=${lastOrderIdRef.current}`} target="_blank" rel="noreferrer">
+                Continue checkout (fallback link)
+              </a>
+            </div>
+          )}
         </>
       )}
       {(!isConfigured || isWebView) && (
@@ -125,9 +134,25 @@ export default function PayPalButton({ amount, currency = 'GBP', customerEmail, 
           PayPal not ready. Configure real sandbox credentials to test payments.
         </div>
       )}
-      {merchantEmail && isConfigured && <div className="text-[11px] text-slate-500 mt-1">Payments go to {merchantEmail}</div>}
-      {message && <div className="text-slate-400 text-xs mt-2">{message}</div>}
-      {error && <div className="text-rose-400 text-xs mt-1">{error}</div>}
+      {isConfigured && error && (
+        <div className="mt-2 w-full flex justify-center">
+          <button
+            className="px-5 py-2 rounded-lg bg-amber-500 text-black hover:bg-amber-400 transition"
+            onClick={async ()=>{
+              try{
+                const id = await createOrder()
+                lastOrderIdRef.current = id
+                window.open(`https://www.paypal.com/checkoutnow?token=${id}`, '_blank')
+              }catch(e:any){ setError(e?.message || 'Fallback checkout failed') }
+            }}
+          >
+            PayPal Checkout
+          </button>
+        </div>
+      )}
+      {/* merchant email note intentionally hidden to keep only the big button */}
+      {message && <div className="text-slate-300 text-xs mt-2 text-center">{message}</div>}
+      {error && <div className="text-rose-400 text-xs mt-1 text-center">{error}</div>}
     </div>
   )
 }

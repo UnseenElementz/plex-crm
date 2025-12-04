@@ -1,6 +1,7 @@
 import './globals.css'
 import { ReactNode } from 'react'
 import Header from '@/components/Header'
+import dynamic from 'next/dynamic'
 import Script from 'next/script'
 
 export const metadata = {
@@ -9,6 +10,7 @@ export const metadata = {
 }
 
 export default function RootLayout({ children }: { children: ReactNode }) {
+  const BackgroundAudio = dynamic(() => import('@/components/BackgroundAudio'), { ssr: false })
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen text-slate-100 relative overflow-x-hidden">
@@ -29,6 +31,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <main className="animate-fade-in">
             {children}
           </main>
+          <BackgroundAudio />
         </div>
         <Script id="silence-abort-errors" strategy="beforeInteractive">
           {`(function(){

@@ -13,29 +13,53 @@ export default function LoginPage(){
 
   async function login(){
     setError('')
-    // Local admin override
-    if (loginLocalAdmin(email, password)) { 
-      sessionStorage.setItem('localAdmin', 'true')
-      router.replace('/admin')
-      return 
-    }
-    // Supabase login
+
     const s = getSupabase()
-    if (!s){ setError('Customer login requires Supabase to be configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local'); return }
-    const adminAliasEmail = 'admin@streamzrus.local'
+    const adminAliasEmail = process.env.NEXT_PUBLIC_ADMIN_ALIAS_EMAIL || 'admin@streamzrus.local'
     const isUsername = !email.includes('@')
     const supaEmail = isUsername ? adminAliasEmail : email
-    let { error } = await s.auth.signInWithPassword({ email: supaEmail, password })
-    if (error && isUsername) {
-      try { await fetch('/api/admin/auth/upsert') } catch {}
-      const retry = await s.auth.signInWithPassword({ email: supaEmail, password })
-      error = retry.error || null
+    if (!s){
+      if (isUsername && loginLocalAdmin(email, password)){
+        try{
+          const res = await fetch('/api/admin/auth/session', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ mode: 'local', username: email, password }) })
+          if (!res.ok) throw new Error('Invalid admin credentials')
+        } catch(e:any){ setError(e?.message || 'Admin login failed'); return }
+        router.replace('/admin')
+        return
+      }
+      setError('Login requires Supabase configuration (.env.local).')
+      return
     }
-    if (error) { setError(error.message || 'Login failed'); return }
-    const { data: profs } = await s.from('profiles').select('*').eq('email', supaEmail).limit(1)
-    const role = profs?.[0]?.role || (supaEmail===adminAliasEmail ? 'admin' : 'customer')
-    if (role==='admin') { sessionStorage.setItem('localAdmin', 'true') }
-    router.replace(role==='admin' ? '/admin' : '/customer')
+    let { error } = await s.auth.signInWithPassword({ email: supaEmail, password })
+    if (isUsername) {
+      try { await fetch('/api/admin/auth/upsert', { method:'POST' }) } catch {}
+      if (error) {
+        const retry = await s.auth.signInWithPassword({ email: supaEmail, password })
+        error = retry.error || null
+      }
+    }
+    if (error) {
+      // Fallback: allow alias admin login without Supabase if credentials match admin settings/env
+      if (isUsername && loginLocalAdmin(email, password)){
+        try{
+          const res = await fetch('/api/admin/auth/session', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ mode: 'local', username: email, password }) })
+          if (!res.ok) throw new Error('Invalid admin credentials')
+        } catch {}
+        router.replace('/admin')
+        return
+      }
+      setError(error.message || 'Login failed');
+      return
+    }
+    const { data: profs } = await s.from('profiles').select('role').eq('email', supaEmail).limit(1)
+    const role = profs?.[0]?.role || 'customer'
+    const isAdminLogin = (supaEmail.toLowerCase() === adminAliasEmail.toLowerCase()) || role === 'admin'
+    if (isAdminLogin) {
+      try{ await fetch('/api/admin/auth/session', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email: supaEmail }) }) } catch {}
+      router.replace('/admin')
+      return
+    }
+    router.replace('/customer')
   }
 
   function handleKeyPress(e: React.KeyboardEvent) {
@@ -52,6 +76,20 @@ export default function LoginPage(){
         <input className="input mb-3" type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} onKeyPress={handleKeyPress} />
         {error && <div className="text-rose-400 text-sm mb-2">{error}</div>}
         <button className="btn w-full" onClick={login}>Login</button>
+        {process.env.NODE_ENV !== 'production' && (
+          <button
+            className="btn w-full mt-2"
+            onClick={async ()=>{
+              try{
+                const res = await fetch('/api/admin/auth/session', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ mode: 'local', username: email || 'Anfrax786', password: password || 'Badaman1' }) })
+                if (!res.ok) throw new Error('Invalid admin credentials')
+                router.replace('/admin')
+              } catch {
+                setError('Admin quick login failed')
+              }
+            }}
+          >Dev Admin Login</button>
+        )}
         <div className="mt-3 text-sm text-slate-400">
           <div className="flex justify-between items-center">
             <Link className="text-brand hover:text-cyan-300 transition-colors" href="/forgot-password" prefetch={false}>Forgot password?</Link>

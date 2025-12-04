@@ -75,7 +75,13 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ isLoading: true })
     try {
       const s = getSupabase()
-      if (!s) { set({ user: null, isAuthenticated: false, isLoading: false }); return }
+      if (!s) {
+        try{
+          const r = await fetch('/api/admin/auth/session')
+          if (r.ok){ set({ user: { id:'local', email:'', name:'Admin User', permissions:{}, created_at: new Date().toISOString() }, isAuthenticated: true, isLoading: false }); return }
+        } catch{}
+        set({ user: null, isAuthenticated: false, isLoading: false }); return
+      }
       const { data } = await s.auth.getUser()
       const u = data.user
       if (u) {

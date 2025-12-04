@@ -84,11 +84,7 @@ export default function ChatWidget({
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
 
-  useEffect(() => {
-    if (isAuthorized && isOpen && customerId && !currentConversation) {
-      initializeConversation()
-    }
-  }, [isOpen, customerId, isAuthorized])
+  // Do not auto-create conversations on open; create on first message.
 
   useEffect(() => {
     if (!isOpen || !conversationId) return
@@ -124,24 +120,11 @@ export default function ChatWidget({
 
   const initializeConversation = async () => {
     try {
-      // Create new conversation for customer
       const conversation = await createConversation(undefined, identity || undefined)
       if (conversation) {
         setConversationId(conversation.id)
         setCurrentConversation(conversation)
         await fetchMessages(conversation.id)
-        // Add welcome message
-        const welcomeMsg = {
-          id: crypto.randomUUID(),
-          conversation_id: conversation.id,
-          sender_id: 'system',
-          sender_type: 'admin' as const,
-          content: welcomeMessage,
-          timestamp: new Date().toISOString(),
-          is_read: false,
-          metadata: {}
-        }
-        addMessage(welcomeMsg)
       }
     } catch (error) {
       console.error('Failed to initialize conversation:', error)
@@ -154,7 +137,11 @@ export default function ChatWidget({
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!message.trim() || !conversationId) return
+    if (!message.trim()) return
+    if (!conversationId) {
+      await initializeConversation()
+    }
+    if (!conversationId) return
 
     try {
       await sendMessage(conversationId, message, 'customer')
@@ -167,7 +154,8 @@ export default function ChatWidget({
   const handleFileUpload = async (result: any) => {
     // Send a message with the file URL
     const fileMessage = `[File: ${result.fileName} (${fileService.formatFileSize(result.fileSize)})](${result.url})`
-    await sendMessage(conversationId, fileMessage, 'customer')
+    if (!conversationId) await initializeConversation()
+    if (conversationId) await sendMessage(conversationId, fileMessage, 'customer')
   }
 
   const handleFileError = (error: string) => {
@@ -180,10 +168,17 @@ export default function ChatWidget({
     const matches = fileRegex.exec(content)
     
     if (matches) {
+      const fileName = matches[1]
+      const fileSize = matches[2]
+      const url = matches[3]
+      const lower = fileName.toLowerCase()
+      const isImg = ['.jpg','.jpeg','.png','.gif','.webp','.bmp'].some(ext=> lower.endsWith(ext))
+      const fileType = isImg ? 'image/' + (lower.split('.').pop() || 'jpeg') : 'application/octet-stream'
       return {
-        fileName: matches[1],
-        fileSize: matches[2],
-        url: matches[3]
+        fileName,
+        fileSize,
+        url,
+        fileType
       }
     }
     
@@ -262,7 +257,7 @@ export default function ChatWidget({
                           url={fileAttachment.url}
                           fileName={fileAttachment.fileName}
                           fileSize={fileAttachment.fileSize}
-                          fileType="application/octet-stream" // Default type
+                          fileType={fileAttachment.fileType}
                         />
                       </div>
                     )}
@@ -270,7 +265,7 @@ export default function ChatWidget({
                     <p className={`text-xs mt-1 ${
                       msg.sender_type === 'customer' ? 'text-cyan-100' : 'text-slate-400'
                     }`}>
-                      {format(new Date(msg.timestamp), 'HH:mm')}
+                      {format(new Date(msg.timestamp), 'dd/MM/yyyy')}
                     </p>
                   </div>
                 </div>

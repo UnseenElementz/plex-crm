@@ -40,7 +40,7 @@ export default function Chat({ chatId, role }: { chatId: string; role: 'customer
       <div className="flex-1 overflow-y-auto space-y-2">
         {messages.map(m=> (
           <div key={m.id} className={`max-w-[70%] p-2 rounded-xl ${m.sender==='customer'?'bg-slate-800':'bg-slate-700 ml-auto'} shadow-glow`}>
-            <div className="text-xs text-slate-400">{new Date(m.created_at).toLocaleString()}</div>
+            <div className="text-xs text-slate-400">{require('date-fns').format(new Date(m.created_at), 'dd/MM/yyyy')}</div>
             <div>{m.text}</div>
           </div>
         ))}

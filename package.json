@@ -3,10 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3001",
+    "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "vercel:env": "node scripts/vercel-env.js",
+    "vercel:deploy": "npx vercel pull --yes --environment=production && npx vercel build --prod && npx vercel deploy --prebuilt --prod"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

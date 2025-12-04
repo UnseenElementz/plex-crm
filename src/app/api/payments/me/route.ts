@@ -11,3 +11,6 @@ export async function GET(){
   const { data } = await s.from('payments').select('*').eq('customer_id', customer.id).order('created_at', { ascending: false })
   return NextResponse.json(data || [])
 }
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'

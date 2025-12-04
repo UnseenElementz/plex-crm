@@ -3,10 +3,11 @@ import paypal from '@paypal/checkout-server-sdk'
 import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { calculateNextDue } from '@/lib/pricing'
+const sanitize = (v?: string) => (v || '').trim().replace(/^['"]|['"]$/g, '')
 
 function client() {
-  const clientId = process.env.PAYPAL_CLIENT_ID
-  const clientSecret = process.env.PAYPAL_CLIENT_SECRET
+  const clientId = sanitize(process.env.PAYPAL_CLIENT_ID)
+  const clientSecret = sanitize(process.env.PAYPAL_CLIENT_SECRET)
   
   if (!clientId || !clientSecret) {
     throw new Error('PayPal credentials not configured')
@@ -61,8 +62,60 @@ export async function POST(request: Request) {
     const req = new paypal.orders.OrdersCaptureRequest(orderId)
     req.requestBody({})
     
-    const res = await c.execute(req)
-    
+    let res: any
+    try {
+      res = await c.execute(req)
+    } catch (e: any) {
+      const envBase = process.env.PAYPAL_ENV === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com'
+      const altBase = process.env.PAYPAL_ENV === 'live' ? 'https://api-m.sandbox.paypal.com' : 'https://api-m.paypal.com'
+      const clientId = sanitize(process.env.PAYPAL_CLIENT_ID as string)
+      const clientSecret = sanitize(process.env.PAYPAL_CLIENT_SECRET as string)
+
+      async function captureWith(base: string){
+        if (!clientId || !clientSecret) return null
+        const tokenRes = await fetch(base + '/v1/oauth2/token', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64'),
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: 'grant_type=client_credentials'
+        })
+        const raw = await tokenRes.text()
+        let token: any = null
+        try{ token = JSON.parse(raw) }catch{}
+        if (!tokenRes.ok || !token?.access_token) return null
+        const capRes = await fetch(base + `/v2/checkout/orders/${orderId}/capture`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token.access_token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({})
+        })
+        const cap = await capRes.json().catch(()=>null)
+        if (!capRes.ok || !cap) return null
+        return { result: cap }
+      }
+
+      let cap = await captureWith(envBase)
+      if (!cap) cap = await captureWith(altBase)
+      if (!cap) {
+        if (e && e.statusCode === 422) {
+          const get = new paypal.orders.OrdersGetRequest(orderId)
+          const got = await c.execute(get).catch(()=>null)
+          if (got && got.result && (got.result.status === 'COMPLETED' || got.result.status === 'APPROVED')) {
+            res = got
+          } else {
+            throw e
+          }
+        } else {
+          throw e
+        }
+      } else {
+        res = cap
+      }
+    }
     if (!res.result) {
       throw new Error('Invalid PayPal response')
     }
@@ -80,15 +133,19 @@ export async function POST(request: Request) {
             .eq('email', customerEmail)
             .single()
           if (customer) {
-            const amount = Number((res.result?.purchase_units?.[0]?.amount?.value) || 0)
+            const amount = Number(
+              (res.result?.purchase_units?.[0]?.payments?.captures?.[0]?.amount?.value) ||
+              (res.result?.purchase_units?.[0]?.amount?.value) || 0
+            )
             await s.from('payments').insert({
               customer_id: customer.id,
               amount,
               status: 'completed',
               payment_method: 'PayPal'
             })
-            const nextDue = calculateNextDue(customer.subscription_type || 'monthly', new Date())
-            await s.from('customers').update({ next_payment_date: nextDue.toISOString(), subscription_status: 'active' }).eq('id', customer.id)
+            const now = new Date()
+            const nextDue = calculateNextDue(customer.subscription_type || 'monthly', now)
+            await s.from('customers').update({ start_date: now.toISOString(), next_payment_date: nextDue.toISOString(), subscription_status: 'active' }).eq('id', customer.id)
           }
         }
       }
@@ -125,3 +182,4 @@ export async function POST(request: Request) {
     }, { status: 500 })
   }
 }
+export const runtime = 'nodejs'

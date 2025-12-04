@@ -61,14 +61,14 @@ export default function CustomerInfo({ conversation }: CustomerInfoProps) {
           <div className="flex items-center space-x-2">
             <Calendar className="w-4 h-4 text-gray-400" />
             <span className="text-gray-600">
-              Started: {format(new Date(conversation.created_at), 'MMM dd, HH:mm')}
+              Started: {format(new Date(conversation.created_at), 'dd/MM/yyyy')}
             </span>
           </div>
           
           <div className="flex items-center space-x-2">
             <Calendar className="w-4 h-4 text-gray-400" />
             <span className="text-gray-600">
-              Last update: {format(new Date(conversation.updated_at), 'MMM dd, HH:mm')}
+              Last update: {format(new Date(conversation.updated_at), 'dd/MM/yyyy')}
             </span>
           </div>
         </div>
@@ -91,7 +91,7 @@ export default function CustomerInfo({ conversation }: CustomerInfoProps) {
           
           {conversation.closed_at && (
             <p className="text-sm text-gray-600">
-              Closed: {format(new Date(conversation.closed_at), 'MMM dd, HH:mm')}
+              Closed: {format(new Date(conversation.closed_at), 'dd/MM/yyyy')}
             </p>
           )}
         </div>

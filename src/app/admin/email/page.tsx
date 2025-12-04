@@ -41,7 +41,10 @@ export default function AdminEmailPage(){
 
   return (
     <main className="p-6 max-w-6xl mx-auto">
-      <h2 className="text-2xl font-semibold mb-4">Admin Email</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-2xl font-semibold">Admin Email</h2>
+        <a href="/admin" className="btn-xs-outline">← Back to Chat</a>
+      </div>
       <div className="grid md:grid-cols-2 gap-6">
         <div className="glass p-4 rounded-2xl">
           <div className="flex items-center gap-3 mb-3">

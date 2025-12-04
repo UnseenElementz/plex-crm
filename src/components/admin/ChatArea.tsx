@@ -5,6 +5,7 @@ import { Send, Paperclip, Smile } from 'lucide-react'
 import { useChatStore } from '@/stores/chatStore'
 import { Conversation, Message } from '@/stores/chatStore'
 import { format } from 'date-fns'
+import FileAttachment from '@/components/chat/FileAttachment'
 
 interface ChatAreaProps {
   conversation: Conversation
@@ -66,11 +67,32 @@ export default function ChatArea({ conversation }: ChatAreaProps) {
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-100 text-gray-800'
               }`}>
-                <p className="text-sm">{message.content}</p>
+                {(() => {
+                  const fileRegex = /\[File: ([^\]]+) \(([^\)]+)\)\]\(([^\)]+)\)/g
+                  const m = fileRegex.exec(message.content)
+                  if (m) {
+                    const fileName = m[1]
+                    const fileSize = m[2]
+                    const url = m[3]
+                    const lower = fileName.toLowerCase()
+                    const isImg = ['.jpg','.jpeg','.png','.gif','.webp','.bmp'].some(ext=> lower.endsWith(ext))
+                    const fileType = isImg ? 'image/' + (lower.split('.').pop() || 'jpeg') : 'application/octet-stream'
+                    const displayContent = message.content.replace(fileRegex, '')
+                    return (
+                      <>
+                        {displayContent && (<p className="text-sm">{displayContent}</p>)}
+                        <div className="mt-2">
+                          <FileAttachment url={url} fileName={fileName} fileSize={fileSize} fileType={fileType} />
+                        </div>
+                      </>
+                    )
+                  }
+                  return (<p className="text-sm">{message.content}</p>)
+                })()}
                 <p className={`text-xs mt-1 ${
                   message.sender_type === 'admin' ? 'text-blue-100' : 'text-gray-500'
                 }`}>
-                  {format(new Date(message.timestamp), 'HH:mm')}
+                  {format(new Date(message.timestamp), 'dd/MM/yyyy')}
                   {!message.is_read && message.sender_type === 'customer' && (
                     <span className="ml-2 text-xs">●</span>
                   )}

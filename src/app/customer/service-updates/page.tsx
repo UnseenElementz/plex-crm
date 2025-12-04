@@ -10,6 +10,14 @@ export default function CustomerServiceUpdatesPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  function renderContent(content: string){
+    const normalized = (content || '').replace(/\\n/g, '\n').replace(/\r\n/g, '\n')
+    const parts = normalized.split(/\n{2,}/).map(s=> s.trim()).filter(Boolean)
+    return parts.map((p, i)=> (
+      <p key={i} className="text-slate-300 text-sm mb-2">{p}</p>
+    ))
+  }
+
   useEffect(()=>{
     (async()=>{
       try{
@@ -58,9 +66,9 @@ export default function CustomerServiceUpdatesPage() {
                 <div key={(u as any).id || idx} className="glass p-4 rounded-lg border border-cyan-500/20">
                   <div className="flex items-center justify-between mb-1">
                     <div className="font-semibold text-slate-200">{u.title}</div>
-                    <div className="text-xs text-slate-400">{format(new Date(u.created_at), 'PPP p')}</div>
+                    <div className="text-xs text-slate-400">{format(new Date(u.created_at), 'dd/MM/yyyy')}</div>
                   </div>
-                  <div className="text-slate-300 text-sm whitespace-pre-wrap">{u.content}</div>
+                  <div>{renderContent(u.content)}</div>
                 </div>
               ))
             )}
