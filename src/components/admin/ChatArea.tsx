@@ -1,11 +1,13 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Send, Paperclip, Smile } from 'lucide-react'
+import { Send, Smile } from 'lucide-react'
 import { useChatStore } from '@/stores/chatStore'
 import { Conversation, Message } from '@/stores/chatStore'
 import { format } from 'date-fns'
 import FileAttachment from '@/components/chat/FileAttachment'
+import FileUpload from '@/components/chat/FileUpload'
+import { fileService } from '@/services/fileService'
 
 interface ChatAreaProps {
   conversation: Conversation
@@ -46,6 +48,22 @@ export default function ChatArea({ conversation }: ChatAreaProps) {
     } catch (error) {
       console.error('Failed to send message:', error)
     }
+  }
+
+  async function handleFileUploaded(result: { url: string; fileName: string; fileSize: number; fileType: string }){
+    try{
+      const sizeLabel = fileService.formatFileSize(result.fileSize)
+      const attachmentTag = `[File: ${result.fileName} (${sizeLabel})](${result.url})`
+      const content = newMessage.trim() ? `${newMessage.trim()} ${attachmentTag}` : attachmentTag
+      await sendMessage(conversation.id, content, 'admin')
+      setNewMessage('')
+    } catch (error){
+      try{ useChatStore.getState().setError((error as Error).message) }catch{}
+    }
+  }
+
+  function handleUploadError(message: string){
+    try{ useChatStore.getState().setError(message) }catch{}
   }
 
   return (
@@ -118,13 +136,7 @@ export default function ChatArea({ conversation }: ChatAreaProps) {
           />
           </div>
           <div className="flex space-x-2">
-            <button
-              type="button"
-              className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
-              title="Attach file"
-            >
-              <Paperclip size={20} />
-            </button>
+            <FileUpload conversationId={conversation.id} onFileUploaded={handleFileUploaded} onError={handleUploadError} />
             <button
               type="button"
               className="p-2 text-gray-400 hover:text-gray-600 transition-colors"

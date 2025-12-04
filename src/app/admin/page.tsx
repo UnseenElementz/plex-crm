@@ -12,28 +12,32 @@ export default function AdminPage() {
 
   useEffect(() => {
     (async()=>{
+      let hasCookie = false
       try{
-        const hasCookie = typeof document !== 'undefined' && document.cookie.includes('admin_session=')
         const isProd = process.env.NODE_ENV === 'production'
+        const r0 = await fetch('/api/admin/auth/session')
+        hasCookie = r0.ok
         if (!hasCookie && !isProd){
-          const raw = typeof document !== 'undefined' ? (document.cookie.split(';').map(s=>s.trim()).find(s=> s.startsWith('admin_settings=')) || '').split('=')[1] : ''
-          const data = raw ? JSON.parse(decodeURIComponent(raw)) : {}
-          const u = (data?.admin_user || 'Anfrax786') as string
-          const p = (data?.admin_pass || 'Badaman1') as string
-          await fetch('/api/admin/auth/session', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ mode: 'local', username: u, password: p }) })
+          try{
+            const raw = typeof document !== 'undefined' ? (document.cookie.split(';').map(s=>s.trim()).find(s=> s.startsWith('admin_settings=')) || '').split('=')[1] : ''
+            const data = raw ? JSON.parse(decodeURIComponent(raw)) : {}
+            const u = (data?.admin_user || 'Anfrax786') as string
+            const p = (data?.admin_pass || 'Badaman1') as string
+            await fetch('/api/admin/auth/session', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ mode: 'local', username: u, password: p }) })
+          } catch{}
+          const r1 = await fetch('/api/admin/auth/session')
+          hasCookie = r1.ok
+          if (!hasCookie){
+            try{ await fetch('/dev-login') } catch{}
+            const r2 = await fetch('/api/admin/auth/session')
+            hasCookie = r2.ok
+          }
         }
       } catch{}
-    })()
-  }, [])
-
-  useEffect(() => { (async()=>{ await checkAuth(); setChecked(true) })() }, [])
-  useEffect(() => {
-    (async()=>{
-      try{
-        const r = await fetch('/api/admin/auth/session')
-        if (r.ok){ setCookieOK(true); setCookieChecked(true); return }
-      }catch{}
-      finally{ setCookieChecked(true) }
+      try{ await checkAuth() } catch{}
+      setCookieOK(hasCookie)
+      setCookieChecked(true)
+      setChecked(true)
     })()
   }, [])
 

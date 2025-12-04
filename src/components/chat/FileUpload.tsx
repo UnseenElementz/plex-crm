@@ -5,12 +5,13 @@ import { Paperclip, X, Upload, FileText, Image } from 'lucide-react'
 import { fileService, FileUploadResult, FileUploadError } from '@/services/fileService'
 
 interface FileUploadProps {
-  conversationId: string
+  conversationId?: string
+  ensureConversationId?: () => Promise<string | null>
   onFileUploaded: (result: FileUploadResult) => void
   onError: (error: string) => void
 }
 
-export default function FileUpload({ conversationId, onFileUploaded, onError }: FileUploadProps) {
+export default function FileUpload({ conversationId, ensureConversationId, onFileUploaded, onError }: FileUploadProps) {
   const [isUploading, setIsUploading] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -26,7 +27,12 @@ export default function FileUpload({ conversationId, onFileUploaded, onError }: 
   const handleUpload = async (file: File) => {
     setIsUploading(true)
     try {
-      const result = await fileService.uploadFile(file, conversationId)
+      let cid = conversationId
+      if (!cid && ensureConversationId) {
+        try { cid = await ensureConversationId() || undefined } catch {}
+      }
+      if (!cid) { onError('Chat not initialized'); return }
+      const result = await fileService.uploadFile(file, cid)
       
       if ('url' in result) {
         onFileUploaded(result)

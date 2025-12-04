@@ -6,35 +6,7 @@ import { calculatePrice, getStatus } from '@/lib/pricing'
 type Customer = { id: string; full_name: string; email: string; plan: 'monthly'|'yearly'|'three_year'; streams: number; next_due_date: string; start_date?: string; plex_username?: string; status?: 'active'|'inactive' }
 
 export default function AdminCustomersPage(){
-  useEffect(()=>{
-    (async()=>{
-      try{
-        const hasCookie = typeof document !== 'undefined' && document.cookie.includes('admin_session=')
-        const isProd = process.env.NODE_ENV === 'production'
-        if (!hasCookie && !isProd){
-          const raw = typeof document !== 'undefined' ? (document.cookie.split(';').map(s=>s.trim()).find(s=> s.startsWith('admin_settings=')) || '').split('=')[1] : ''
-          const data = raw ? JSON.parse(decodeURIComponent(raw)) : {}
-          const u = (data?.admin_user || 'Anfrax786') as string
-          const p = (data?.admin_pass || 'Badaman1') as string
-          await fetch('/api/admin/auth/session', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ mode: 'local', username: u, password: p }) })
-        }
-      } catch{}
-    })()
-  }, [])
-  useEffect(()=>{
-    (async()=>{
-      try{
-        const res = await fetch('/api/admin/auth/session', { cache: 'no-store' })
-        if (!res.ok){
-          const isProd = process.env.NODE_ENV === 'production'
-          if (isProd) location.href = '/login'
-        }
-      } catch {
-        const isProd = process.env.NODE_ENV === 'production'
-        if (isProd) location.href = '/login'
-      }
-    })()
-  }, [])
+  // Single effect: ensure session then load customers (dev auto-login, prod redirect)
   const [customers, setCustomers] = useState<Customer[]>([])
   const [q, setQ] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all'|'active'|'inactive'|'due_soon'>('active')
@@ -47,6 +19,7 @@ export default function AdminCustomersPage(){
   const [sendMsg, setSendMsg] = useState('')
   const [pendingDelete, setPendingDelete] = useState<Customer | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [openActionsId, setOpenActionsId] = useState<string | null>(null)
   
   useEffect(()=>{ (async()=>{ 
     try{ 
@@ -63,10 +36,18 @@ export default function AdminCustomersPage(){
             const p = (data?.admin_pass || 'Badaman1') as string
             await fetch('/api/admin/auth/session', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ mode: 'local', username: u, password: p }) })
             const s2 = await fetch('/api/admin/auth/session', { cache: 'no-store' }); ok = s2.ok
+            if (!ok){
+              try{ await fetch('/dev-login') } catch{}
+              const s3 = await fetch('/api/admin/auth/session', { cache: 'no-store' }); ok = s3.ok
+            }
           } catch{}
         }
       }
-      if (!ok){ throw new Error('Unauthorized') }
+      if (!ok){
+        const isProd = process.env.NODE_ENV === 'production'
+        if (isProd){ location.href = '/login'; return }
+        throw new Error('Unauthorized')
+      }
       const res = await fetch('/api/customers'); 
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({ error: 'Failed to load customers' }));
@@ -235,29 +216,37 @@ export default function AdminCustomersPage(){
                         <span className={`tag ${statusLabel.toLowerCase().replace(' ','-')}`}>{statusLabel}</span>
                       </td>
                       <td className="p-2">
-                        <div className="flex flex-wrap gap-2">
+                        <div className="relative inline-block">
                           <button
                             className="btn-xs"
-                            onClick={()=>{ setEditItem(c); setShowForm(true) }}
-                          >Edit</button>
-                          <button
-                            className="btn-xs-outline"
-                            onClick={()=> toggleStatus(c, setCustomers, setSendMsg)}
-                          >{c.status === 'inactive' ? 'Set Active' : 'Set Inactive'}</button>
-                          <button
-                            className="btn-xs-outline"
-                            disabled={sendingEmail===c.email}
-                            onClick={()=> sendReminder(c.email, setSendingEmail, setSendMsg)}
-                          >{sendingEmail===c.email ? 'Sending...' : 'Send Reminder'}</button>
-                          <button
-                            className="btn-xs-outline"
-                            onClick={()=> sendTranscode(c.email, setSendingEmail, setSendMsg)}
-                          >Over Stream Warning</button>
-                          <button
-                            className="btn-xs-outline"
-                            disabled={deletingId === c.id}
-                            onClick={()=> setPendingDelete(c)}
-                          >{deletingId === c.id ? 'Deleting...' : 'Delete'}</button>
+                            onClick={()=> setOpenActionsId(openActionsId===c.id ? null : c.id)}
+                          >Actions</button>
+                          {openActionsId===c.id && (
+                            <div className="absolute right-0 mt-1 glass p-2 rounded-lg border border-cyan-500/20 z-10 w-44 space-y-2">
+                              <button
+                                className="btn-xs w-full"
+                                onClick={()=>{ setEditItem(c); setShowForm(true); setOpenActionsId(null) }}
+                              >Edit</button>
+                              <button
+                                className="btn-xs-outline w-full"
+                                onClick={()=>{ toggleStatus(c, setCustomers, setSendMsg); setOpenActionsId(null) }}
+                              >{c.status === 'inactive' ? 'Set Active' : 'Set Inactive'}</button>
+                              <button
+                                className="btn-xs-outline w-full"
+                                disabled={sendingEmail===c.email}
+                                onClick={()=>{ sendReminder(c.email, setSendingEmail, setSendMsg); setOpenActionsId(null) }}
+                              >{sendingEmail===c.email ? 'Sending...' : 'Send Reminder'}</button>
+                              <button
+                                className="btn-xs-outline w-full"
+                                onClick={()=>{ sendTranscode(c.email, setSendingEmail, setSendMsg); setOpenActionsId(null) }}
+                              >Over Stream Warning</button>
+                              <button
+                                className="btn-xs-outline w-full"
+                                disabled={deletingId === c.id}
+                                onClick={()=>{ setPendingDelete(c); setOpenActionsId(null) }}
+                              >{deletingId === c.id ? 'Deleting...' : 'Delete'}</button>
+                            </div>
+                          )}
                         </div>
                       </td>
                     </tr>

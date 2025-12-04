@@ -3,6 +3,8 @@ import { supabase } from '@/lib/supabase'
 import { Database } from '@/lib/supabase'
 let __msgChannel: any = null
 let __convChannel: any = null
+let __convBusy = false
+let __msgBusy = false
 
 export type Conversation = Database['public']['Tables']['conversations']['Row']
 export type Message = Database['public']['Tables']['messages']['Row']
@@ -81,6 +83,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   refreshConversations: async () => {
+    if (__convBusy) return
+    __convBusy = true
     try {
       const res = await fetch('/api/chat/conversations')
       if (!res.ok) return
@@ -92,6 +96,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set({ conversations: data || [] })
       }
     } catch {}
+    finally { __convBusy = false }
   },
 
   fetchMessages: async (conversationId: string) => {
@@ -110,6 +115,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   refreshMessages: async (conversationId: string) => {
+    if (__msgBusy) return
+    __msgBusy = true
     try {
       const res = await fetch(`/api/chat/messages?conversationId=${encodeURIComponent(conversationId)}`)
       if (!res.ok) return
@@ -122,6 +129,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set({ messages: data || [] })
       }
     } catch {}
+    finally { __msgBusy = false }
   },
 
   sendMessage: async (conversationId: string, content: string, senderType: 'customer' | 'admin') => {

@@ -125,10 +125,12 @@ export default function ChatWidget({
         setConversationId(conversation.id)
         setCurrentConversation(conversation)
         await fetchMessages(conversation.id)
+        return conversation.id
       }
     } catch (error) {
       console.error('Failed to initialize conversation:', error)
     }
+    return null
   }
 
   const scrollToBottom = () => {
@@ -292,13 +294,18 @@ export default function ChatWidget({
                 placeholder={chatOnline ? 'Type your message...' : 'We are offline — leave your message and email'}
                 className="flex-1 input"
               />
-              {conversationId && (
-                <FileUpload
-                  conversationId={conversationId}
-                  onFileUploaded={handleFileUpload}
-                  onError={handleFileError}
-                />
-              )}
+              <FileUpload
+                conversationId={conversationId || undefined}
+                ensureConversationId={async()=>{
+                  if (!conversationId) {
+                    const id = await initializeConversation()
+                    return id
+                  }
+                  return conversationId
+                }}
+                onFileUploaded={handleFileUpload}
+                onError={handleFileError}
+              />
               <button
                 type="submit"
                 disabled={!message.trim() || isLoading}
