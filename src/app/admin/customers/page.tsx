@@ -181,7 +181,7 @@ export default function AdminCustomersPage(){
         )}
         
         {!loading && !error && (
-          <div className="overflow-x-auto max-h-[85vh] overflow-y-auto">
+          <div className="overflow-visible min-h-[400px]">
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left text-slate-300 border-b border-slate-700/50">
