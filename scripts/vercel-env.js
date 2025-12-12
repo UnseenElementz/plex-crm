@@ -66,7 +66,12 @@ async function main(){
     { key: 'NEXT_PUBLIC_SUPABASE_URL', value: process.env.NEXT_PUBLIC_SUPABASE_URL || dot.NEXT_PUBLIC_SUPABASE_URL },
     { key: 'NEXT_PUBLIC_SUPABASE_ANON_KEY', value: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || dot.NEXT_PUBLIC_SUPABASE_ANON_KEY },
     { key: 'SUPABASE_SERVICE_ROLE_KEY', value: process.env.SUPABASE_SERVICE_ROLE_KEY || dot.SUPABASE_SERVICE_ROLE_KEY },
-    { key: 'NEXT_PUBLIC_CANONICAL_HOST', value: process.env.NEXT_PUBLIC_CANONICAL_HOST || dot.NEXT_PUBLIC_CANONICAL_HOST }
+    { key: 'NEXT_PUBLIC_CANONICAL_HOST', value: process.env.NEXT_PUBLIC_CANONICAL_HOST || dot.NEXT_PUBLIC_CANONICAL_HOST },
+    { key: 'NEXT_PUBLIC_PAYPAL_CLIENT_ID', value: process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || dot.NEXT_PUBLIC_PAYPAL_CLIENT_ID },
+    { key: 'NEXT_PUBLIC_PAYPAL_MERCHANT_EMAIL', value: process.env.NEXT_PUBLIC_PAYPAL_MERCHANT_EMAIL || dot.NEXT_PUBLIC_PAYPAL_MERCHANT_EMAIL },
+    { key: 'PAYPAL_CLIENT_ID', value: process.env.PAYPAL_CLIENT_ID || dot.PAYPAL_CLIENT_ID },
+    { key: 'PAYPAL_CLIENT_SECRET', value: process.env.PAYPAL_CLIENT_SECRET || dot.PAYPAL_CLIENT_SECRET },
+    { key: 'PAYPAL_ENV', value: process.env.PAYPAL_ENV || dot.PAYPAL_ENV }
   ]
   const existing = await listEnv().catch(()=>({ envs: [] }))
   const rows = Array.isArray(existing?.envs) ? existing.envs : (Array.isArray(existing) ? existing : [])

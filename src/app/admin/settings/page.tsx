@@ -22,6 +22,8 @@ export default function AdminSettingsPage() {
     yearly_price: '85',
     stream_monthly_price: '5',
     stream_yearly_price: '20',
+    two_year_price: '150',
+    stream_two_year_price: '35',
     three_year_price: '180',
     stream_three_year_price: '40',
     bg_music_url: '',
@@ -86,6 +88,9 @@ export default function AdminSettingsPage() {
       
       if (profile?.role === 'admin') {
         setIsAuthenticated(true)
+        try {
+          await fetch('/api/admin/auth/session', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email: user.email }) })
+        } catch {}
       }
       
     } catch (e) {
@@ -178,6 +183,8 @@ export default function AdminSettingsPage() {
                 yearly_price: (data.yearly_price ?? Number(prev.yearly_price)).toString(),
                 stream_monthly_price: (data.stream_monthly_price ?? Number(prev.stream_monthly_price)).toString(),
                 stream_yearly_price: (data.stream_yearly_price ?? Number(prev.stream_yearly_price)).toString(),
+                two_year_price: (data.two_year_price ?? Number(prev.two_year_price)).toString(),
+                stream_two_year_price: (data.stream_two_year_price ?? Number(prev.stream_two_year_price)).toString(),
                 three_year_price: (data.three_year_price ?? Number(prev.three_year_price)).toString(),
                 stream_three_year_price: (data.stream_three_year_price ?? Number(prev.stream_three_year_price)).toString(),
                 bg_music_url: data.bg_music_url || prev.bg_music_url,
@@ -209,6 +216,8 @@ export default function AdminSettingsPage() {
                 yearly_price: (data.yearly_price ?? Number(prev.yearly_price)).toString(),
                 stream_monthly_price: (data.stream_monthly_price ?? Number(prev.stream_monthly_price)).toString(),
                 stream_yearly_price: (data.stream_yearly_price ?? Number(prev.stream_yearly_price)).toString(),
+                two_year_price: (data.two_year_price ?? Number(prev.two_year_price)).toString(),
+                stream_two_year_price: (data.stream_two_year_price ?? Number(prev.stream_two_year_price)).toString(),
                 three_year_price: (data.three_year_price ?? Number(prev.three_year_price)).toString(),
                 stream_three_year_price: (data.stream_three_year_price ?? Number(prev.stream_three_year_price)).toString(),
                 bg_music_url: data.bg_music_url || prev.bg_music_url,
@@ -249,6 +258,8 @@ export default function AdminSettingsPage() {
         yearly_price: (data.yearly_price ?? Number(prev.yearly_price)).toString(),
         stream_monthly_price: (data.stream_monthly_price ?? Number(prev.stream_monthly_price)).toString(),
         stream_yearly_price: (data.stream_yearly_price ?? Number(prev.stream_yearly_price)).toString(),
+        two_year_price: (data.two_year_price ?? Number(prev.two_year_price)).toString(),
+        stream_two_year_price: (data.stream_two_year_price ?? Number(prev.stream_two_year_price)).toString(),
         three_year_price: (data.three_year_price ?? Number(prev.three_year_price)).toString(),
         stream_three_year_price: (data.stream_three_year_price ?? Number(prev.stream_three_year_price)).toString(),
         bg_music_url: data.bg_music_url || prev.bg_music_url,
@@ -263,6 +274,8 @@ export default function AdminSettingsPage() {
             yearly_price: data.yearly_price,
             stream_monthly_price: data.stream_monthly_price,
             stream_yearly_price: data.stream_yearly_price,
+            two_year_price: data.two_year_price,
+            stream_two_year_price: data.stream_two_year_price,
             three_year_price: data.three_year_price,
             stream_three_year_price: data.stream_three_year_price,
             smtp_host: data.smtp_host,
@@ -308,6 +321,8 @@ export default function AdminSettingsPage() {
         yearly_price: parseFloat(settings.yearly_price) || 85,
         stream_monthly_price: parseFloat(settings.stream_monthly_price) || 5,
         stream_yearly_price: parseFloat(settings.stream_yearly_price) || 20,
+        two_year_price: parseFloat(settings.two_year_price) || 150,
+        stream_two_year_price: parseFloat(settings.stream_two_year_price) || 35,
         three_year_price: parseFloat(settings.three_year_price) || 180,
         stream_three_year_price: parseFloat(settings.stream_three_year_price) || 40,
         smtp_host: settings.smtp_host,
@@ -718,6 +733,28 @@ export default function AdminSettingsPage() {
                 step="0.01"
                 value={settings.stream_yearly_price}
                 onChange={e=>setSettings({...settings, stream_yearly_price: e.target.value})}
+                onKeyPress={handleKeyPress}
+              />
+            </div>
+            <div>
+              <label className="label">Two-Year Base Price (£)</label>
+              <input 
+                className="input" 
+                type="number"
+                step="0.01"
+                value={settings.two_year_price}
+                onChange={e=>setSettings({...settings, two_year_price: e.target.value})}
+                onKeyPress={handleKeyPress}
+              />
+            </div>
+            <div>
+              <label className="label">Additional Stream (Two-Year) (£)</label>
+              <input 
+                className="input" 
+                type="number"
+                step="0.01"
+                value={settings.stream_two_year_price}
+                onChange={e=>setSettings({...settings, stream_two_year_price: e.target.value})}
                 onKeyPress={handleKeyPress}
               />
             </div>

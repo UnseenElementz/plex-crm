@@ -144,6 +144,7 @@
   }
   
   .card{ @apply glass p-4 rounded-2xl; }
+  .card-solid{ @apply p-4 rounded-2xl bg-slate-900 border border-slate-700 shadow-glow; }
   .card-title{ @apply text-lg font-semibold mb-2 bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent; }
   
   .tag{ @apply inline-block px-2 py-1 rounded-lg text-xs font-medium; }

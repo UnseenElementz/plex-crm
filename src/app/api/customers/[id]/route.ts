@@ -88,7 +88,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   if (payload.full_name !== undefined) dbPayload.name = payload.full_name
   if (payload.email !== undefined) dbPayload.email = payload.email
   if (payload.plan !== undefined) dbPayload.subscription_type = payload.plan
-  if (payload.plan === 'three_year') dbPayload.subscription_type = 'yearly'
+  if (payload.plan === 'three_year' || payload.plan === 'two_year') dbPayload.subscription_type = 'yearly'
   if (payload.streams !== undefined) dbPayload.streams = payload.streams
   if (payload.start_date !== undefined) dbPayload.start_date = payload.start_date
   if (payload.next_due_date !== undefined) dbPayload.next_payment_date = payload.next_due_date
@@ -97,7 +97,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     const notes = (payload.notes ?? '').trim()
     const plex = payload.plex_username?.trim()
     const tz = payload.timezone?.trim()
-    const term = payload.plan === 'three_year' ? 'Term: 3y' : undefined
+    const term = payload.plan === 'three_year' ? 'Term: 3y' : (payload.plan === 'two_year' ? 'Term: 2y' : undefined)
     const combined = [notes || undefined, term, plex ? `Plex: ${plex}` : undefined, tz ? `Timezone: ${tz}` : undefined].filter(Boolean).join('\n')
     dbPayload.notes = combined
   }

@@ -185,6 +185,8 @@ export default function AdminDashboard() {
             <a href="/admin/customers" className="px-2 py-1 rounded text-xs hover:bg-slate-800/50 text-slate-300">Customers</a>
             <a href="/admin/settings" className="px-2 py-1 rounded text-xs hover:bg-slate-800/50 text-slate-300">Settings</a>
             <a href="/admin/email" className="px-2 py-1 rounded text-xs hover:bg-slate-800/50 text-slate-300">Mail</a>
+            <a href="/admin/admins" className="px-2 py-1 rounded text-xs hover:bg-slate-800/50 text-slate-300">Admins</a>
+            <a href="/admin/security" className="px-2 py-1 rounded text-xs hover:bg-slate-800/50 text-slate-300">Security</a>
           </div>
           <div className="mt-3 flex items-center gap-3">
             {chatOnline !== null && (

@@ -8,7 +8,7 @@ export default function PayPalButton({ amount, currency = 'GBP', customerEmail, 
   const [message, setMessage] = useState('')
   const renderedRef = useRef(false)
   const lastOrderIdRef = useRef<string | null>(null)
-  const isWebView = typeof navigator !== 'undefined' && /Electron|Trae/i.test(navigator.userAgent || '')
+  const isWebView = typeof navigator !== 'undefined' && /Electron/i.test(navigator.userAgent || '')
 
   const createOrder = useCallback(async ()=>{
     const res = await fetch('/api/paypal/create-order', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ amount, currency, plan, streams }) })
@@ -48,6 +48,9 @@ export default function PayPalButton({ amount, currency = 'GBP', customerEmail, 
       return
     }
     try{
+      if (!paypal.Buttons) {
+        throw new Error('PayPal SDK not loaded')
+      }
       paypal.Buttons({
         style: { label: 'checkout', layout: 'vertical', color: 'gold', shape: 'rect', height: 48 },
         createOrder: async ()=> {
@@ -98,13 +101,24 @@ export default function PayPalButton({ amount, currency = 'GBP', customerEmail, 
         </div>
       )}
       
-      {!isWebView && isConfigured && (
+      {isConfigured && (
         <>
           <Script 
             src={`https://www.paypal.com/sdk/js?client-id=${clientId}&currency=${currency}&components=buttons&intent=CAPTURE&disable-funding=card,venmo`}
+            strategy="lazyOnload"
+            crossOrigin="anonymous"
             onLoad={()=>setReady(true)} 
             onError={async ()=>{
               setError('Failed to load PayPal SDK')
+              try {
+                const s1 = document.createElement('script')
+                s1.src = `https://www.paypal.com/sdk/js?client-id=${clientId}&currency=${currency}&components=buttons&intent=CAPTURE&disable-funding=card,venmo`
+                s1.async = true
+                s1.crossOrigin = 'anonymous'
+                s1.onload = ()=> setReady(true)
+                s1.onerror = ()=>{ /* keep fallback to manual link only */ }
+                document.head.appendChild(s1)
+              } catch {}
               try {
                 const id = await createOrder()
                 lastOrderIdRef.current = id
@@ -129,7 +143,7 @@ export default function PayPalButton({ amount, currency = 'GBP', customerEmail, 
           )}
         </>
       )}
-      {(!isConfigured || isWebView) && (
+      {!isConfigured && (
         <div className="glass p-4 rounded-lg border border-slate-700/40 bg-slate-900/30 text-slate-300 text-xs">
           PayPal not ready. Configure real sandbox credentials to test payments.
         </div>

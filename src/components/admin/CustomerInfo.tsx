@@ -1,6 +1,7 @@
 'use client'
 
 import { User, Globe, Calendar, Info } from 'lucide-react'
+import { useState } from 'react'
 import { Conversation, useChatStore } from '@/stores/chatStore'
 import { format } from 'date-fns'
 
@@ -10,6 +11,8 @@ interface CustomerInfoProps {
 
 export default function CustomerInfo({ conversation }: CustomerInfoProps) {
   const { sendMessage, updateConversationStatus, updateConversationMetadata } = useChatStore()
+  const [sending, setSending] = useState(false)
+  const [sendMsg, setSendMsg] = useState('')
   const sendTemplate = async () => {
     await sendMessage(conversation.id, 'Thanks for reaching out! A team member will be with you shortly.', 'admin')
   }
@@ -24,6 +27,22 @@ export default function CustomerInfo({ conversation }: CustomerInfoProps) {
   }
   const close = async () => {
     await updateConversationStatus(conversation.id, 'closed')
+  }
+  const sendSignedUp = async () => {
+    try{
+      setSending(true); setSendMsg('')
+      const email = (conversation as any).metadata?.email || ''
+      if (!email) { setSendMsg('No email found'); return }
+      const res = await fetch('/api/onboarding/signed-up', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email }) })
+      const data = await res.json().catch(()=>({}))
+      if (!res.ok){
+        const msg = data?.error || 'Failed to send'
+        setSendMsg(msg.includes('SMTP not configured') ? 'Email service not configured' : msg)
+      } else {
+        setSendMsg('Setup email sent')
+      }
+    } catch(e:any){ setSendMsg(e?.message || 'Failed to send') }
+    finally{ setSending(false); setTimeout(()=> setSendMsg(''), 4000) }
   }
   return (
     <div className="p-4 space-y-6">
@@ -106,6 +125,11 @@ export default function CustomerInfo({ conversation }: CustomerInfoProps) {
             Send Template
           </button>
           
+          <button onClick={sendSignedUp} disabled={sending} className="w-full px-3 py-2 bg-emerald-600 text-white rounded text-sm hover:bg-emerald-700 disabled:opacity-50 transition-colors">
+            Signed up
+          </button>
+          {sendMsg && (<div className="text-xs text-slate-500">{sendMsg}</div>)}
+
           <button onClick={transferChat} className="w-full px-3 py-2 bg-gray-200 text-gray-700 rounded text-sm hover:bg-gray-300 transition-colors">
             Transfer Chat
           </button>

@@ -14,7 +14,9 @@ export function getSupabase(){
   try {
     new URL(url)
     if (cached) return cached
-    cached = createClient(url, key, { auth: { persistSession: true, storageKey: 'plex-auth' }, global: { headers: { apikey: key } } })
+    const isBrowser = typeof window !== 'undefined'
+    const storage = isBrowser ? window.localStorage : undefined
+    cached = createClient(url, key, { auth: { persistSession: Boolean(storage), storageKey: 'plex-auth', storage }, global: { headers: { apikey: key } } })
     return cached
   } catch (error) {
     console.error('Invalid Supabase URL:', error)

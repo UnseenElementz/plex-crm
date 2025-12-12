@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import CustomerForm from '@/components/CustomerForm'
 import { calculatePrice, getStatus } from '@/lib/pricing'
+import { format } from 'date-fns'
 
 type Customer = { id: string; full_name: string; email: string; plan: 'monthly'|'yearly'|'three_year'; streams: number; next_due_date: string; start_date?: string; plex_username?: string; status?: 'active'|'inactive' }
 
@@ -9,7 +10,7 @@ export default function AdminCustomersPage(){
   // Single effect: ensure session then load customers (dev auto-login, prod redirect)
   const [customers, setCustomers] = useState<Customer[]>([])
   const [q, setQ] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all'|'active'|'inactive'|'due_soon'>('active')
+  const [statusFilter, setStatusFilter] = useState<'all'|'active'|'inactive'|'due_soon'|'registered'>('active')
   const [sortBy, setSortBy] = useState<'none'|'newest'|'oldest'|'price_high'|'price_low'|'streams_high'|'streams_low'|'due_soon'>('none')
   const [showForm, setShowForm] = useState(false)
   const [editItem, setEditItem] = useState<Customer | null>(null)
@@ -67,7 +68,9 @@ export default function AdminCustomersPage(){
       const matchesText = (c.full_name+c.email+(c.plex_username||'')).toLowerCase().includes(q.toLowerCase())
       if (!matchesText) return false
       if (statusFilter === 'all') return true
-      const statusLabel = (c.status === 'inactive') ? 'Inactive' : getStatus(new Date(c.next_due_date))
+      const hasPlan = Boolean(c.plan)
+      if (statusFilter === 'registered') return !hasPlan
+      const statusLabel = (c.status === 'inactive') ? 'Inactive' : (hasPlan ? getStatus(new Date(c.next_due_date)) : 'Registered')
       if (statusFilter === 'inactive') return statusLabel === 'Inactive'
       if (statusFilter === 'active') return statusLabel === 'Active'
       if (statusFilter === 'due_soon') return statusLabel === 'Due Soon' || statusLabel === 'Due Today'
@@ -107,6 +110,7 @@ export default function AdminCustomersPage(){
             <option value="due_soon">Due Soon</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
+            <option value="registered">Registered</option>
           </select>
           <select className="input w-48" value={sortBy} onChange={e=> setSortBy(e.target.value as any)}>
             <option value="none">Sort: Default</option>
@@ -156,7 +160,7 @@ export default function AdminCustomersPage(){
         </div>
       )}
 
-      <div className="glass p-6 rounded-2xl border border-cyan-500/10">
+      <div className="card-solid p-6 rounded-2xl border border-cyan-500/10">
         {loading && (
           <div className="flex items-center justify-center py-8">
             <div className="text-slate-400 text-sm flex items-center gap-2">
@@ -177,52 +181,61 @@ export default function AdminCustomersPage(){
         )}
         
         {!loading && !error && (
-          <div className="overflow-x-auto max-h-[65vh] overflow-y-auto">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto max-h-[85vh] overflow-y-auto">
+            <table className="w-full text-xs">
               <thead>
                 <tr className="text-left text-slate-300 border-b border-slate-700/50">
-                  <th className="p-2 font-medium">Name</th>
-                  <th className="p-2 font-medium">Email / Plex</th>
-                  <th className="p-2 font-medium">Plan</th>
-                  <th className="p-2 font-medium">Streams</th>
-                  <th className="p-2 font-medium">Price</th>
-                  <th className="p-2 font-medium">Status</th>
-                  <th className="p-2 font-medium">Actions</th>
+                  <th className="p-1.5 font-medium">Name</th>
+                  <th className="p-1.5 font-medium">Email / Plex</th>
+                  <th className="p-1.5 font-medium">Plan</th>
+                  <th className="p-1.5 font-medium">Streams</th>
+                  <th className="p-1.5 font-medium">Price</th>
+                  <th className="p-1.5 font-medium">Status</th>
+                  <th className="p-1.5 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map(c=>{
-                  const price = calculatePrice(c.plan as any, c.streams)
-                  const statusLabel = (c.status === 'inactive') ? 'Inactive' : getStatus(new Date(c.next_due_date))
+                  const hasPlan = Boolean(c.plan)
+                  const price = hasPlan ? calculatePrice(c.plan as any, c.streams) : null
+                  const statusLabel = !hasPlan ? 'Registered' : ((c.status === 'inactive') ? 'Inactive' : getStatus(new Date(c.next_due_date)))
                   return (
                     <tr key={c.id} className="border-b border-slate-800/30 hover:bg-slate-800/30 transition-all duration-200 group">
-                      <td className="p-2">
+                      <td className="p-1.5">
                         <div className="font-medium text-slate-200 group-hover:text-cyan-400 transition-colors">
                           {c.full_name}
                         </div>
                       </td>
-                      <td className="p-2 text-slate-400">
+                      <td className="p-1.5 text-slate-400">
                         <div>{c.email}</div>
                         {c.plex_username && <div className="text-slate-500 text-xs">Plex: {c.plex_username}</div>}
                       </td>
-                      <td className="p-2">
-                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-slate-700/50 text-slate-300 capitalize">
-                          {c.plan}
-                        </span>
+                      <td className="p-1.5">
+                        {hasPlan ? (
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-slate-700/50 text-slate-300 capitalize">
+                            {c.plan}
+                          </span>
+                        ) : (
+                          <div className="text-slate-400 text-xs">Registered: {c.start_date ? format(new Date(c.start_date), 'dd/MM/yyyy') : '-'}</div>
+                        )}
                       </td>
-                      <td className="p-2 text-slate-400">{c.streams}</td>
-                      <td className="p-2 font-medium text-slate-200">£{price.toFixed(2)}</td>
-                      <td className="p-2">
+                      <td className="p-1.5 text-slate-400">{c.streams}</td>
+                      <td className="p-1.5 font-medium text-slate-200">{price !== null ? `£${price.toFixed(2)}` : '—'}</td>
+                      <td className="p-1.5">
                         <span className={`tag ${statusLabel.toLowerCase().replace(' ','-')}`}>{statusLabel}</span>
                       </td>
-                      <td className="p-2">
+                      <td className="p-1.5">
                         <div className="relative inline-block">
                           <button
                             className="btn-xs"
                             onClick={()=> setOpenActionsId(openActionsId===c.id ? null : c.id)}
                           >Actions</button>
                           {openActionsId===c.id && (
-                            <div className="absolute right-0 mt-1 glass p-2 rounded-lg border border-cyan-500/20 z-10 w-44 space-y-2">
+                            <>
+                            <div className="absolute right-0 mt-1 card-solid p-2 rounded-lg border border-cyan-500/20 z-10 w-44 space-y-2 actions-menu">
+                              <div className="flex justify-end">
+                                <button className="btn-xs-outline" onClick={()=> setOpenActionsId(null)}>✕</button>
+                              </div>
                               <button
                                 className="btn-xs w-full"
                                 onClick={()=>{ setEditItem(c); setShowForm(true); setOpenActionsId(null) }}
@@ -242,10 +255,22 @@ export default function AdminCustomersPage(){
                               >Over Stream Warning</button>
                               <button
                                 className="btn-xs-outline w-full"
+                                disabled={sendingEmail===c.email}
+                                onClick={()=>{ sendTwoYears(c.email, setSendingEmail, setSendMsg); setOpenActionsId(null) }}
+                              >{sendingEmail===c.email ? 'Sending...' : '2 years'}</button>
+                              <button
+                                className="btn-xs-outline w-full"
+                                disabled={sendingEmail===c.email}
+                                onClick={()=>{ sendSignedUp(c.email, setSendingEmail, setSendMsg); setOpenActionsId(null) }}
+                              >{sendingEmail===c.email ? 'Sending...' : 'Signed up'}</button>
+                              <button
+                                className="btn-xs-outline w-full"
                                 disabled={deletingId === c.id}
                                 onClick={()=>{ setPendingDelete(c); setOpenActionsId(null) }}
                               >{deletingId === c.id ? 'Deleting...' : 'Delete'}</button>
                             </div>
+                            <div className="fixed inset-0" onClick={()=> setOpenActionsId(null)} />
+                            </>
                           )}
                         </div>
                       </td>
@@ -314,6 +339,52 @@ async function sendTranscode(email: string, setSendingEmail: (v: string | null)=
     }
   } catch(e: any){ setSendMsg(`Failed: ${e?.message || 'Network error'}`) }
   finally{ setSendingEmail(null); setTimeout(()=> setSendMsg(''), 5000) }
+}
+
+async function sendSignedUp(email: string, setSendingEmail: (v: string | null)=>void, setSendMsg: (v: string)=>void){
+  try{
+    setSendingEmail(email)
+    setSendMsg('Sending setup instructions...')
+    const res = await fetch('/api/onboarding/signed-up', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email }) })
+    const data = await res.json().catch(()=>({}))
+    if (!res.ok){
+      const errorMsg = data?.error || 'Unknown error'
+      if (String(errorMsg).includes('SMTP not configured')) {
+        setSendMsg('Email service not configured. Please contact admin.')
+      } else {
+        setSendMsg(`Failed: ${errorMsg}`)
+      }
+    } else {
+      setSendMsg('Setup email sent successfully!')
+    }
+  } catch(e:any){ setSendMsg(`Failed: ${e?.message || 'Network error'}`) }
+  finally {
+    setSendingEmail(null)
+    setTimeout(()=> setSendMsg(''), 5000)
+  }
+}
+
+async function sendTwoYears(email: string, setSendingEmail: (v: string | null)=>void, setSendMsg: (v: string)=>void){
+  try{
+    setSendingEmail(email)
+    setSendMsg('Sending service update...')
+    const res = await fetch('/api/admin/email/two-years', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email }) })
+    const data = await res.json().catch(()=>({}))
+    if (!res.ok){
+      const errorMsg = data?.error || 'Unknown error'
+      if (String(errorMsg).includes('SMTP not configured')) {
+        setSendMsg('Email service not configured. Please contact admin.')
+      } else {
+        setSendMsg(`Failed: ${errorMsg}`)
+      }
+    } else {
+      setSendMsg('Service update sent successfully!')
+    }
+  } catch(e:any){ setSendMsg(`Failed: ${e?.message || 'Network error'}`) }
+  finally {
+    setSendingEmail(null)
+    setTimeout(()=> setSendMsg(''), 5000)
+  }
 }
 
 async function confirmDelete(item: { id: string }, setDeletingId: (v: string | null)=>void, setPendingDelete: (v: any)=>void, setCustomers: (updater: any)=>void, setSendMsg: (v: string)=>void){

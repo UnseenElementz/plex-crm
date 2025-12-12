@@ -14,33 +14,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Authentication service not configured' }, { status: 500 })
     }
 
-    // Check if user exists
-    const { data: existingUser, error: checkError } = await supabase
-      .from('profiles')
-      .select('email')
-      .eq('email', email)
-      .single()
-
-    if (checkError || !existingUser) {
-      // Don't reveal whether email exists for security
-      return NextResponse.json({ 
-        message: 'If an account exists with this email, you will receive password reset instructions.' 
-      })
-    }
-
-    // Send password reset email
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/reset-password`,
-    })
+    // Always request Supabase to send reset email; Supabase will handle existence silently
+    const host = process.env.NEXT_PUBLIC_CANONICAL_HOST || 'plex-crm.vercel.app'
+    const scheme = host.startsWith('http') ? '' : 'https://'
+    const redirectTo = `${scheme}${host}/reset-password`
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
 
     if (error) {
       console.error('Password reset error:', error)
       return NextResponse.json({ error: 'Failed to send reset email' }, { status: 500 })
     }
 
-    return NextResponse.json({ 
-      message: 'If an account exists with this email, you will receive password reset instructions.' 
-    })
+    return NextResponse.json({ message: 'If an account exists with this email, you will receive password reset instructions.' })
 
   } catch (error) {
     console.error('Password reset request error:', error)

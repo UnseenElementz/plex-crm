@@ -28,15 +28,14 @@ export async function GET(){
     const safe: any = {}
     const allow = ['monthly_price','yearly_price','stream_monthly_price','stream_yearly_price','three_year_price','stream_three_year_price','payment_lock','chat_online','canonical_host','hero_image_url','bg_music_url','bg_music_volume','bg_music_enabled']
     for (const k of allow){ if (merged && (merged as any)[k] !== undefined) safe[k] = (merged as any)[k] }
-    const res = NextResponse.json(isAdmin ? merged : safe)
+    const res = NextResponse.json(isAdmin ? merged : safe, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate' } })
     try {
-      if (isAdmin) {
-        res.cookies.set('admin_settings', encodeURIComponent(JSON.stringify(merged)), { path: '/', maxAge: 60*60*24*365 })
-      }
+      const toStore = isAdmin ? merged : safe
+      res.cookies.set('admin_settings', encodeURIComponent(JSON.stringify(toStore)), { path: '/', maxAge: 60*60*24*365 })
     } catch {}
     return res
   }catch(e: any){
-    return NextResponse.json({ error: e?.message || 'Unknown error' }, { status: 500 })
+    return NextResponse.json({ error: e?.message || 'Unknown error' }, { status: 500, headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate' } })
   }
 }
 
@@ -53,12 +52,15 @@ export async function PUT(request: Request){
       dbOk = !error
     }
     // Always set cookie for persistence across ports
-    const res = NextResponse.json({ ok: true, dbOk })
+    const res = NextResponse.json({ ok: true, dbOk }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate' } })
     try { res.cookies.set('admin_settings', encodeURIComponent(JSON.stringify(row)), { path: '/', maxAge: 60*60*24*365 }) } catch {}
     return res
   }catch(e: any){
-    const res = NextResponse.json({ error: e?.message || 'Unknown error' }, { status: 500 })
+    const res = NextResponse.json({ error: e?.message || 'Unknown error' }, { status: 500, headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate' } })
     try { res.cookies.set('admin_settings', encodeURIComponent(await request.text()), { path: '/', maxAge: 60*60*24*365 }) } catch {}
     return res
   }
 }
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'

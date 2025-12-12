@@ -70,10 +70,11 @@ export default function CustomerRegisterPage(){
       await s.from('customers').insert({ 
         name: fullName || email, 
         email, 
-        subscription_type: 'monthly', 
+        subscription_type: null, 
         streams: 1, 
-        next_payment_date: new Date().toISOString(),
+        next_payment_date: null,
         start_date: new Date().toISOString(),
+        subscription_status: 'inactive',
         notes: plexUsername ? `Plex: ${plexUsername}` : undefined
       })
       

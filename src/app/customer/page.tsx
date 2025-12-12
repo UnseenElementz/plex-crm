@@ -103,9 +103,10 @@ export default function CustomerPortal() {
         setHasSubscription(true)
         setAuthState('ready')
         try{
-          const res = await fetch('/api/admin/settings')
+          const res = await fetch('/api/admin/settings', { cache: 'no-store' })
           if (res.ok){ const data = await res.json(); setPaymentLock(Boolean(data?.payment_lock)) }
         } catch{}
+        try{ await fetch('/api/security/ip-log', { method:'POST' }) } catch{}
         return
       }
 
@@ -128,11 +129,12 @@ export default function CustomerPortal() {
         setHasSubscription(false)
         setAuthState('ready')
         try{
-          const res = await fetch('/api/admin/settings')
+          const res = await fetch('/api/admin/settings', { cache: 'no-store' })
           if (res.ok){ const data = await res.json(); setPaymentLock(Boolean(data?.payment_lock)) }
         } catch{}
+        try{ await fetch('/api/security/ip-log', { method:'POST' }) } catch{}
         return
-        }
+      }
 
         setAuthState('unauth')
       } catch { setAuthState('unauth') }
@@ -225,14 +227,14 @@ export default function CustomerPortal() {
           <a href="/customer/recommendations" className="cta-btn shimmer" data-no-prefetch>Recommendations</a>
         </div>
         {paymentLock && !canPay && (
-          <div className="glass p-4 rounded-lg mt-4 border border-cyan-500/30">
+          <div className="card-solid p-4 rounded-lg mt-4 border border-cyan-500/30">
             <p className="text-slate-300 text-sm mb-2">To keep the server running at a professional and stable level, we are not accepting new customers at the moment.</p>
             <p className="text-slate-300 text-sm mb-2">If you are interested, please click the chat icon in the bottom-right corner and send us a message with your details and email address. When new slots become available, we will contact you right away.</p>
             <p className="text-slate-300 text-sm">Thank you,</p>
           </div>
         )}
         <div className="grid md:grid-cols-2 gap-6 mt-6">
-          <div className="card">
+          <div className="card-solid">
             <h3 className="card-title">Subscription</h3>
             <div className="space-y-3">
               <label className="label">Plan</label>
@@ -247,6 +249,11 @@ export default function CustomerPortal() {
                   plan:'yearly',
                   nextDueDate: calculateNextDue('yearly', new Date(c.startDate)).toISOString()
                 }))}>Yearly</button>
+                <button className={`btn ${customer.plan==='two_year'?'active':''}`} onClick={()=>setCustomer(c=>({
+                  ...c,
+                  plan:'two_year',
+                  nextDueDate: calculateNextDue('two_year', new Date(c.startDate)).toISOString()
+                }))}>2 Years</button>
                 <button className={`btn ${customer.plan==='three_year'?'active':''}`} onClick={()=>setCustomer(c=>({
                   ...c,
                   plan:'three_year',
@@ -288,7 +295,7 @@ export default function CustomerPortal() {
               </div>
             </div>
           </div>
-          <div className="card">
+          <div className="card-solid">
             <h3 className="card-title">Account</h3>
             <div className="space-y-3">
               <label className="label">Full name</label>
@@ -300,7 +307,7 @@ export default function CustomerPortal() {
             </div>
           </div>
         </div>
-        <div className="mt-6 glass p-4 rounded-lg border border-rose-500/30 bg-rose-900/10">
+        <div className="mt-6 card-solid p-4 rounded-lg border border-rose-500/30">
           <div className="text-rose-300 text-sm font-semibold mb-2">DISCLAIMER:</div>
           <p className="text-slate-300 text-xs mb-2">If you purchase 1 stream, it may only be used on one device at a time. Using multiple devices concurrently is strictly prohibited. We have a zero-tolerance policy for this, and violations will result in immediate disconnection with no refund.</p>
           <p className="text-slate-300 text-xs">If you need to use multiple devices, please purchase additional streams to avoid a ban.</p>

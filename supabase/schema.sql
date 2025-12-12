@@ -126,6 +126,10 @@ alter table public.admin_settings add column if not exists monthly_price numeric
 alter table public.admin_settings add column if not exists yearly_price numeric(10,2) default 85;
 alter table public.admin_settings add column if not exists stream_monthly_price numeric(10,2) default 5;
 alter table public.admin_settings add column if not exists stream_yearly_price numeric(10,2) default 20;
+alter table public.admin_settings add column if not exists two_year_price numeric(10,2) default 150;
+alter table public.admin_settings add column if not exists stream_two_year_price numeric(10,2) default 35;
+alter table public.admin_settings add column if not exists three_year_price numeric(10,2) default 180;
+alter table public.admin_settings add column if not exists stream_three_year_price numeric(10,2) default 40;
 -- Live chat tables
 create table if not exists public.messages (
   id uuid primary key default gen_random_uuid(),
