@@ -41,12 +41,13 @@ export async function POST(request: Request){
  
  Before our current structure, Unseen ran some extremely cheap “lifetime” deals. Some users paid £50–£80 and were promised lifetime access. As much as we respect Unseen, those prices were never realistic. At £50 for lifetime service, we might as well shut the doors. No platform can operate at a loss.
  
+ Also, it’s important to mention that most providers only honour “lifetime” until the server dies or goes offline. That’s the industry standard. And as many of you know, we’ve had 2–3 servers go down in the past. If this were any other platform, they would’ve just started fresh with new clients and left previous users behind. 
+ We chose to be honest and do things properly, even when it meant extra work, extra cost, and rebuilding from scratch. 
+ 
  For those arguing that 3 years isn’t fair after paying £80, let’s break it down:
  £80 over 3 years = just £2 a month.
  
  If someone believes our service, content collection, stability, and support are only worth £2 a month, then respectfully — they’re welcome to find another provider. We’re not spending hours maintaining servers, fixing issues, and upgrading systems for pocket change. We’re not Netflix with a billion-pound budget, yet our platform outperforms most services out there. We’ve invested thousands into improvements, infrastructure, and features. Sustainability matters.
- 
- To address another issue: we’ve received reports of users sharing and promoting other platforms within our Discord. This will not be tolerated. Anyone doing this will be identified and permanently banned. We want a solid, loyal community — not people who take from our service while pushing others elsewhere.
  
  Big things are coming. This platform has received real investment, and we’re only just getting started.
  
