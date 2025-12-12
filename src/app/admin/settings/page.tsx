@@ -212,8 +212,6 @@ export default function AdminSettingsPage() {
                 yearly_price: (data.yearly_price ?? Number(prev.yearly_price)).toString(),
                 stream_monthly_price: (data.stream_monthly_price ?? Number(prev.stream_monthly_price)).toString(),
                 stream_yearly_price: (data.stream_yearly_price ?? Number(prev.stream_yearly_price)).toString(),
-                two_year_price: (data.two_year_price ?? Number(prev.two_year_price)).toString(),
-                stream_two_year_price: (data.stream_two_year_price ?? Number(prev.stream_two_year_price)).toString(),
                 three_year_price: (data.three_year_price ?? Number(prev.three_year_price)).toString(),
                 stream_three_year_price: (data.stream_three_year_price ?? Number(prev.stream_three_year_price)).toString(),
                 bg_music_url: data.bg_music_url || prev.bg_music_url,
