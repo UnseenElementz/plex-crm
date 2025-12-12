@@ -2,7 +2,7 @@
 import Script from 'next/script'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-export default function PayPalButton({ amount, currency = 'GBP', customerEmail, plan, streams, onSuccess }: { amount: number; currency?: string; customerEmail?: string; plan?: 'monthly'|'yearly'|'three_year'; streams?: number; onSuccess?: (orderId: string) => void }){
+export default function PayPalButton({ amount, currency = 'GBP', customerEmail, plan, streams, onSuccess }: { amount: number; currency?: string; customerEmail?: string; plan?: 'monthly'|'yearly'|'two_year'|'three_year'; streams?: number; onSuccess?: (orderId: string) => void }){
   const [ready, setReady] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
