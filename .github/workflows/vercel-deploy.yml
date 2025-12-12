@@ -21,9 +21,9 @@ jobs:
           node-version: '18'
           cache: 'npm'
       - run: npm ci
-      - run: npx vercel pull --yes --environment=preview --token "$VERCEL_TOKEN"
-      - run: npx vercel build --token "$VERCEL_TOKEN"
-      - run: npx vercel deploy --prebuilt --token "$VERCEL_TOKEN"
+      - run: npx vercel pull --yes --environment=preview --token "$VERCEL_TOKEN" --scope "$VERCEL_ORG_ID"
+      - run: npx vercel build --token "$VERCEL_TOKEN" --scope "$VERCEL_ORG_ID"
+      - run: npx vercel deploy --prebuilt --token "$VERCEL_TOKEN" --scope "$VERCEL_ORG_ID"
 
   deploy-production:
     if: github.ref == 'refs/heads/main'
@@ -39,6 +39,6 @@ jobs:
           node-version: '18'
           cache: 'npm'
       - run: npm ci
-      - run: npx vercel pull --yes --environment=production --token "$VERCEL_TOKEN"
-      - run: npx vercel build --prod --token "$VERCEL_TOKEN"
-      - run: npx vercel deploy --prebuilt --prod --token "$VERCEL_TOKEN"
+      - run: npx vercel pull --yes --environment=production --token "$VERCEL_TOKEN" --scope "$VERCEL_ORG_ID"
+      - run: npx vercel build --prod --token "$VERCEL_TOKEN" --scope "$VERCEL_ORG_ID"
+      - run: npx vercel deploy --prebuilt --prod --token "$VERCEL_TOKEN" --scope "$VERCEL_ORG_ID"
