@@ -15,9 +15,6 @@ export default function AdminDashboard() {
   const [isMobile, setIsMobile] = useState(false)
   const [chatOnline, setChatOnline] = useState<boolean | null>(null)
   const [saving, setSaving] = useState(false)
-  const [uploadingMusic, setUploadingMusic] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
-  const [musicMsg, setMusicMsg] = useState('')
   const searchParams = useSearchParams()
   
   const {
@@ -158,18 +155,6 @@ export default function AdminDashboard() {
     finally{ setSaving(false) }
   }
 
-  async function updateBgMusicUrl(url: string){
-    setSaving(true)
-    try{
-      const g = await fetch('/api/admin/settings')
-      const cur = g.ok ? await g.json() : {}
-      const payload = { ...cur, bg_music_url: url }
-      const r = await fetch('/api/admin/settings', { method:'PUT', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(payload) })
-      if (!r.ok) return
-    } catch{}
-    finally{ setSaving(false) }
-  }
-
   return (
     <div className="flex h-screen bg-slate-900">
       {/* Sidebar - Conversation List */}
@@ -238,52 +223,7 @@ export default function AdminDashboard() {
 
           {/* removed demo conversation seed button */}
 
-          <div className="mt-2 p-2 rounded-lg border border-slate-800 bg-slate-900/40">
-            <div className="text-xs text-slate-400 mb-2">Background Music</div>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <input id="dash-mp3" type="file" accept="audio/mpeg,audio/mp3" className="hidden" onChange={async e=>{
-                  const file = e.target.files?.[0]
-                  if (!file) return
-                  setMusicMsg('')
-                  setUploadingMusic(true)
-                  setUploadProgress(0)
-                  try{
-                    const fd = new FormData()
-                    fd.append('file', file)
-                    await new Promise<void>((resolve, reject)=>{
-                      const xhr = new XMLHttpRequest()
-                      xhr.open('POST', '/api/admin/upload-mp3')
-                      xhr.upload.onprogress = (evt)=>{ if (evt.lengthComputable){ setUploadProgress(Math.round((evt.loaded/evt.total)*100)) } }
-                      xhr.onload = ()=>{
-                        try{
-                          const body = JSON.parse(xhr.responseText || '{}')
-                          if (xhr.status>=200 && xhr.status<300){
-                            const url = body?.url || ''
-                            if (url){ updateBgMusicUrl(url); setMusicMsg('Uploaded') }
-                            resolve()
-                          } else {
-                            setMusicMsg(body?.error || 'Upload failed')
-                            reject(new Error(body?.error || 'Upload failed'))
-                          }
-                        }catch(e){ setMusicMsg('Upload failed'); reject(e as any) }
-                      }
-                      xhr.onerror = ()=>{ setMusicMsg('Network error'); reject(new Error('network')) }
-                      xhr.send(fd)
-                    })
-                  } catch(e:any){}
-                  finally{ setUploadingMusic(false) }
-                }} />
-                <label htmlFor="dash-mp3" className="btn-xs-outline cursor-pointer">{uploadingMusic ? 'Uploading...' : 'Upload MP3'}</label>
-                {musicMsg && (<span className={`text-[11px] ${musicMsg.startsWith('Upload') ? 'text-emerald-400' : 'text-rose-400'}`}>{musicMsg}</span>)}
-              </div>
-              {uploadingMusic && (
-                <div className="w-full h-1 bg-slate-800 rounded">
-                  <div className="h-1 bg-cyan-500 rounded" style={{ width: `${uploadProgress}%` }}></div>
-                </div>
-              )}
-            </div>
-          </div>
+
         </div>
 
         {/* Conversation List */}

@@ -38,10 +38,6 @@ export default function AdminSettingsPage() {
   const [newContent, setNewContent] = useState('')
   const [publishing, setPublishing] = useState(false)
   const [updateMsg, setUpdateMsg] = useState('')
-  const [musicMsg, setMusicMsg] = useState('')
-  const [uploadingMusic, setUploadingMusic] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
-  const [selectedFileName, setSelectedFileName] = useState('')
 
   useEffect(() => {
     checkAuth()
@@ -407,74 +403,7 @@ export default function AdminSettingsPage() {
           </div>
         </div>
         
-        <div className="glass p-6 rounded-2xl mb-6">
-          <h2 className="text-xl font-semibold mb-4">Background Music</h2>
-          {/* removed settings CTA upload button */}
-          <div className="grid md:grid-cols-2 gap-4">
-            <div className="md:col-span-2">
-              <label className="label">Music MP3 Link (Google Drive or URL)</label>
-              <input className="input" placeholder="https://drive.google.com/file/d/ID/view?usp=sharing" value={settings.bg_music_url} onChange={e=> setSettings({ ...settings, bg_music_url: e.target.value })} />
-              <div className="mt-3 space-y-2">
-                <div className="flex items-center gap-3">
-                  <input id="bg-music-file" type="file" accept="audio/mpeg,audio/mp3" className="hidden" onChange={async e=>{
-                    const file = e.target.files?.[0]
-                    if (!file) return
-                    setSelectedFileName(file.name)
-                    setUploadProgress(0)
-                    setMusicMsg('')
-                    if (!isAuthenticated){ setMusicMsg('You must be admin to upload.'); return }
-                    setUploadingMusic(true)
-                    try{
-                      const fd = new FormData()
-                      fd.append('file', file)
-                      await new Promise<void>((resolve, reject)=>{
-                        const xhr = new XMLHttpRequest()
-                        xhr.open('POST', '/api/admin/upload-mp3')
-                        xhr.upload.onprogress = (evt)=>{ if (evt.lengthComputable){ setUploadProgress(Math.round((evt.loaded/evt.total)*100)) } }
-                        xhr.onload = ()=>{
-                          try{
-                            const body = JSON.parse(xhr.responseText || '{}')
-                            if (xhr.status>=200 && xhr.status<300){
-                              const url = body?.url || ''
-                              if (url){ setSettings({ ...settings, bg_music_url: url }); setMusicMsg('Uploaded') }
-                              resolve()
-                            } else {
-                              setMusicMsg(body?.error || 'Upload failed')
-                              reject(new Error(body?.error || 'Upload failed'))
-                            }
-                          }catch(e){ setMusicMsg('Upload failed'); reject(e as any) }
-                        }
-                        xhr.onerror = ()=>{ setMusicMsg('Network error'); reject(new Error('network')) }
-                        xhr.send(fd)
-                      })
-                    } catch(e:any){ /* message already set */ }
-                    finally{ setUploadingMusic(false) }
-                  }} />
-                  <label htmlFor="bg-music-file" className="btn cursor-pointer">{uploadingMusic ? 'Uploading...' : 'Upload MP3'}</label>
-                  {selectedFileName && (<span className="text-xs text-slate-400">{selectedFileName}</span>)}
-                </div>
-                {uploadingMusic && (
-                  <div className="w-full h-2 bg-slate-800 rounded">
-                    <div className="h-2 bg-cyan-500 rounded" style={{ width: `${uploadProgress}%` }}></div>
-                  </div>
-                )}
-                {musicMsg && (<div className={`text-xs ${musicMsg.startsWith('Upload') ? 'text-emerald-400' : 'text-rose-400'}`}>{musicMsg}</div>)}
-              </div>
-              <div className="text-xs text-slate-500 mt-1">We proxy the URL for smooth playback and CORS safety.</div>
-            </div>
-            <div>
-              <label className="label">Enabled</label>
-              <label className="inline-flex items-center gap-2">
-                <input type="checkbox" checked={settings.bg_music_enabled} onChange={e=> setSettings({ ...settings, bg_music_enabled: e.target.checked })} />
-                <span className="text-xs text-slate-400">When enabled, it plays once per session at low volume.</span>
-              </label>
-            </div>
-            <div>
-              <label className="label">Volume (0.0 – 1.0)</label>
-              <input className="input" type="number" step="0.05" min="0" max="1" value={settings.bg_music_volume} onChange={e=> setSettings({ ...settings, bg_music_volume: e.target.value })} />
-            </div>
-          </div>
-        </div>
+
         <div className="glass p-6 rounded-2xl mb-6">
           <h2 className="text-xl font-semibold mb-4">Service Updates</h2>
           <div className="space-y-3 mb-4">
