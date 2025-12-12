@@ -10,7 +10,7 @@ export default function AdminCustomersPage(){
   // Single effect: ensure session then load customers (dev auto-login, prod redirect)
   const [customers, setCustomers] = useState<Customer[]>([])
   const [q, setQ] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all'|'active'|'inactive'|'due_soon'|'registered'>('active')
+  const [statusFilter, setStatusFilter] = useState<'all'|'active'|'inactive'|'due_soon'|'overdue'|'registered'>('active')
   const [sortBy, setSortBy] = useState<'none'|'newest'|'oldest'|'price_high'|'price_low'|'streams_high'|'streams_low'|'due_soon'>('none')
   const [showForm, setShowForm] = useState(false)
   const [editItem, setEditItem] = useState<Customer | null>(null)
@@ -74,6 +74,7 @@ export default function AdminCustomersPage(){
       if (statusFilter === 'inactive') return statusLabel === 'Inactive'
       if (statusFilter === 'active') return statusLabel === 'Active'
       if (statusFilter === 'due_soon') return statusLabel === 'Due Soon' || statusLabel === 'Due Today'
+      if (statusFilter === 'overdue') return statusLabel === 'Overdue'
       return true
     })
     const sorted = [...list]
@@ -108,6 +109,7 @@ export default function AdminCustomersPage(){
           <select className="input w-40" value={statusFilter} onChange={e=> setStatusFilter(e.target.value as any)}>
             <option value="all">All</option>
             <option value="due_soon">Due Soon</option>
+            <option value="overdue">Overdue</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
             <option value="registered">Registered</option>
