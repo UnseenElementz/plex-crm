@@ -232,9 +232,12 @@ export default function AdminCustomersPage(){
                           >Actions</button>
                           {openActionsId===c.id && (
                             <>
-                            <div className="absolute right-0 mt-1 card-solid p-2 rounded-lg border border-cyan-500/20 z-10 w-44 space-y-2 actions-menu">
-                              <div className="flex justify-end">
-                                <button className="btn-xs-outline" onClick={()=> setOpenActionsId(null)}>✕</button>
+                            <div 
+                              className="absolute right-0 mt-1 card-solid p-2 rounded-lg border border-cyan-500/20 z-10 w-44 space-y-2 actions-menu max-h-60 overflow-y-auto"
+                              style={{ top: '100%', right: 0 }}
+                            >
+                              <div className="flex justify-end sticky top-0 bg-[#0f172a] pb-2 pt-1 -mx-2 px-2 z-20 border-b border-slate-700/50 mb-2">
+                                <button className="btn-xs-outline" onClick={(e)=>{ e.stopPropagation(); setOpenActionsId(null) }}>✕</button>
                               </div>
                               <button
                                 className="btn-xs w-full"
