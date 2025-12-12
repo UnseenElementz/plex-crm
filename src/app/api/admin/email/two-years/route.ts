@@ -37,17 +37,22 @@ export async function POST(request: Request){
  
  We need to clear up an ongoing issue around lifetime subscriptions.
  
- As stated previously, all lifetime payments will be honoured for 3 years, but this only applies to users who paid over £120. Anyone who purchased a lifetime plan below that amount cannot be included — it simply isn’t fair or sustainable.
+ After sitting down with our data centre team and carefully going through all past payments, we’ve had to make some difficult but necessary decisions to ensure the long-term stability of the service for everyone.
  
- Before our current structure, Unseen ran some extremely cheap “lifetime” deals. Some users paid £50–£80 and were promised lifetime access. As much as we respect Unseen, those prices were never realistic. At £50 for lifetime service, we might as well shut the doors. No platform can operate at a loss.
+ As stated previously, all lifetime payments will be honoured for 3 years, but this only applies to users who paid full price (£120 or more). Anyone who purchased a lifetime plan below that amount will receive 2 years, as extending it to 3 years would be unsustainable and put the platform at a loss.
  
- Also, it’s important to mention that most providers only honour “lifetime” until the server dies or goes offline. That’s the industry standard. And as many of you know, we’ve had 2–3 servers go down in the past. If this were any other platform, they would’ve just started fresh with new clients and left previous users behind. 
- We chose to be honest and do things properly, even when it meant extra work, extra cost, and rebuilding from scratch. 
+ Before our current structure, Unseen ran some extremely cheap “lifetime” deals. Some users paid £50–£80 and were promised lifetime access. As much as we respect Unseen, those prices were never realistic. At £50 for lifetime service, we might as well have shut the doors. No platform can operate at a loss.
  
- For those arguing that 3 years isn’t fair after paying £80, let’s break it down:
- £80 over 3 years = just £2 a month.
+ We also originally assumed everyone had paid the proper full price for lifetime access. However, it turns out many users paid heavily discounted, very low amounts. Extending these plans to 3 years would compromise the stability of the service and directly affect all users. We are committed to keeping the platform strong, reliable, and sustainable — and that means making decisions that protect the entire community.
  
- If someone believes our service, content collection, stability, and support are only worth £2 a month, then respectfully — they’re welcome to find another provider. We’re not spending hours maintaining servers, fixing issues, and upgrading systems for pocket change. We’re not Netflix with a billion-pound budget, yet our platform outperforms most services out there. We’ve invested thousands into improvements, infrastructure, and features. Sustainability matters.
+ It’s important to note that most providers only honour “lifetime” until the server dies or goes offline. That’s the industry standard. And as many of you know, we’ve had 2–3 servers go down in the past. If this were any other platform, they would have simply started fresh with new clients and left previous users behind. 
+ We chose to be transparent and rebuild properly, even when it meant extra work, cost, and time.
+ 
+ For those arguing that 3 years isn’t fair after paying £150, let’s break it down:
+ £150 over 3 years = £4.17 per month.
+ Even if the plan were extended to 3 years, this is still far below what any service of this scale could operate on.
+ 
+ If someone feels our service, content collection, stability, and support are only worth £4–£6 a month, then respectfully — they’re welcome to find another provider. We’re not Netflix with a billion-pound budget, yet our platform outperforms most services out there. We’ve invested thousands into improvements, infrastructure, and new features. Sustainability matters.
  
  Big things are coming. This platform has received real investment, and we’re only just getting started.
  
