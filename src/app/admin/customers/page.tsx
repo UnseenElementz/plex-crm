@@ -334,20 +334,42 @@ export default function AdminCustomersPage(){
                               setShareMsg('')
                               // Load libraries in background
                               const headers = { 'Content-Type': 'application/json' } as any
+                              let tokenFound = false
                               try {
                                 const raw = localStorage.getItem('admin_settings')
                                 if (raw) {
                                   const s = JSON.parse(raw)
-                                  if (s.plex_token) headers['X-Plex-Token-Local'] = s.plex_token
-                                  if (s.plex_server_url) headers['X-Plex-Url-Local'] = s.plex_server_url
+                                  if (s.plex_token) {
+                                    headers['X-Plex-Token-Local'] = s.plex_token
+                                    if (s.plex_server_url) headers['X-Plex-Url-Local'] = s.plex_server_url
+                                    tokenFound = true
+                                  }
                                 }
                               } catch {}
+
+                              if (!tokenFound) {
+                                try {
+                                  const cookieMatch = document.cookie.split(';').map(s=>s.trim()).find(s=> s.startsWith('admin_settings='))
+                                  if (cookieMatch) {
+                                    const rawCookie = decodeURIComponent(cookieMatch.split('=')[1] || '')
+                                    const s = JSON.parse(rawCookie)
+                                    if (s.plex_token) {
+                                      headers['X-Plex-Token-Local'] = s.plex_token
+                                      if (s.plex_server_url) headers['X-Plex-Url-Local'] = s.plex_server_url
+                                    }
+                                  }
+                                } catch {}
+                              }
                               
-                              fetch('/api/admin/plex/libraries', { headers, cache: 'no-store' })
+                              fetch(`/api/admin/plex/libraries?email=${encodeURIComponent(c.email)}`, { headers, cache: 'no-store' })
                                 .then(r => r.json())
                                 .then(j => {
                                   setLibraries(j.libraries || [])
-                                  if (j.error) setSendMsg(`Library load failed: ${j.error}`)
+                                  // Pre-select shared libraries
+                                  if (j.shared && Array.isArray(j.shared)) {
+                                    setSelectedLibs(j.shared)
+                                  }
+                                  if (j.error) setShareMsg(`Failed: ${j.error}`)
                                 })
                                 .catch(() => {})
                                 .finally(() => setLibrariesLoading(false))
@@ -386,7 +408,16 @@ export default function AdminCustomersPage(){
             <div className="glass p-6 rounded-2xl w-full max-w-md border border-cyan-500/30">
               <div className="text-lg font-semibold text-slate-200 mb-2">Manage Plex Share</div>
               <div className="text-slate-400 text-sm mb-4">{manageShareItem.email}</div>
-              {shareMsg && (<div className={`text-sm mb-3 ${shareMsg.startsWith('Failed') ? 'text-rose-400' : 'text-emerald-400'}`}>{shareMsg}</div>)}
+              {shareMsg && (
+                <div className={`text-sm mb-3 ${shareMsg.startsWith('Failed') ? 'text-rose-400' : 'text-emerald-400'}`}>
+                  {shareMsg}
+                  {shareMsg.includes('Plex token not configured') && (
+                    <div className="mt-2">
+                      <a href="/admin/settings" className="btn-xs bg-cyan-600 hover:bg-cyan-500 text-white">Go to Settings to Configure Plex</a>
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="space-y-2 max-h-60 overflow-y-auto">
                 {librariesLoading && <div className="text-slate-400 text-sm animate-pulse">Loading libraries...</div>}
                 {!librariesLoading && libraries.length===0 && <div className="text-slate-500 text-xs">No libraries found. You can still add this user to Plex.</div>}

@@ -192,3 +192,65 @@ export async function getAnyServerIdentifier(token: string): Promise<{ serverId?
     return null
   }
 }
+
+export async function getPlexSharedSections(token: string, email: string): Promise<string[]> {
+  try {
+    const servers = await getOwnedServers(token)
+    // Try first owned server or fallback
+    let machineId = servers[0]?.machineIdentifier
+    if (!machineId) {
+      const any = await getAnyServerIdentifier(token)
+      if (any?.machineIdentifier) machineId = any.machineIdentifier
+    }
+    if (!machineId) return []
+
+    const res = await fetch(`https://plex.tv/api/servers/${machineId}/shared_servers`, { headers: plexHeaders(token) })
+    if (!res.ok) return []
+    const text = await res.text()
+    
+    // Find the SharedServer block for this email/username
+    // Match <SharedServer ... email="..." ...> or <SharedServer ... username="..." ...>
+    // We need to be careful with regex matching across lines or within the block
+    
+    // Split by SharedServer tags to process each block
+    const blocks = text.split('</SharedServer>')
+    for (const block of blocks) {
+      if (!block.includes('<SharedServer')) continue
+      
+      const attrsMatch = block.match(/<SharedServer\s+([^>]+)>/)
+      if (!attrsMatch) continue
+      const attrs = attrsMatch[1]
+      
+      const uEmail = attrs.match(/email="([^"]+)"/)?.[1] || ''
+      const uName = attrs.match(/username="([^"]+)"/)?.[1] || ''
+      
+      if (uEmail.toLowerCase() === email.toLowerCase() || uName.toLowerCase() === email.toLowerCase()) {
+        // Found the user, now find sections inside this block
+        const sectionMatches = block.matchAll(/<Section\s+([^>]+)\/>/g)
+        const ids: string[] = []
+        for (const sm of sectionMatches) {
+          const sAttrs = sm[1]
+          const key = sAttrs.match(/key="([^"]+)"/)?.[1] // shared library section id is usually 'key' or 'id' in this context? 
+          // In shared_servers response, it's often <Section id="X" key="X" /> or similar. 
+          // Actually, in the XML it's usually <Section id="123" key="123" title="..." />
+          // But wait, sometimes it's <Section sectionKey="123" />? 
+          // Let's check typical Plex API. Usually it's 'sectionKey' or 'key'.
+          // Let's grab both 'id', 'key', 'sectionKey' just in case
+          const sId = sAttrs.match(/sectionKey="([^"]+)"/)?.[1] || sAttrs.match(/key="([^"]+)"/)?.[1] || sAttrs.match(/id="([^"]+)"/)?.[1]
+          if (sId) ids.push(sId)
+        }
+        
+        // If "allLibraries" is set? 
+        const allLibs = attrs.match(/allLibraries="1"/);
+        if (allLibs) return ['all'] 
+        
+        return ids
+      }
+    }
+    
+    return []
+  } catch (e) {
+    console.error('Plex shared sections error:', e)
+    return []
+  }
+}
