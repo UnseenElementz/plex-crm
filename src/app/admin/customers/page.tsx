@@ -361,7 +361,9 @@ export default function AdminCustomersPage(){
                                 } catch {}
                               }
                               
-                              fetch(`/api/admin/plex/libraries?email=${encodeURIComponent(c.email)}`, { headers, cache: 'no-store' })
+                              const encodedEmail = encodeURIComponent(c.email || '')
+                              const encodedUsername = encodeURIComponent(c.plex_username || '')
+                              fetch(`/api/admin/plex/libraries?email=${encodedEmail}&username=${encodedUsername}`, { headers, cache: 'no-store' })
                                 .then(r => r.json())
                                 .then(j => {
                                   setLibraries(j.libraries || [])
@@ -418,6 +420,21 @@ export default function AdminCustomersPage(){
                   )}
                 </div>
               )}
+              
+              {!librariesLoading && libraries.length > 0 && (
+                <div className="flex justify-end mb-2">
+                   <button 
+                     className="text-xs text-cyan-400 hover:text-cyan-300 transition-colors"
+                     onClick={() => {
+                       if (selectedLibs.length === libraries.length) setSelectedLibs([])
+                       else setSelectedLibs(libraries.map(l => l.id))
+                     }}
+                   >
+                     {selectedLibs.length === libraries.length ? 'Deselect All' : 'Select All'}
+                   </button>
+                </div>
+              )}
+
               <div className="space-y-2 max-h-60 overflow-y-auto">
                 {librariesLoading && <div className="text-slate-400 text-sm animate-pulse">Loading libraries...</div>}
                 {!librariesLoading && libraries.length===0 && <div className="text-slate-500 text-xs">No libraries found. You can still add this user to Plex.</div>}
@@ -468,10 +485,10 @@ export default function AdminCustomersPage(){
 
                     const r = await fetch('/api/admin/plex/share', { method:'POST', headers, body: JSON.stringify({ email: manageShareItem.email, libraries: selectedLibs }) })
                     const j = await r.json().catch(()=>({}))
-                    if (!r.ok){ setShareMsg('Failed: ' + (j?.error || 'Invite error') + (j?.response ? (' - ' + j.response) : '')); setSendMsg(j?.error || 'Failed to add') } else { setShareMsg('Invite sent'); setSendMsg('Added to Plex with selected libraries') }
+                    if (!r.ok){ setShareMsg('Failed: ' + (j?.error || 'Invite error') + (j?.response ? (' - ' + j.response) : '')); setSendMsg(j?.error || 'Failed to add') } else { setShareMsg('Updated'); setSendMsg('Updated Plex share') }
                   } catch(e:any){ setShareMsg('Failed: ' + (e?.message || 'Error')); setSendMsg(e?.message || 'Failed') }
                   finally{ setShareLoading(false); setTimeout(()=> setSendMsg(''), 5000) }
-                }}>Add to Plex</button>
+                }}>{selectedLibs.length > 0 ? 'Save Changes' : 'Add to Plex'}</button>
               </div>
             </div>
           </div>

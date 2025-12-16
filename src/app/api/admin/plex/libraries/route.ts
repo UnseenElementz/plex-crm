@@ -51,18 +51,23 @@ export async function GET(request: Request){
     const serverUrl = settings?.plex_server_url || 'https://plex.tv'
     if (!token) return NextResponse.json({ error: 'Plex token not configured' }, { status: 400 })
     
-    const libs = await getPlexLibraries(serverUrl, token)
+    const { libraries, machineIdentifier } = await getPlexLibraries(serverUrl, token)
     let shared: string[] = []
     
     if (email) {
-      shared = await getPlexSharedSections(token, email)
+      // We don't have username passed in searchParams yet, but let's see if we can infer it or if 'email' is actually a username
+      // The frontend now passes ?email=... which might be just email.
+      // We can try to match against email only first.
+      // But if we want to be safe, we should accept username too.
+      const username = searchParams.get('username') || undefined
+      shared = await getPlexSharedSections(token, email, username, machineIdentifier)
       // If user has "all libraries" (shared=['all']), map to all IDs
       if (shared.length === 1 && shared[0] === 'all') {
-        shared = libs.map(l => l.id)
+        shared = libraries.map(l => l.id)
       }
     }
     
-    return NextResponse.json({ libraries: libs, shared })
+    return NextResponse.json({ libraries, shared })
   } catch(e:any){
     return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 })
   }

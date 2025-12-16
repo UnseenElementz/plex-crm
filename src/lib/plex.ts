@@ -69,30 +69,101 @@ export interface PlexLibrary {
   type: string
 }
 
-export async function getPlexLibraries(serverUrl: string, token: string): Promise<PlexLibrary[]> {
+export async function getPlexLibraries(serverUrl: string, token: string): Promise<{ libraries: PlexLibrary[], machineIdentifier: string }> {
   try{
-    // If serverUrl points to plex.tv, resolve a concrete server connection URI via resources
     let base = serverUrl.replace(/\/+$/,'')
+    
+    // If user provided a specific URL, use it directly first
+    if (!base.includes('plex.tv')) {
+      try {
+        const res = await fetch(`${base}/library/sections`, { headers: plexHeaders(token) })
+        if (res.ok) {
+          return await parseLibraries(res)
+        }
+      } catch (e) {
+        console.error('Direct server connection failed:', e)
+        // Fall through to auto-discovery
+      }
+    }
+
+    // Auto-discovery via plex.tv resources
     if (base.includes('plex.tv')) {
-      base = await getPreferredServerUri(token)
+      const discovered = await getPreferredServerUri(token)
+      if (discovered === 'https://plex.tv') {
+        throw new Error('Could not resolve Plex Media Server URI. Please ensure the server is claimed and Remote Access is enabled, or set a direct local IP in Settings.')
+      }
+      base = discovered
     }
-    const res = await fetch(`${base}/library/sections`, { headers: plexHeaders(token) })
-    if (!res.ok) throw new Error(`Libraries fetch failed: ${res.status}`)
-    const text = await res.text()
-    const matches = text.matchAll(/<Directory\s+([^>]+)>/g)
-    const libs: PlexLibrary[] = []
-    for (const m of matches) {
-      const attrs = m[1]
-      const id = attrs.match(/key="([^"]+)"/)?.[1] || ''
-      const title = attrs.match(/title="([^"]+)"/)?.[1] || ''
-      const type = attrs.match(/type="([^"]+)"/)?.[1] || ''
-      if (id && title) libs.push({ id, title, type })
+    
+    // Try connecting to the resolved base
+    try {
+      const res = await fetch(`${base}/library/sections`, { headers: plexHeaders(token) })
+      if (!res.ok) throw new Error(`Libraries fetch failed: ${res.status} ${res.statusText}`)
+      return await parseLibraries(res)
+    } catch (e: any) {
+      // If the auto-resolved URI failed, let's try ONE MORE aggressive fallback:
+      console.warn(`Preferred URI ${base} failed, trying all connection candidates...`)
+      const candidates = await getAllConnectionCandidates(token)
+      for (const uri of candidates) {
+        if (uri === base) continue
+        try {
+          const res2 = await fetch(`${uri}/library/sections`, { headers: plexHeaders(token) })
+          if (res2.ok) return await parseLibraries(res2)
+        } catch {}
+      }
+      throw new Error(`Connection failed to ${base}. Checked ${candidates.length} alternative URIs. Last error: ${e.message}`)
     }
-    return libs
-  } catch(e){
+  } catch(e: any){
     console.error('Plex libraries error:', e)
-    return []
+    throw new Error(e.message || 'Failed to load libraries')
   }
+}
+
+async function parseLibraries(res: Response): Promise<{ libraries: PlexLibrary[], machineIdentifier: string }> {
+  const text = await res.text()
+  const matches = text.matchAll(/<Directory\s+([^>]+)>/g)
+  const libs: PlexLibrary[] = []
+  for (const m of matches) {
+    const attrs = m[1]
+    const id = attrs.match(/key="([^"]+)"/)?.[1] || ''
+    const title = attrs.match(/title="([^"]+)"/)?.[1] || ''
+    const type = attrs.match(/type="([^"]+)"/)?.[1] || ''
+    if (id && title) libs.push({ id, title, type })
+  }
+  
+  // Try to find machineIdentifier from the root <MediaContainer> tag
+  const rootMatch = text.match(/<MediaContainer\s+([^>]+)>/)
+  let machineIdentifier = ''
+  if (rootMatch) {
+    machineIdentifier = rootMatch[1].match(/machineIdentifier="([^"]+)"/)?.[1] || ''
+  }
+  
+  return { libraries: libs, machineIdentifier }
+}
+
+// Helper to get ALL possible URIs for owned servers
+async function getAllConnectionCandidates(token: string): Promise<string[]> {
+  try {
+    const res = await fetch('https://plex.tv/pms/resources?includeHttps=1&includeRelay=1&includeManaged=1', { headers: plexHeaders(token) })
+    if (!res.ok) return []
+    const text = await res.text()
+    const uris: string[] = []
+    const devMatches = text.matchAll(/<Device\s+([^>]+)>[\s\S]*?<\/Device>/g)
+    for (const dm of devMatches) {
+      const dAttrs = dm[1]
+      const provides = dAttrs.match(/provides="([^"]+)"/)?.[1] || ''
+      const owned = dAttrs.match(/owned="([^"]+)"/)?.[1] || '0'
+      if (provides.includes('server') && owned === '1') {
+        const block = dm[0]
+        const connMatches = block.matchAll(/<Connection\s+([^>]+)\/>/g)
+        for (const cm of connMatches) {
+          const uri = cm[1].match(/uri="([^"]+)"/)?.[1]
+          if (uri) uris.push(uri.replace(/\/+$/,''))
+        }
+      }
+    }
+    return uris
+  } catch { return [] }
 }
 
 export interface PlexServerInfo {
@@ -193,58 +264,65 @@ export async function getAnyServerIdentifier(token: string): Promise<{ serverId?
   }
 }
 
-export async function getPlexSharedSections(token: string, email: string): Promise<string[]> {
+export async function getPlexSharedSections(token: string, email: string, username?: string, targetMachineId?: string): Promise<string[]> {
   try {
     const servers = await getOwnedServers(token)
-    // Try first owned server or fallback
-    let machineId = servers[0]?.machineIdentifier
-    if (!machineId) {
-      const any = await getAnyServerIdentifier(token)
-      if (any?.machineIdentifier) machineId = any.machineIdentifier
+    
+    // Determine which servers to check
+    let machineIds: string[] = []
+    
+    if (targetMachineId) {
+      machineIds.push(targetMachineId)
+    } else {
+      machineIds = servers.map(s => s.machineIdentifier)
+      if (machineIds.length === 0) {
+        const any = await getAnyServerIdentifier(token)
+        if (any?.machineIdentifier) machineIds.push(any.machineIdentifier)
+      }
     }
-    if (!machineId) return []
+    
+    if (machineIds.length === 0) return []
 
-    const res = await fetch(`https://plex.tv/api/servers/${machineId}/shared_servers`, { headers: plexHeaders(token) })
-    if (!res.ok) return []
-    const text = await res.text()
-    
-    // Find the SharedServer block for this email/username
-    // Match <SharedServer ... email="..." ...> or <SharedServer ... username="..." ...>
-    // We need to be careful with regex matching across lines or within the block
-    
-    // Split by SharedServer tags to process each block
-    const blocks = text.split('</SharedServer>')
-    for (const block of blocks) {
-      if (!block.includes('<SharedServer')) continue
+    // Iterate ALL relevant servers to find the user share
+    // We return the first non-empty set of sections found for this user
+    for (const machineId of machineIds) {
+      const res = await fetch(`https://plex.tv/api/servers/${machineId}/shared_servers`, { headers: plexHeaders(token) })
+      if (!res.ok) continue
+      const text = await res.text()
       
-      const attrsMatch = block.match(/<SharedServer\s+([^>]+)>/)
-      if (!attrsMatch) continue
-      const attrs = attrsMatch[1]
-      
-      const uEmail = attrs.match(/email="([^"]+)"/)?.[1] || ''
-      const uName = attrs.match(/username="([^"]+)"/)?.[1] || ''
-      
-      if (uEmail.toLowerCase() === email.toLowerCase() || uName.toLowerCase() === email.toLowerCase()) {
-        // Found the user, now find sections inside this block
-        const sectionMatches = block.matchAll(/<Section\s+([^>]+)\/>/g)
-        const ids: string[] = []
-        for (const sm of sectionMatches) {
-          const sAttrs = sm[1]
-          const key = sAttrs.match(/key="([^"]+)"/)?.[1] // shared library section id is usually 'key' or 'id' in this context? 
-          // In shared_servers response, it's often <Section id="X" key="X" /> or similar. 
-          // Actually, in the XML it's usually <Section id="123" key="123" title="..." />
-          // But wait, sometimes it's <Section sectionKey="123" />? 
-          // Let's check typical Plex API. Usually it's 'sectionKey' or 'key'.
-          // Let's grab both 'id', 'key', 'sectionKey' just in case
-          const sId = sAttrs.match(/sectionKey="([^"]+)"/)?.[1] || sAttrs.match(/key="([^"]+)"/)?.[1] || sAttrs.match(/id="([^"]+)"/)?.[1]
-          if (sId) ids.push(sId)
+      // Split by SharedServer tags
+      const blocks = text.split('</SharedServer>')
+      for (const block of blocks) {
+        if (!block.includes('<SharedServer')) continue
+        
+        const attrsMatch = block.match(/<SharedServer\s+([^>]+)>/)
+        if (!attrsMatch) continue
+        const attrs = attrsMatch[1]
+        
+        const uEmail = attrs.match(/email="([^"]+)"/)?.[1] || ''
+        const uName = attrs.match(/username="([^"]+)"/)?.[1] || ''
+        
+        const emailMatch = uEmail && email && uEmail.toLowerCase() === email.toLowerCase()
+        const nameMatch = uName && ((username && uName.toLowerCase() === username.toLowerCase()) || (email && uName.toLowerCase() === email.toLowerCase()))
+        
+        if (emailMatch || nameMatch) {
+          // Found user
+          const allLibs = attrs.match(/allLibraries="1"/);
+          if (allLibs) return ['all'] 
+          
+          const ids: string[] = []
+          const sectionMatches = block.matchAll(/<Section\s+([^>]+)\/>/g)
+          for (const sm of sectionMatches) {
+            const sAttrs = sm[1]
+            // Try all possible ID attributes
+            const sKey = sAttrs.match(/sectionKey="([^"]+)"/)?.[1] || sAttrs.match(/key="([^"]+)"/)?.[1] || sAttrs.match(/id="([^"]+)"/)?.[1]
+            if (sKey) ids.push(sKey)
+          }
+          
+          // Also try to match non-self-closing Section tags if regex missed them (less common but possible)
+          // Actually, let's just return what we found. If ids is empty but user found, maybe they have no libraries shared?
+          return ids
         }
-        
-        // If "allLibraries" is set? 
-        const allLibs = attrs.match(/allLibraries="1"/);
-        if (allLibs) return ['all'] 
-        
-        return ids
       }
     }
     
