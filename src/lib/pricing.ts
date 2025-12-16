@@ -3,7 +3,16 @@ import { addMonths, addYears, differenceInDays } from 'date-fns'
 export type Plan = 'monthly' | 'yearly' | 'three_year'
 export const TRANSACTION_FEE = 5
 
-function readPricingConfig(){
+export type PricingConfig = {
+  monthly_price: number
+  yearly_price: number
+  stream_monthly_price: number
+  stream_yearly_price: number
+  three_year_price: number
+  stream_three_year_price: number
+}
+
+function readPricingConfig(): PricingConfig | null {
   try{
     if (typeof window === 'undefined') return null
     const raw = localStorage.getItem('admin_settings')
@@ -20,8 +29,8 @@ function readPricingConfig(){
   }catch{ return null }
 }
 
-export function calculatePrice(plan: Plan, streams: number): number {
-  const cfg = readPricingConfig()
+export function calculatePrice(plan: Plan, streams: number, config?: PricingConfig | null): number {
+  const cfg = config || readPricingConfig()
   const included = 1
   const extra = Math.max(0, streams - included)
   if (plan === 'three_year') {

@@ -26,6 +26,7 @@ export default function CustomerPortal() {
   const [authState, setAuthState] = useState<'checking'|'unauth'|'ready'>('checking')
   const [hasSubscription, setHasSubscription] = useState(false)
   const [paymentLock, setPaymentLock] = useState(false)
+  const [pricingConfig, setPricingConfig] = useState<any>(null)
   const [updateModal, setUpdateModal] = useState<{ id?: string; title: string; content: string } | null>(null)
   const [customer, setCustomer] = useState<Customer>({
     id: 'demo',
@@ -42,7 +43,11 @@ export default function CustomerPortal() {
     (async()=>{ 
       try{
         const res = await fetch('/api/admin/settings')
-        if (res.ok){ const data = await res.json(); setPaymentLock(Boolean(data?.payment_lock)) }
+        if (res.ok){ 
+          const data = await res.json()
+          setPaymentLock(Boolean(data?.payment_lock)) 
+          setPricingConfig(data)
+        }
       } catch{}
       if (typeof window !== 'undefined' && sessionStorage.getItem('customerDemo') === 'true') {
         const raw = localStorage.getItem('customerProfile')
@@ -141,7 +146,7 @@ export default function CustomerPortal() {
     })(); 
   }, [])
 
-  const price = useMemo(() => calculatePrice(customer.plan, customer.streams), [customer])
+  const price = useMemo(() => calculatePrice(customer.plan, customer.streams, pricingConfig), [customer, pricingConfig])
   const status = useMemo(() => {
     if (!hasSubscription) return 'Inactive'
     const inactive = (customer as any).subscription_status === 'inactive'
