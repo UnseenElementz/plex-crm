@@ -131,17 +131,27 @@ export default function AdminCustomersPage(){
 
   
   return (
-    <main className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold gradient-text">Customers</h1>
-        <div className="flex gap-2 items-center">
-          <button className="btn-xs-outline flex items-center gap-2" onClick={syncPlex} disabled={syncing}>
-            {syncing ? <span className="loading loading-spinner loading-xs"></span> : '↻'} Sync Plex
+    <main className="p-6 max-w-[95vw] mx-auto">
+      <div className="flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4 mb-6">
+        <h1 className="text-3xl font-bold gradient-text shrink-0">Customers</h1>
+        <div className="flex gap-2 items-center flex-wrap">
+          <button 
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-950/30 border border-cyan-500/30 text-cyan-400 font-medium hover:bg-cyan-500/10 hover:border-cyan-400 hover:shadow-[0_0_15px_rgba(6,182,212,0.3)] transition-all duration-300 backdrop-blur-md" 
+            onClick={syncPlex} 
+            disabled={syncing}
+          >
+            {syncing ? <span className="loading loading-spinner loading-xs"></span> : '↻'} 
+            <span>Sync Plex</span>
           </button>
-          <a href="/admin" className="btn-xs-outline">← Chat</a>
+          <a 
+            href="/admin" 
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900/50 border border-slate-600/50 text-slate-300 font-medium hover:bg-slate-800/80 hover:border-slate-400 hover:text-white transition-all duration-300 backdrop-blur-md"
+          >
+            <span>←</span> Chat
+          </a>
           <input 
             className="input w-64" 
-            placeholder="Search customers..." 
+            placeholder="Search customers..."  
             value={q} 
             onChange={e=>setQ(e.target.value)} 
           />

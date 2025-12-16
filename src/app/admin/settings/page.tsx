@@ -440,28 +440,30 @@ export default function AdminSettingsPage() {
             <button className="btn" onClick={publishUpdate} disabled={publishing || !newTitle.trim() || !newContent.trim()}>{publishing ? 'Publishing...' : 'Publish Update'}</button>
             {updateMsg && (<div className={`text-sm ${updateMsg.startsWith('Failed') || updateMsg.includes('Error') ? 'text-rose-400' : 'text-emerald-400'}`}>{updateMsg}</div>)}
           </div>
-          <div>
-            <div className="text-slate-400 mb-2">Previous Updates</div>
-            <div className="space-y-3">
-              {updates.length === 0 && (
-                <div className="text-slate-500 text-sm">No updates yet.</div>
-              )}
-              {updates.map((u, idx)=> (
-                <div key={(u as any).id || idx} className="glass p-4 rounded-lg border border-cyan-500/20">
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="font-semibold text-slate-200">{u.title}</div>
-                    <div className="flex items-center gap-2">
-                      <div className="text-xs text-slate-400">{require('date-fns').format(new Date(u.created_at), 'dd/MM/yyyy')}</div>
-                      {(u as any).id && (
-                        <button className="btn-xs-outline" onClick={()=> deleteUpdate((u as any).id)}>Delete</button>
-                      )}
+          {updates.length > 0 && (
+            <div>
+              <div className="text-slate-400 mb-2 font-medium">Previous Updates</div>
+              <div className="space-y-3">
+                {updates.map((u, idx)=> (
+                  <div key={(u as any).id || idx} className="glass p-4 rounded-xl border border-cyan-500/10 hover:border-cyan-500/30 transition-colors">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="font-semibold text-slate-200">{u.title}</div>
+                      <div className="flex items-center gap-3">
+                        <div className="text-xs text-slate-500">{require('date-fns').format(new Date(u.created_at), 'dd MMM yyyy')}</div>
+                        {(u as any).id && (
+                          <button 
+                            className="text-xs text-rose-400 hover:text-rose-300 transition-colors"
+                            onClick={()=> deleteUpdate((u as any).id)}
+                          >Delete</button>
+                        )}
+                      </div>
                     </div>
+                    <div className="text-slate-400 text-sm whitespace-pre-wrap">{u.content}</div>
                   </div>
-                  <div className="text-slate-300 text-sm whitespace-pre-wrap">{u.content}</div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         <div className="glass p-6 rounded-2xl mb-6">
