@@ -94,10 +94,53 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   if (payload.next_due_date !== undefined) dbPayload.next_payment_date = payload.next_due_date
   if (payload.subscription_status !== undefined) dbPayload.subscription_status = payload.subscription_status
   if (payload.notes !== undefined || payload.plex_username !== undefined || payload.timezone !== undefined) {
-    const notes = (payload.notes ?? '').trim()
-    const plex = payload.plex_username?.trim()
-    const tz = payload.timezone?.trim()
-    const term = payload.plan === 'three_year' ? 'Term: 3y' : undefined
+    // We need existing data to preserve fields not present in payload
+    // If client provided ALL fields, we don't strictly need to fetch, but it's safer to fetch if we are partial updating.
+    // However, for simplicity, if any of these are missing, we should probably fetch.
+    
+    let currentNotes = ''
+    let currentTerm = false
+    let currentPlex = ''
+    let currentTimezone = ''
+    
+    // Fetch existing if we are missing any component or if we just want to be safe
+    // We already check for duplicates with email, but let's fetch current row if not already fetched
+    if (client) {
+      const { data: current } = await client.from('customers').select('notes, plan, subscription_type').eq('id', params.id).single()
+      if (current) {
+        currentNotes = current.notes || ''
+        // Extract existing values
+        const plexM = currentNotes.match(/Plex:\s*([^\n]+)/i)
+        if (plexM) currentPlex = plexM[1].trim()
+        
+        const tzM = currentNotes.match(/Timezone:\s*([^\n]+)/i)
+        if (tzM) currentTimezone = tzM[1].trim()
+        
+        const termM = currentNotes.includes('Term: 3y')
+        currentTerm = termM
+        
+        // Remove the virtual fields from the "base" notes to get the user's actual notes
+        // This is a bit hacky because we store everything in one string. 
+        // We should strip the system lines to get the "user notes".
+        currentNotes = currentNotes
+          .replace(/Plex:\s*[^\n]+\n?/gi, '')
+          .replace(/Timezone:\s*[^\n]+\n?/gi, '')
+          .replace(/Term: 3y\n?/gi, '')
+          .trim()
+      }
+    }
+
+    const notes = payload.notes !== undefined ? (payload.notes ?? '').trim() : currentNotes
+    const plex = payload.plex_username !== undefined ? payload.plex_username?.trim() : currentPlex
+    const tz = payload.timezone !== undefined ? payload.timezone?.trim() : currentTimezone
+    
+    // Term is derived from plan, so we trust payload.plan or fallback to existing check? 
+    // If payload.plan is present, we use it. If not, we should probably preserve existing term status OR check existing plan column?
+    // The current logic `payload.plan === 'three_year'` implies we only set it if plan is being updated to three_year.
+    // If plan is NOT updated, we should probably keep existing term marker if it exists.
+    const isThreeYear = payload.plan === 'three_year' || (payload.plan === undefined && currentTerm)
+    const term = isThreeYear ? 'Term: 3y' : undefined
+    
     const combined = [notes || undefined, term, plex ? `Plex: ${plex}` : undefined, tz ? `Timezone: ${tz}` : undefined].filter(Boolean).join('\n')
     dbPayload.notes = combined
   }

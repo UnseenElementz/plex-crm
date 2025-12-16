@@ -10,7 +10,7 @@ export default function AdminCustomersPage(){
   // Single effect: ensure session then load customers (dev auto-login, prod redirect)
   const [customers, setCustomers] = useState<Customer[]>([])
   const [q, setQ] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all'|'active'|'inactive'|'due_soon'|'overdue'|'registered'>('active')
+  const [statusFilter, setStatusFilter] = useState<'all'|'active'|'inactive'|'due_soon'|'overdue'|'registered'>('all')
   const [sortBy, setSortBy] = useState<'none'|'newest'|'oldest'|'price_high'|'price_low'|'streams_high'|'streams_low'|'due_soon'>('none')
   const [showForm, setShowForm] = useState(false)
   const [editItem, setEditItem] = useState<Customer | null>(null)
@@ -21,7 +21,19 @@ export default function AdminCustomersPage(){
   const [pendingDelete, setPendingDelete] = useState<Customer | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [openActionsId, setOpenActionsId] = useState<string | null>(null)
-  
+  const [linkingItem, setLinkingItem] = useState<Customer | null>(null)
+  const [linkInput, setLinkInput] = useState<string>('')
+  const [syncing, setSyncing] = useState(false)
+  const [unmatchedPlex, setUnmatchedPlex] = useState<Array<{ id: string; username: string; email: string; thumb: string }>>([])
+  const [linkUnmatchedModal, setLinkUnmatchedModal] = useState<{ id: string; username: string } | null>(null)
+  const [selectedCustomerId, setSelectedCustomerId] = useState('')
+  const [manageShareItem, setManageShareItem] = useState<Customer | null>(null)
+  const [libraries, setLibraries] = useState<Array<{ id: string; title: string; type: string }>>([])
+  const [selectedLibs, setSelectedLibs] = useState<string[]>([])
+  const [shareLoading, setShareLoading] = useState(false)
+  const [librariesLoading, setLibrariesLoading] = useState(false)
+  const [shareMsg, setShareMsg] = useState('')
+
   useEffect(()=>{ (async()=>{ 
     try{ 
       setLoading(true); 
@@ -63,6 +75,35 @@ export default function AdminCustomersPage(){
       setLoading(false) 
     } 
   })() }, [])
+
+  async function syncPlex(){
+    setSyncing(true); setSendMsg('Syncing with Plex...')
+    try{
+      const res = await fetch('/api/admin/plex/sync', { method:'POST' })
+      const data = await res.json()
+      if(res.ok){
+        setSendMsg(`Synced! Updated ${data.count} customers.`)
+        setUnmatchedPlex(data.unmatched || [])
+        // Reload customers
+        const r2 = await fetch('/api/customers')
+        if(r2.ok) setCustomers(await r2.json())
+      } else {
+        setSendMsg(data.error || 'Sync failed')
+      }
+    } catch(e){ setSendMsg('Network error') }
+    finally{ setSyncing(false); setTimeout(()=> setSendMsg(''), 5000) }
+  }
+
+  async function linkUnmatched(plexUser: { username: string }, customerId: string){
+    if (!customerId) return
+    try {
+      await saveLink({ id: customerId }, plexUser.username, setCustomers, setSendMsg, () => {})
+      setUnmatchedPlex(prev => prev.filter(u => u.username !== plexUser.username))
+      setLinkUnmatchedModal(null)
+      setSelectedCustomerId('')
+    } catch {}
+  }
+
   const filtered = useMemo(()=> {
     const list = customers.filter(c=>{
       const matchesText = (c.full_name+c.email+(c.plex_username||'')).toLowerCase().includes(q.toLowerCase())
@@ -92,14 +133,12 @@ export default function AdminCustomersPage(){
   return (
     <main className="p-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-3xl font-bold gradient-text">Customers</h2>
-        <div className="flex gap-3 items-center">
-          <a
-            href="/admin"
-            className="btn-outline px-4 py-1 text-center transition-all duration-200 hover:shadow-glow hover:scale-105"
-          >
-            ← Back to Chat
-          </a>
+        <h1 className="text-3xl font-bold gradient-text">Customers</h1>
+        <div className="flex gap-2 items-center">
+          <button className="btn-xs-outline flex items-center gap-2" onClick={syncPlex} disabled={syncing}>
+            {syncing ? <span className="loading loading-spinner loading-xs"></span> : '↻'} Sync Plex
+          </button>
+          <a href="/admin" className="btn-xs-outline">← Chat</a>
           <input 
             className="input w-64" 
             placeholder="Search customers..." 
@@ -158,6 +197,28 @@ export default function AdminCustomersPage(){
             }} 
             onCancel={()=>{ setEditItem(null); setShowForm(false) }}
             initial={editItem || undefined} />
+          </div>
+        </div>
+      )}
+
+      {unmatchedPlex.length > 0 && (
+        <div className="card-solid p-6 rounded-2xl border border-amber-500/20 mb-6">
+          <h3 className="text-lg font-semibold text-amber-400 mb-4 flex items-center gap-2">
+            ⚠️ Unmatched Plex Users ({unmatchedPlex.length})
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {unmatchedPlex.map(u => (
+              <div key={u.id} className="glass p-3 rounded-lg flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-medium text-slate-200 truncate">{u.username}</div>
+                  <div className="text-xs text-slate-500 truncate">{u.email}</div>
+                </div>
+                <button 
+                  className="btn-xs-outline whitespace-nowrap"
+                  onClick={()=> setLinkUnmatchedModal(u)}
+                >Link to Customer</button>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -258,11 +319,35 @@ export default function AdminCustomersPage(){
                                 className="btn-xs-outline w-full"
                                 onClick={()=>{ sendTranscode(c.email, setSendingEmail, setSendMsg); setOpenActionsId(null) }}
                               >Over Stream Warning</button>
-                              <button
-                                className="btn-xs-outline w-full"
-                                disabled={sendingEmail===c.email}
-                                onClick={()=>{ sendTwoYears(c.email, setSendingEmail, setSendMsg); setOpenActionsId(null) }}
-                              >{sendingEmail===c.email ? 'Sending...' : '2 years'}</button>
+                          <button
+                            className="btn-xs-outline w-full"
+                            onClick={()=>{ setLinkingItem(c); setLinkInput(c.plex_username || ''); setOpenActionsId(null) }}
+                          >Link Plex Username</button>
+                          <button
+                            className="btn-xs-outline w-full"
+                            onClick={()=>{ 
+                              setOpenActionsId(null)
+                              setManageShareItem(c)
+                              setLibrariesLoading(true)
+                              setLibraries([])
+                              setSelectedLibs([])
+                              setShareMsg('')
+                              // Load libraries in background
+                              fetch('/api/admin/plex/libraries', { cache: 'no-store' })
+                                .then(r => r.json())
+                                .then(j => {
+                                  setLibraries(j.libraries || [])
+                                  if (j.error) setSendMsg(`Library load failed: ${j.error}`)
+                                })
+                                .catch(() => {})
+                                .finally(() => setLibrariesLoading(false))
+                            }}
+                          >Manage Plex Share</button>
+                          <button
+                            className="btn-xs-outline w-full"
+                            disabled={sendingEmail===c.email}
+                            onClick={()=>{ sendTwoYears(c.email, setSendingEmail, setSendMsg); setOpenActionsId(null) }}
+                          >{sendingEmail===c.email ? 'Sending...' : '2 years'}</button>
                               <button
                                 className="btn-xs-outline w-full"
                                 disabled={sendingEmail===c.email}
@@ -286,6 +371,50 @@ export default function AdminCustomersPage(){
             </table>
           </div>
         )}
+        {manageShareItem && (
+          <div className="fixed inset-0 modal-backdrop flex items-center justify-center p-4 z-50">
+            <div className="glass p-6 rounded-2xl w-full max-w-md border border-cyan-500/30">
+              <div className="text-lg font-semibold text-slate-200 mb-2">Manage Plex Share</div>
+              <div className="text-slate-400 text-sm mb-4">{manageShareItem.email}</div>
+              {shareMsg && (<div className={`text-sm mb-3 ${shareMsg.startsWith('Failed') ? 'text-rose-400' : 'text-emerald-400'}`}>{shareMsg}</div>)}
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {librariesLoading && <div className="text-slate-400 text-sm animate-pulse">Loading libraries...</div>}
+                {!librariesLoading && libraries.length===0 && <div className="text-slate-500 text-xs">No libraries found. You can still add this user to Plex.</div>}
+                {libraries.map(lib=>(
+                  <label key={lib.id} className="inline-flex items-center gap-2 text-sm text-slate-300">
+                    <input type="checkbox" checked={selectedLibs.includes(lib.id)} onChange={e=>{
+                      setSelectedLibs(prev=> e.target.checked ? [...prev, lib.id] : prev.filter(x=>x!==lib.id))
+                    }} />
+                    <span>{lib.title} <span className="text-slate-500">({lib.type})</span></span>
+                  </label>
+                ))}
+              </div>
+              <div className="flex justify-end gap-2 mt-4">
+                <button className="btn-outline" onClick={()=>{ setManageShareItem(null); setSelectedLibs([]) }}>Close</button>
+                <button className="btn-outline" disabled={shareLoading} onClick={async ()=>{
+                  setShareLoading(true)
+                  setShareMsg('')
+                  try{
+                    const r = await fetch('/api/admin/plex/unshare', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email: manageShareItem.email }) })
+                    const j = await r.json().catch(()=>({}))
+                    if (!r.ok){ setShareMsg('Failed: ' + (j?.error || 'Remove error') + (j?.response ? (' - ' + j.response) : '')); setSendMsg(j?.error || 'Failed to remove') } else { setShareMsg('Removed from Plex'); setSendMsg('Removed from Plex') }
+                  } catch(e:any){ setShareMsg('Failed: ' + (e?.message || 'Error')); setSendMsg(e?.message || 'Failed') }
+                  finally{ setShareLoading(false); setTimeout(()=> setSendMsg(''), 5000) }
+                }}>Remove from Plex</button>
+                <button className="btn" disabled={shareLoading} onClick={async ()=>{
+                  setShareLoading(true)
+                  setShareMsg('')
+                  try{
+                    const r = await fetch('/api/admin/plex/share', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email: manageShareItem.email, libraries: selectedLibs }) })
+                    const j = await r.json().catch(()=>({}))
+                    if (!r.ok){ setShareMsg('Failed: ' + (j?.error || 'Invite error') + (j?.response ? (' - ' + j.response) : '')); setSendMsg(j?.error || 'Failed to add') } else { setShareMsg('Invite sent'); setSendMsg('Added to Plex with selected libraries') }
+                  } catch(e:any){ setShareMsg('Failed: ' + (e?.message || 'Error')); setSendMsg(e?.message || 'Failed') }
+                  finally{ setShareLoading(false); setTimeout(()=> setSendMsg(''), 5000) }
+                }}>Add to Plex</button>
+              </div>
+            </div>
+          </div>
+        )}
         {pendingDelete && (
           <div className="fixed inset-0 modal-backdrop flex items-center justify-center p-4 z-50">
             <div className="glass p-6 rounded-2xl w-full max-w-md border border-rose-500/30">
@@ -294,6 +423,61 @@ export default function AdminCustomersPage(){
               <div className="flex justify-end gap-2">
                 <button className="btn-outline" onClick={()=> setPendingDelete(null)}>Cancel</button>
                 <button className="btn" onClick={()=> confirmDelete(pendingDelete as any, setDeletingId, setPendingDelete, setCustomers, setSendMsg)}>Delete</button>
+              </div>
+            </div>
+          </div>
+        )}
+        {linkingItem && (
+          <div className="fixed inset-0 modal-backdrop flex items-center justify-center p-4 z-50">
+            <div className="glass p-6 rounded-2xl w-full max-w-md border border-cyan-500/30">
+              <div className="text-lg font-semibold text-slate-200 mb-2">Link Plex Username</div>
+              <div className="text-slate-400 text-sm mb-4">Enter the Plex username to link to this customer.</div>
+              <input className="input w-full mb-4" placeholder="Plex Username" value={linkInput} onChange={e=> setLinkInput(e.target.value)} />
+              <div className="flex justify-end gap-2">
+                <button className="btn-outline" onClick={()=>{ setLinkingItem(null); setLinkInput('') }}>Cancel</button>
+                <button className="btn" onClick={()=> saveLink(linkingItem as any, linkInput, setCustomers, setSendMsg, setLinkingItem)}>Save</button>
+              </div>
+            </div>
+          </div>
+        )}
+        {linkUnmatchedModal && (
+          <div className="fixed inset-0 modal-backdrop flex items-center justify-center p-4 z-50">
+            <div className="glass p-6 rounded-2xl w-full max-w-md border border-cyan-500/30">
+              <div className="text-lg font-semibold text-slate-200 mb-2">Link Plex User: <span className="text-cyan-400">{linkUnmatchedModal.username}</span></div>
+              <div className="text-slate-400 text-sm mb-4">Select a customer to link this Plex account to.</div>
+              
+              <div className="mb-4">
+                <input 
+                  className="input w-full mb-2" 
+                  placeholder="Search customers..." 
+                  value={q} 
+                  onChange={e => setQ(e.target.value)} 
+                />
+                <div className="max-h-60 overflow-y-auto space-y-1 border border-slate-700/50 rounded p-1">
+                  {filtered.map(c => (
+                    <div 
+                      key={c.id} 
+                      className={`p-2 rounded cursor-pointer text-sm flex justify-between items-center ${selectedCustomerId === c.id ? 'bg-cyan-900/40 text-cyan-300' : 'hover:bg-slate-800/50 text-slate-300'}`}
+                      onClick={() => setSelectedCustomerId(c.id)}
+                    >
+                      <div>
+                        <div className="font-medium">{c.full_name}</div>
+                        <div className="text-xs text-slate-500">{c.email}</div>
+                      </div>
+                      {c.plex_username && <div className="text-xs text-amber-500">Already linked: {c.plex_username}</div>}
+                    </div>
+                  ))}
+                  {filtered.length === 0 && <div className="p-2 text-slate-500 text-xs">No customers found</div>}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button className="btn-outline" onClick={()=>{ setLinkUnmatchedModal(null); setSelectedCustomerId('') }}>Cancel</button>
+                <button 
+                  className="btn" 
+                  disabled={!selectedCustomerId}
+                  onClick={()=> linkUnmatched(linkUnmatchedModal, selectedCustomerId)}
+                >Link Customer</button>
               </div>
             </div>
           </div>
@@ -418,4 +602,16 @@ async function toggleStatus(item: { id: string; status?: 'active'|'inactive' }, 
     setSendMsg(`Status updated to ${next}`)
   } catch(e: any){ setSendMsg(e?.message || 'Network error') }
   finally{ setTimeout(()=> setSendMsg(''), 5000) }
+}
+
+async function saveLink(item: { id: string }, username: string, setCustomers: (updater: any)=>void, setSendMsg: (v: string)=>void, setLinkingItem: (v: any)=>void){
+  try{
+    const u = (username || '').trim()
+    const res = await fetch(`/api/customers/${item.id}`, { method:'PATCH', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ plex_username: u }) })
+    const data = await res.json().catch(()=>({}))
+    if (!res.ok){ setSendMsg(data?.error || 'Failed to link'); return }
+    setCustomers((prev: any[]) => prev.map(c => c.id === item.id ? { ...c, plex_username: u } : c))
+    setSendMsg('Plex username linked')
+  } catch(e: any){ setSendMsg(e?.message || 'Network error') }
+  finally{ setLinkingItem(null); setTimeout(()=> setSendMsg(''), 5000) }
 }

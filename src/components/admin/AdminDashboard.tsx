@@ -165,13 +165,14 @@ export default function AdminDashboard() {
         <div className="p-4 border-b border-slate-800">
           <h1 className="text-xl font-semibold text-slate-200">Live Chat Admin</h1>
           <p className="text-sm text-slate-400">Manage customer conversations</p>
-          <div className="mt-3 flex gap-2">
-            <a href="/admin" className="px-2 py-1 rounded text-xs bg-cyan-600/30 text-cyan-300">Chat</a>
-            <a href="/admin/customers" className="px-2 py-1 rounded text-xs hover:bg-slate-800/50 text-slate-300">Customers</a>
-            <a href="/admin/settings" className="px-2 py-1 rounded text-xs hover:bg-slate-800/50 text-slate-300">Settings</a>
-            <a href="/admin/email" className="px-2 py-1 rounded text-xs hover:bg-slate-800/50 text-slate-300">Mail</a>
-            <a href="/admin/admins" className="px-2 py-1 rounded text-xs hover:bg-slate-800/50 text-slate-300">Admins</a>
-            <a href="/admin/security" className="px-2 py-1 rounded text-xs hover:bg-slate-800/50 text-slate-300">Security</a>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <a href="/admin/dashboard" className="px-2 py-1 rounded text-xs hover:bg-slate-800/50 text-slate-300 border border-transparent hover:border-cyan-500/30">Dashboard</a>
+            <a href="/admin" className="px-2 py-1 rounded text-xs bg-cyan-600/30 text-cyan-300 border border-cyan-500/30">Chat</a>
+            <a href="/admin/customers" className="px-2 py-1 rounded text-xs hover:bg-slate-800/50 text-slate-300 border border-transparent hover:border-cyan-500/30">Customers</a>
+            <a href="/admin/settings" className="px-2 py-1 rounded text-xs hover:bg-slate-800/50 text-slate-300 border border-transparent hover:border-cyan-500/30">Settings</a>
+            <a href="/admin/email" className="px-2 py-1 rounded text-xs hover:bg-slate-800/50 text-slate-300 border border-transparent hover:border-cyan-500/30">Mail</a>
+            <a href="/admin/admins" className="px-2 py-1 rounded text-xs hover:bg-slate-800/50 text-slate-300 border border-transparent hover:border-cyan-500/30">Admins</a>
+            <a href="/admin/security" className="px-2 py-1 rounded text-xs hover:bg-slate-800/50 text-slate-300 border border-transparent hover:border-cyan-500/30">Security</a>
           </div>
           <div className="mt-3 flex items-center gap-3">
             {chatOnline !== null && (

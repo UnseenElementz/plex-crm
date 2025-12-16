@@ -86,4 +86,104 @@ export async function POST(request: Request){
   }
 }
 
+export async function PUT(request: Request){
+  const s = svc()
+  if (!s) return NextResponse.json({ error: 'service unavailable' }, { status: 503 })
+  try{
+    const body = await request.json()
+    const email = String(body.email||'').toLowerCase()
+    const password = body.password ? String(body.password) : undefined
+    const full_name = String(body.full_name||'')
+    const pages: string[] = Array.isArray(body.pages) ? body.pages : []
+    const originalEmail = String(body.originalEmail || email).toLowerCase()
+
+    if (!email) return NextResponse.json({ error: 'email required' }, { status: 400 })
+
+    const admin = (s as any).auth?.admin
+    if (!admin) return NextResponse.json({ error: 'admin auth not available' }, { status: 500 })
+    
+    let userId: string | null = null
+    try{
+      const list = await admin.listUsers({ page: 1, perPage: 200 })
+      userId = (list?.data?.users || []).find((u:any)=> (u.email || '').toLowerCase() === originalEmail)?.id || null
+    } catch{}
+
+    if (userId){
+      const updateData: any = { user_metadata: { role: 'admin', full_name } }
+      if (email !== originalEmail) updateData.email = email
+      if (password) updateData.password = password
+      updateData.email_confirm = true
+      
+      await admin.updateUserById(userId, updateData)
+    }
+
+    await s.from('profiles').upsert({ email, role: 'admin', full_name }, { onConflict: 'email' })
+    if (email !== originalEmail) {
+      // Clean up old profile if email changed
+      // Note: Supabase auth change handles user, but profile needs manual cleanup if PK is email
+      // If profile PK is id, it's fine. If PK is email, we might leave an orphan.
+      // Assuming PK is user_id or email. If email, we should delete old.
+      await s.from('profiles').delete().eq('email', originalEmail)
+    }
+
+    let settings: any = null
+    try{
+      const { data } = await s.from('admin_settings').select('*').single()
+      settings = data || {}
+    } catch{}
+    settings = settings || {}
+    const perms = { ...(settings.admin_perms || {}) }
+    if (email !== originalEmail) delete perms[originalEmail]
+    perms[email] = pages
+    
+    const row = { id: 1, ...(settings||{}), admin_perms: perms }
+    await s.from('admin_settings').upsert(row)
+    
+    const res = NextResponse.json({ ok: true })
+    res.cookies.set('admin_settings', encodeURIComponent(JSON.stringify(row)), { path: '/', maxAge: 31536000 })
+    return res
+  } catch(e:any){
+    return NextResponse.json({ error: e?.message || 'failed' }, { status: 500 })
+  }
+}
+
+export async function DELETE(request: Request){
+  const s = svc()
+  if (!s) return NextResponse.json({ error: 'service unavailable' }, { status: 503 })
+  try{
+    const url = new URL(request.url)
+    const email = (url.searchParams.get('email') || '').toLowerCase()
+    if (!email) return NextResponse.json({ error: 'email required' }, { status: 400 })
+
+    const admin = (s as any).auth?.admin
+    if (admin){
+      try{
+        const list = await admin.listUsers({ page: 1, perPage: 200 })
+        const userId = (list?.data?.users || []).find((u:any)=> (u.email || '').toLowerCase() === email)?.id
+        if (userId) await admin.deleteUser(userId)
+      } catch{}
+    }
+    
+    await s.from('profiles').delete().eq('email', email)
+
+    let settings: any = null
+    try{
+      const { data } = await s.from('admin_settings').select('*').single()
+      settings = data || {}
+    } catch{}
+    settings = settings || {}
+    const perms = { ...(settings.admin_perms || {}) }
+    delete perms[email]
+    
+    const row = { id: 1, ...(settings||{}), admin_perms: perms }
+    await s.from('admin_settings').upsert(row)
+    
+    const res = NextResponse.json({ ok: true })
+    res.cookies.set('admin_settings', encodeURIComponent(JSON.stringify(row)), { path: '/', maxAge: 31536000 })
+    return res
+  } catch(e:any){
+    return NextResponse.json({ error: e?.message || 'failed' }, { status: 500 })
+  }
+}
+
 export const runtime = 'nodejs'

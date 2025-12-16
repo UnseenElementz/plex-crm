@@ -14,7 +14,7 @@ function readPricingConfig(){
       yearly_price: Number(s.yearly_price) || 85,
       stream_monthly_price: Number(s.stream_monthly_price) || 5,
       stream_yearly_price: Number(s.stream_yearly_price) || 20,
-      three_year_price: Number(s.three_year_price) || 180,
+      three_year_price: Number(s.three_year_price) || 200,
       stream_three_year_price: Number(s.stream_three_year_price) || 40,
     }
   }catch{ return null }
@@ -25,7 +25,7 @@ export function calculatePrice(plan: Plan, streams: number): number {
   const included = 1
   const extra = Math.max(0, streams - included)
   if (plan === 'three_year') {
-    const base = cfg?.three_year_price ?? 180
+    const base = cfg?.three_year_price ?? 200
     const extraPrice = cfg?.stream_three_year_price ?? 40
     return base + extra * extraPrice
   }

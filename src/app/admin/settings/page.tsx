@@ -26,9 +26,13 @@ export default function AdminSettingsPage() {
     stream_three_year_price: '40',
     bg_music_url: '',
     bg_music_volume: '0.1',
-    bg_music_enabled: true
+    bg_music_enabled: true,
+    plex_token: '',
+    plex_server_url: 'https://plex.tv'
   })
   const [loading, setLoading] = useState(false)
+  const [testMsg, setTestMsg] = useState('')
+  const [testing, setTesting] = useState(false)
   const [message, setMessage] = useState('')
   const [supabaseStatus, setSupabaseStatus] = useState<'checking' | 'connected' | 'error'>('checking')
   const [isAuthenticated, setIsAuthenticated] = useState(false)
@@ -252,7 +256,9 @@ export default function AdminSettingsPage() {
         stream_three_year_price: (data.stream_three_year_price ?? Number(prev.stream_three_year_price)).toString(),
         bg_music_url: data.bg_music_url || prev.bg_music_url,
         bg_music_volume: (data.bg_music_volume ?? Number(prev.bg_music_volume)).toString(),
-        bg_music_enabled: Boolean(data.bg_music_enabled ?? prev.bg_music_enabled)
+        bg_music_enabled: Boolean(data.bg_music_enabled ?? prev.bg_music_enabled),
+        plex_token: data.plex_token || prev.plex_token,
+        plex_server_url: data.plex_server_url || prev.plex_server_url
       }))
       try {
         if (typeof window !== 'undefined') {
@@ -279,7 +285,9 @@ export default function AdminSettingsPage() {
             company_name: data.company_name,
             bg_music_url: data.bg_music_url,
             bg_music_volume: data.bg_music_volume,
-            bg_music_enabled: data.bg_music_enabled
+            bg_music_enabled: data.bg_music_enabled,
+            plex_token: data.plex_token,
+            plex_server_url: data.plex_server_url
           }
           localStorage.setItem('admin_settings', JSON.stringify(toStore))
           document.cookie = `admin_settings=${encodeURIComponent(JSON.stringify(toStore))}; path=/; max-age=31536000`
@@ -290,6 +298,24 @@ export default function AdminSettingsPage() {
       setSupabaseStatus('error')
       setMessage('Failed to load settings. Using local settings.')
     }
+  }
+
+  async function testPlex(){
+    setTesting(true); setTestMsg('Testing...')
+    try {
+      const res = await fetch('/api/admin/plex/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: settings.plex_token, url: settings.plex_server_url })
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setTestMsg('✅ ' + data.message)
+      } else {
+        setTestMsg('❌ ' + (data.error || 'Failed'))
+      }
+    } catch (e) { setTestMsg('❌ Network error') }
+    finally { setTesting(false); setTimeout(()=> setTestMsg(''), 5000) }
   }
 
   async function saveSettings() {
@@ -324,7 +350,9 @@ export default function AdminSettingsPage() {
         company_name: settings.company_name,
         bg_music_url: settings.bg_music_url,
         bg_music_volume: parseFloat(settings.bg_music_volume) || 0.1,
-        bg_music_enabled: Boolean(settings.bg_music_enabled)
+        bg_music_enabled: Boolean(settings.bg_music_enabled),
+        plex_token: settings.plex_token,
+        plex_server_url: settings.plex_server_url
       }
       const res = await fetch('/api/admin/settings', { method:'PUT', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(settingsData) })
       const body = await res.json().catch(()=>({}))
@@ -501,6 +529,39 @@ export default function AdminSettingsPage() {
                 onKeyPress={handleKeyPress}
               />
             </div>
+          </div>
+        </div>
+
+        <div className="glass p-6 rounded-2xl mb-6">
+          <h2 className="text-xl font-semibold mb-4">Plex Configuration</h2>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <label className="label">Plex Token (X-Plex-Token)</label>
+              <input 
+                className="input" 
+                type="password"
+                value={settings.plex_token || ''}
+                onChange={e => setSettings({...settings, plex_token: e.target.value})}
+                placeholder="Ex: abcdef123456"
+              />
+              <div className="text-xs text-slate-500 mt-1">Found in XML of Plex web app or Tautulli settings.</div>
+            </div>
+            <div>
+              <label className="label">Plex Server URL</label>
+              <input 
+                className="input" 
+                value={settings.plex_server_url || ''}
+                onChange={e => setSettings({...settings, plex_server_url: e.target.value})}
+                placeholder="Ex: https://plex.tv or http://IP:32400"
+              />
+              <div className="text-xs text-slate-500 mt-1">Use https://plex.tv to sync via cloud, or local IP if accessible.</div>
+            </div>
+          </div>
+          <div className="mt-4 flex items-center gap-4">
+            <button className="btn-outline text-xs" onClick={testPlex} disabled={testing || !settings.plex_token}>
+              {testing ? 'Testing...' : 'Test Connection'}
+            </button>
+            {testMsg && <div className="text-sm text-slate-300">{testMsg}</div>}
           </div>
         </div>
 
@@ -699,6 +760,17 @@ export default function AdminSettingsPage() {
           )}
           <div className="grid md:grid-cols-2 gap-4">
             <div>
+              <div className="text-sm text-slate-400 mb-2">Plex Integration</div>
+              <div className={`flex items-center gap-2 ${
+                settings.plex_token ? 'text-emerald-400' : 'text-slate-500'
+              }`}>
+                <div className={`w-2 h-2 rounded-full ${
+                  settings.plex_token ? 'bg-emerald-500' : 'bg-slate-700'
+                }`}></div>
+                {settings.plex_token ? 'Token Configured' : 'Token Missing'}
+              </div>
+            </div>
+            <div>
               <div className="text-sm text-slate-400 mb-2">Email Service</div>
               <div className={`flex items-center gap-2 ${
                 settings.smtp_host && settings.smtp_user && settings.smtp_pass 
@@ -713,17 +785,6 @@ export default function AdminSettingsPage() {
                 {settings.smtp_host && settings.smtp_user && settings.smtp_pass 
                   ? 'Configured' 
                   : 'Not Configured'}
-              </div>
-            </div>
-            <div>
-              <div className="text-sm text-slate-400 mb-2">PayPal Integration</div>
-              <div className={`flex items-center gap-2 ${
-                settings.paypal_email ? 'text-emerald-400' : 'text-rose-400'
-              }`}>
-                <div className={`w-2 h-2 rounded-full ${
-                  settings.paypal_email ? 'bg-emerald-500' : 'bg-rose-500'
-                }`}></div>
-                {settings.paypal_email ? 'Configured' : 'Not Configured'}
               </div>
             </div>
           </div>
