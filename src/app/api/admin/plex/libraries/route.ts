@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { cookies } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 import { getPlexLibraries } from '@/lib/plex'
 
 function svc(){
@@ -17,10 +17,21 @@ export async function GET(){
   const s = svc()
   try{
     let settings: any = null
-    if (s) {
-      const { data } = await s.from('admin_settings').select('*').single()
-      settings = data
+    
+    // Check headers first (highest priority from client localStorage)
+    const reqHeaders = headers()
+    const headerToken = reqHeaders.get('X-Plex-Token-Local')
+    const headerUrl = reqHeaders.get('X-Plex-Url-Local')
+    
+    if (headerToken) {
+      settings = { plex_token: headerToken, plex_server_url: headerUrl || 'https://plex.tv' }
     }
+
+    if (!settings?.plex_token && s) {
+      const { data } = await s.from('admin_settings').select('*').single()
+      if (data) settings = data
+    }
+    
     if (!settings?.plex_token) {
       const cookieStore = cookies()
       const raw = cookieStore.get('admin_settings')?.value

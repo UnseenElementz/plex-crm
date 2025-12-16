@@ -126,10 +126,10 @@ export default function CustomerForm({ initial, onSaved, onCancel }: { initial?:
       <label className="label">Plex Username</label>
       <input className="input" placeholder="Plex Username" value={c.plex_username || ''} onChange={e=>setC({ ...c, plex_username: e.target.value })} />
       <label className="label">Plan</label>
-      <div className="flex gap-3">
-        <button disabled={loading} className={`btn ${c.plan==='monthly'?'active':''}`} onClick={()=>setC({ ...c, plan: 'monthly', next_due_date: calculateNextDue('monthly', new Date(c.start_date || new Date())).toISOString() })}>Monthly</button>
-        <button disabled={loading} className={`btn ${c.plan==='yearly'?'active':''}`} onClick={()=>setC({ ...c, plan: 'yearly', next_due_date: calculateNextDue('yearly', new Date(c.start_date || new Date())).toISOString() })}>Yearly</button>
-        <button disabled={loading} className={`btn ${c.plan==='three_year'?'active':''}`} onClick={()=>setC({ ...c, plan: 'three_year', next_due_date: calculateNextDue('three_year', new Date(c.start_date || new Date())).toISOString() })}>3 Years</button>
+      <div className="flex gap-3 overflow-x-auto pb-1">
+        <button disabled={loading} className={`btn whitespace-nowrap ${c.plan==='monthly'?'active':''}`} onClick={()=>setC({ ...c, plan: 'monthly', next_due_date: calculateNextDue('monthly', new Date(c.start_date || new Date())).toISOString() })}>Monthly</button>
+        <button disabled={loading} className={`btn whitespace-nowrap ${c.plan==='yearly'?'active':''}`} onClick={()=>setC({ ...c, plan: 'yearly', next_due_date: calculateNextDue('yearly', new Date(c.start_date || new Date())).toISOString() })}>Yearly</button>
+        <button disabled={loading} className={`btn whitespace-nowrap ${c.plan==='three_year'?'active':''}`} onClick={()=>setC({ ...c, plan: 'three_year', next_due_date: calculateNextDue('three_year', new Date(c.start_date || new Date())).toISOString() })}>3 Years</button>
       </div>
       <label className="label">Streams</label>
       <input className="input" type="number" min={1} value={c.streams} onChange={e=>setC({ ...c, streams: parseInt(e.target.value||'1',10) })} />

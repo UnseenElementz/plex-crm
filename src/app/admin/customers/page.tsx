@@ -145,7 +145,7 @@ export default function AdminCustomersPage(){
             value={q} 
             onChange={e=>setQ(e.target.value)} 
           />
-          <select className="input w-40" value={statusFilter} onChange={e=> setStatusFilter(e.target.value as any)}>
+          <select className="input w-40 max-w-[40vw]" value={statusFilter} onChange={e=> setStatusFilter(e.target.value as any)}>
             <option value="all">All</option>
             <option value="due_soon">Due Soon</option>
             <option value="overdue">Overdue</option>
@@ -153,7 +153,7 @@ export default function AdminCustomersPage(){
             <option value="inactive">Inactive</option>
             <option value="registered">Registered</option>
           </select>
-          <select className="input w-48" value={sortBy} onChange={e=> setSortBy(e.target.value as any)}>
+          <select className="input w-48 max-w-[40vw]" value={sortBy} onChange={e=> setSortBy(e.target.value as any)}>
             <option value="none">Sort: Default</option>
             <option value="newest">Newest signup</option>
             <option value="oldest">Oldest signup</option>
@@ -333,7 +333,17 @@ export default function AdminCustomersPage(){
                               setSelectedLibs([])
                               setShareMsg('')
                               // Load libraries in background
-                              fetch('/api/admin/plex/libraries', { cache: 'no-store' })
+                              const headers = { 'Content-Type': 'application/json' } as any
+                              try {
+                                const raw = localStorage.getItem('admin_settings')
+                                if (raw) {
+                                  const s = JSON.parse(raw)
+                                  if (s.plex_token) headers['X-Plex-Token-Local'] = s.plex_token
+                                  if (s.plex_server_url) headers['X-Plex-Url-Local'] = s.plex_server_url
+                                }
+                              } catch {}
+                              
+                              fetch('/api/admin/plex/libraries', { headers, cache: 'no-store' })
                                 .then(r => r.json())
                                 .then(j => {
                                   setLibraries(j.libraries || [])
@@ -395,7 +405,17 @@ export default function AdminCustomersPage(){
                   setShareLoading(true)
                   setShareMsg('')
                   try{
-                    const r = await fetch('/api/admin/plex/unshare', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email: manageShareItem.email }) })
+                    const headers = { 'Content-Type': 'application/json' } as any
+                    try {
+                      const raw = localStorage.getItem('admin_settings')
+                      if (raw) {
+                        const s = JSON.parse(raw)
+                        if (s.plex_token) headers['X-Plex-Token-Local'] = s.plex_token
+                        if (s.plex_server_url) headers['X-Plex-Url-Local'] = s.plex_server_url
+                      }
+                    } catch {}
+                    
+                    const r = await fetch('/api/admin/plex/unshare', { method:'POST', headers, body: JSON.stringify({ email: manageShareItem.email }) })
                     const j = await r.json().catch(()=>({}))
                     if (!r.ok){ setShareMsg('Failed: ' + (j?.error || 'Remove error') + (j?.response ? (' - ' + j.response) : '')); setSendMsg(j?.error || 'Failed to remove') } else { setShareMsg('Removed from Plex'); setSendMsg('Removed from Plex') }
                   } catch(e:any){ setShareMsg('Failed: ' + (e?.message || 'Error')); setSendMsg(e?.message || 'Failed') }
@@ -405,7 +425,17 @@ export default function AdminCustomersPage(){
                   setShareLoading(true)
                   setShareMsg('')
                   try{
-                    const r = await fetch('/api/admin/plex/share', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email: manageShareItem.email, libraries: selectedLibs }) })
+                    const headers = { 'Content-Type': 'application/json' } as any
+                    try {
+                      const raw = localStorage.getItem('admin_settings')
+                      if (raw) {
+                        const s = JSON.parse(raw)
+                        if (s.plex_token) headers['X-Plex-Token-Local'] = s.plex_token
+                        if (s.plex_server_url) headers['X-Plex-Url-Local'] = s.plex_server_url
+                      }
+                    } catch {}
+
+                    const r = await fetch('/api/admin/plex/share', { method:'POST', headers, body: JSON.stringify({ email: manageShareItem.email, libraries: selectedLibs }) })
                     const j = await r.json().catch(()=>({}))
                     if (!r.ok){ setShareMsg('Failed: ' + (j?.error || 'Invite error') + (j?.response ? (' - ' + j.response) : '')); setSendMsg(j?.error || 'Failed to add') } else { setShareMsg('Invite sent'); setSendMsg('Added to Plex with selected libraries') }
                   } catch(e:any){ setShareMsg('Failed: ' + (e?.message || 'Error')); setSendMsg(e?.message || 'Failed') }
