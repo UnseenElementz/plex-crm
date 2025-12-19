@@ -15,7 +15,7 @@ export async function GET(){
     let data: any = null
     let error: any = null
     if (supabase){
-      const r = await supabase.from('admin_settings').select('*').single()
+      const r = await supabase.from('admin_settings').select('*').maybeSingle()
       data = r.data || null
       error = r.error || null
     }
@@ -31,7 +31,7 @@ export async function GET(){
     const isAdmin = cookies().get('admin_session')?.value === '1'
     if (error && !merged) return NextResponse.json({ error: error.message }, { status: 404 })
     const safe: any = {}
-    const allow = ['monthly_price','yearly_price','stream_monthly_price','stream_yearly_price','three_year_price','stream_three_year_price','payment_lock','chat_online','canonical_host','hero_image_url','bg_music_url','bg_music_volume','bg_music_enabled','plex_token','plex_server_url']
+    const allow = ['monthly_price','yearly_price','stream_monthly_price','stream_yearly_price','payment_lock','chat_online','canonical_host','hero_image_url','bg_music_url','bg_music_volume','bg_music_enabled','plex_token','plex_server_url']
     for (const k of allow){ if (merged && (merged as any)[k] !== undefined) safe[k] = (merged as any)[k] }
     const res = NextResponse.json(isAdmin ? merged : safe, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate' } })
     try {
