@@ -254,11 +254,6 @@ export default function CustomerPortal() {
                   plan:'yearly',
                   nextDueDate: calculateNextDue('yearly', new Date(c.startDate)).toISOString()
                 }))}>Yearly</button>
-                <button className={`btn ${customer.plan==='three_year'?'active':''}`} onClick={()=>setCustomer(c=>({
-                  ...c,
-                  plan:'three_year',
-                  nextDueDate: calculateNextDue('three_year', new Date(c.startDate)).toISOString()
-                }))}>3 Years</button>
               </div>
               <label className="label">Streams</label>
               <select className="input" value={customer.streams} onChange={e=>setCustomer(c=>({

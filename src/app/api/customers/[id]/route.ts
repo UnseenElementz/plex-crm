@@ -136,12 +136,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     
     // Term is derived from plan, so we trust payload.plan or fallback to existing check? 
     // If payload.plan is present, we use it. If not, we should probably preserve existing term status OR check existing plan column?
-    // The current logic `payload.plan === 'three_year'` implies we only set it if plan is being updated to three_year.
-    // If plan is NOT updated, we should probably keep existing term marker if it exists.
-    const isThreeYear = payload.plan === 'three_year' || (payload.plan === undefined && currentTerm)
-    const term = isThreeYear ? 'Term: 3y' : undefined
-    
-    const combined = [notes || undefined, term, plex ? `Plex: ${plex}` : undefined, tz ? `Timezone: ${tz}` : undefined].filter(Boolean).join('\n')
+    const combined = [notes || undefined, plex ? `Plex: ${plex}` : undefined, tz ? `Timezone: ${tz}` : undefined].filter(Boolean).join('\n')
     dbPayload.notes = combined
   }
   if (!client){

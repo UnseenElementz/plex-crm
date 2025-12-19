@@ -716,28 +716,6 @@ export default function AdminSettingsPage() {
                 onKeyPress={handleKeyPress}
               />
             </div>
-            <div>
-              <label className="label">Three-Year Base Price (£)</label>
-              <input 
-                className="input" 
-                type="number"
-                step="0.01"
-                value={settings.three_year_price}
-                onChange={e=>setSettings({...settings, three_year_price: e.target.value})}
-                onKeyPress={handleKeyPress}
-              />
-            </div>
-            <div>
-              <label className="label">Additional Stream (Three-Year) (£)</label>
-              <input 
-                className="input" 
-                type="number"
-                step="0.01"
-                value={settings.stream_three_year_price}
-                onChange={e=>setSettings({...settings, stream_three_year_price: e.target.value})}
-                onKeyPress={handleKeyPress}
-              />
-            </div>
           </div>
           <div className="text-xs text-slate-400 mt-2">These prices update the customer portal totals immediately. In demo mode, they save locally; with Supabase configured, they persist to the database.</div>
         </div>

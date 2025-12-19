@@ -1,6 +1,6 @@
 import { addMonths, addYears, differenceInDays } from 'date-fns'
 
-export type Plan = 'monthly' | 'yearly' | 'three_year'
+export type Plan = 'monthly' | 'yearly'
 export const TRANSACTION_FEE = 5
 
 export type PricingConfig = {
@@ -8,8 +8,6 @@ export type PricingConfig = {
   yearly_price: number
   stream_monthly_price: number
   stream_yearly_price: number
-  three_year_price: number
-  stream_three_year_price: number
 }
 
 function readPricingConfig(): PricingConfig | null {
@@ -23,8 +21,6 @@ function readPricingConfig(): PricingConfig | null {
       yearly_price: Number(s.yearly_price) || 85,
       stream_monthly_price: Number(s.stream_monthly_price) || 5,
       stream_yearly_price: Number(s.stream_yearly_price) || 20,
-      three_year_price: Number(s.three_year_price) || 200,
-      stream_three_year_price: Number(s.stream_three_year_price) || 40,
     }
   }catch{ return null }
 }
@@ -33,23 +29,16 @@ export function calculatePrice(plan: Plan, streams: number, config?: PricingConf
   const cfg = config || readPricingConfig()
   const included = 1
   const extra = Math.max(0, streams - included)
-  if (plan === 'three_year') {
-    const base = cfg?.three_year_price ?? 200
-    const extraPrice = cfg?.stream_three_year_price ?? 40
-    return base + extra * extraPrice
-  }
   const base = plan === 'yearly' ? (cfg?.yearly_price ?? 85) : (cfg?.monthly_price ?? 15)
   const extraPrice = plan === 'yearly' ? (cfg?.stream_yearly_price ?? 20) : (cfg?.stream_monthly_price ?? 5)
   return base + extra * extraPrice
 }
 
 export function getTransactionFee(plan: Plan): number {
-  if (plan === 'three_year') return 10
   return plan === 'yearly' ? 5 : 3
 }
 
 export function calculateNextDue(plan: Plan, startDate: Date): Date {
-  if (plan === 'three_year') return addYears(startDate, 3)
   return plan === 'yearly' ? addYears(startDate, 1) : addMonths(startDate, 1)
 }
 

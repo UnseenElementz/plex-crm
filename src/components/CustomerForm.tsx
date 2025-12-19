@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { calculatePrice, getTransactionFee, calculateNextDue } from '@/lib/pricing'
 import { CustomerCreateSchema, CustomerUpdateSchema, formatZodError } from '@/lib/validation'
 
-type Plan = 'monthly'|'yearly'|'three_year'
+type Plan = 'monthly'|'yearly'
 type Customer = { id?: string; full_name: string; email: string; plan: Plan; streams: number; start_date?: string; next_due_date?: string; notes?: string; plex_username?: string }
 
 export default function CustomerForm({ initial, onSaved, onCancel }: { initial?: Customer; onSaved?: (c: any)=>void; onCancel?: ()=>void }){
@@ -129,7 +129,6 @@ export default function CustomerForm({ initial, onSaved, onCancel }: { initial?:
       <div className="flex gap-3 overflow-x-auto pb-1">
         <button disabled={loading} className={`btn whitespace-nowrap ${c.plan==='monthly'?'active':''}`} onClick={()=>setC({ ...c, plan: 'monthly', next_due_date: calculateNextDue('monthly', new Date(c.start_date || new Date())).toISOString() })}>Monthly</button>
         <button disabled={loading} className={`btn whitespace-nowrap ${c.plan==='yearly'?'active':''}`} onClick={()=>setC({ ...c, plan: 'yearly', next_due_date: calculateNextDue('yearly', new Date(c.start_date || new Date())).toISOString() })}>Yearly</button>
-        <button disabled={loading} className={`btn whitespace-nowrap ${c.plan==='three_year'?'active':''}`} onClick={()=>setC({ ...c, plan: 'three_year', next_due_date: calculateNextDue('three_year', new Date(c.start_date || new Date())).toISOString() })}>3 Years</button>
       </div>
       <label className="label">Streams</label>
       <input className="input" type="number" min={1} value={c.streams} onChange={e=>setC({ ...c, streams: parseInt(e.target.value||'1',10) })} />

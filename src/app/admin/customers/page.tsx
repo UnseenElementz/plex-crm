@@ -4,7 +4,7 @@ import CustomerForm from '@/components/CustomerForm'
 import { calculatePrice, getStatus } from '@/lib/pricing'
 import { format } from 'date-fns'
 
-type Customer = { id: string; full_name: string; email: string; plan: 'monthly'|'yearly'|'three_year'; streams: number; next_due_date: string; start_date?: string; plex_username?: string; status?: 'active'|'inactive' }
+type Customer = { id: string; full_name: string; email: string; plan: 'monthly'|'yearly'; streams: number; next_due_date: string; start_date?: string; plex_username?: string; status?: 'active'|'inactive' }
 
 export default function AdminCustomersPage(){
   // Single effect: ensure session then load customers (dev auto-login, prod redirect)

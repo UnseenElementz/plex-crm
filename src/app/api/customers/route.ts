@@ -92,10 +92,9 @@ export async function POST(request: Request){
     subscription_type: payload.plan === 'three_year' ? 'yearly' : payload.plan,
     streams: payload.streams,
     start_date: payload.start_date,
-    next_payment_date: payload.plan === 'three_year' ? (payload.next_due_date || new Date(new Date().setFullYear(new Date().getFullYear()+3)).toISOString()) : payload.next_due_date,
+    next_payment_date: payload.next_due_date,
     notes: [
       payload.notes?.trim(),
-      payload.plan === 'three_year' ? 'Term: 3y' : undefined,
       plex ? `Plex: ${plex}` : undefined,
       tz ? `Timezone: ${tz}` : undefined
     ].filter(Boolean).join('\n')
@@ -107,7 +106,7 @@ export async function POST(request: Request){
     id: row.id,
     full_name: row.full_name ?? row.name,
     email: row.email,
-    plan: ((row.notes || '').includes('Term: 3y')) ? 'three_year' : (row.plan ?? row.subscription_type),
+    plan: (row.plan ?? row.subscription_type),
     streams: row.streams,
     start_date: row.start_date,
     next_due_date: row.next_due_date ?? row.next_payment_date,

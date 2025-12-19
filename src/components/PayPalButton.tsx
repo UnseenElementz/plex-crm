@@ -1,9 +1,8 @@
 "use client"
 
-export default function PayPalButton({ amount, currency = 'GBP', plan, streams }: { amount: number; currency?: string; customerEmail?: string; plan?: 'monthly'|'yearly'|'three_year'; streams?: number; onSuccess?: (orderId: string) => void }){
+export default function PayPalButton({ amount, currency = 'GBP', plan, streams }: { amount: number; currency?: string; customerEmail?: string; plan?: 'monthly'|'yearly'; streams?: number; onSuccess?: (orderId: string) => void }){
   
   const getPlanLabel = (p?: string) => {
-    if (p === 'three_year') return '3 Years Hosting'
     if (p === 'yearly') return '1 Year Hosting'
     return 'Monthly Hosting'
   }
