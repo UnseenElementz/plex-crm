@@ -22,7 +22,12 @@ export async function GET(){
     const jar = cookies()
     const raw = jar.get('admin_settings')?.value
     const cookieData = raw ? JSON.parse(decodeURIComponent(raw)) : {}
-    const merged = { ...(data || {}), ...(cookieData || {}) }
+    // Merge: Database takes precedence over cookies for security and persistence
+    const merged = { ...(cookieData || {}), ...(data || {}) }
+    
+    // If we have database access but the row was missing/empty, we might want to use defaults or cookie data
+    // But if DB returned data, it should be the source of truth.
+    
     const isAdmin = cookies().get('admin_session')?.value === '1'
     if (error && !merged) return NextResponse.json({ error: error.message }, { status: 404 })
     const safe: any = {}
@@ -49,6 +54,13 @@ export async function PUT(request: Request){
     let dbOk = false
     if (supabase) {
       const { error } = await supabase.from('admin_settings').upsert(row)
+      if (error) {
+        console.error('Admin settings DB save error:', error)
+        // If error is about missing columns, we can't fix it here easily without DDL
+        // But we should at least log it. 
+        // We will NOT set dbOk to true, so client knows? 
+        // The client currently doesn't check dbOk strictly for success message, but we pass it.
+      }
       dbOk = !error
     }
     // Always set cookie for persistence across ports
