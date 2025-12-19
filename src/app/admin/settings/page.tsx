@@ -356,12 +356,16 @@ export default function AdminSettingsPage() {
       }
       const res = await fetch('/api/admin/settings', { method:'PUT', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(settingsData) })
       const body = await res.json().catch(()=>({}))
+      
       if (!res.ok) {
         setMessage(body?.error || 'Failed to save to database. Saved locally.')
+      } else if (body.dbOk === false) {
+        setMessage('⚠️ Saved to browser, but Database write failed. Did you run the Migration SQL in Supabase?')
       } else {
-        setMessage('Settings saved successfully!')
+        setMessage('Settings saved to Database successfully!')
         try{ await fetch('/api/admin/auth/upsert', { method:'POST' }) } catch{}
       }
+      
       try {
         if (typeof window !== 'undefined') {
           localStorage.setItem('admin_settings', JSON.stringify(settingsData))
