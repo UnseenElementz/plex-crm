@@ -230,6 +230,8 @@ export default function CustomerPortal() {
         <div className="mt-2 flex gap-4">
           <a href="/customer/service-updates" className="cta-outline shimmer" data-no-prefetch>Service Updates</a>
           <a href="/customer/recommendations" className="cta-btn shimmer" data-no-prefetch>Recommendations</a>
+          {/* Global Chat Integration - Link to isolated chat module */}
+          <a href="/customer/chat" className="cta-outline shimmer" data-no-prefetch>Members Chatroom</a>
         </div>
         {paymentLock && !canPay && (
           <div className="card-solid p-4 rounded-lg mt-4 border border-cyan-500/30">
