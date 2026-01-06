@@ -20,6 +20,8 @@ class FileService {
     'image/png',
     'image/gif',
     'image/webp',
+    'image/heic',
+    'image/heif',
     'application/pdf',
     'text/plain',
     'application/msword',
@@ -54,35 +56,34 @@ class FileService {
         return { message: validation.error! }
       }
 
-      // Generate unique file name
-      const fileName = this.generateFileName(file.name, conversationId)
+      // Prefer server-side upload API (service role, reliable permissions)
+      try {
+        const form = new FormData()
+        form.append('file', file)
+        form.append('conversationId', conversationId)
+        const res = await fetch('/api/chat/upload', { method: 'POST', body: form })
+        if (res.ok) {
+          const j = await res.json()
+          return j
+        }
+      } catch {}
       
-      // Upload to Supabase Storage
-      const { data, error } = await supabase.storage
-        .from(this.BUCKET_NAME)
-        .upload(fileName, file, {
-          cacheControl: '3600',
-          upsert: false
-        })
-
-      if (error) {
-        return { message: error.message }
-      }
-
-      if (!data) {
-        return { message: 'Upload failed - no data returned' }
-      }
-
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from(this.BUCKET_NAME)
-        .getPublicUrl(data.path)
-
-      return {
-        url: publicUrl,
-        fileName: file.name,
-        fileSize: file.size,
-        fileType: file.type
+      // Fallback: attempt direct client-side upload (requires storage insert policy)
+      try {
+        const fileName = this.generateFileName(file.name, conversationId)
+        const { data, error } = await supabase.storage
+          .from(this.BUCKET_NAME)
+          .upload(fileName, file, {
+            cacheControl: '3600',
+            upsert: false
+          })
+        if (error || !data) {
+          return { message: error?.message || 'Upload failed' }
+        }
+        const { data: { publicUrl } } = supabase.storage.from(this.BUCKET_NAME).getPublicUrl(data.path)
+        return { url: publicUrl, fileName: file.name, fileSize: file.size, fileType: file.type }
+      } catch (e:any) {
+        return { message: e?.message || 'Upload failed' }
       }
     } catch (error) {
       return { message: (error as Error).message }

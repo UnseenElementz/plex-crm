@@ -78,7 +78,7 @@ export default function Home() {
               Streamz R Us
             </h1>
             <p className="mt-3 text-slate-300 text-lg">
-              Ultimate Premium Plex Experiance
+              Ultimate Hosting Experiance
               <br />
               <span className="text-slate-400">When The best matters</span>
             </p>

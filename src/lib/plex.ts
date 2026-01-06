@@ -264,6 +264,18 @@ export async function getAnyServerIdentifier(token: string): Promise<{ serverId?
   }
 }
 
+export async function getServerIdentifierFromUrl(url: string, token: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, { headers: plexHeaders(token) })
+    if (!res.ok) return null
+    const text = await res.text()
+    const match = text.match(/machineIdentifier="([^"]+)"/)
+    return match ? match[1] : null
+  } catch {
+    return null
+  }
+}
+
 export async function getPlexSharedSections(token: string, email: string, username?: string, targetMachineId?: string): Promise<string[]> {
   try {
     const servers = await getOwnedServers(token)

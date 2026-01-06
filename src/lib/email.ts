@@ -144,7 +144,14 @@ export async function sendCustomEmail(to: string[], subject: string, body: strin
   if (!host || !user || !pass) throw new Error('SMTP config missing')
   const transporter = nodemailer.createTransport({ host, port, secure: port === 465, auth: { user, pass } })
   const from = process.env.SMTP_FROM || user
-  for (const addr of to.filter(Boolean)) {
-    await transporter.sendMail({ from, to: addr, subject, text: body })
+  
+  const recipients = to.filter(Boolean)
+  // Send in batches of 5 to reuse transport but speed up sending
+  const BATCH_SIZE = 5
+  for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
+    const batch = recipients.slice(i, i + BATCH_SIZE)
+    await Promise.all(batch.map(addr => 
+      transporter.sendMail({ from, to: addr, subject, text: body }).catch((e: unknown) => console.error(`Failed to send to ${addr}:`, e))
+    ))
   }
 }

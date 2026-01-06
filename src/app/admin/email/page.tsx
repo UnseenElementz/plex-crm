@@ -14,20 +14,52 @@ export default function AdminEmailPage(){
   const [body, setBody] = useState('')
   const [sending, setSending] = useState(false)
   const [msg, setMsg] = useState('')
+  const [syncing, setSyncing] = useState(false)
 
   useEffect(()=>{ 
-    (async()=>{ 
-      try{ 
-        setLoading(true)
-        const r = await fetch('/api/customers')
-        if(r.ok){ 
-          const d = await r.json()
-          setCustomers(d || []) 
-        } 
-      } catch{} 
-      finally { setLoading(false) }
-    })() 
+    loadCustomers()
   },[])
+
+  async function loadCustomers() {
+    try{ 
+      setLoading(true)
+      const r = await fetch('/api/customers')
+      if(r.ok){ 
+        const d = await r.json()
+        setCustomers(d || []) 
+      } 
+    } catch{} 
+    finally { setLoading(false) }
+  }
+
+  async function syncPlex() {
+    setSyncing(true)
+    setMsg('Syncing with Plex...')
+    try {
+      const res = await fetch('/api/admin/customers/sync-plex', { method: 'POST' })
+      const data = await res.json()
+      if (res.ok) {
+        setMsg(data.message || 'Sync successful')
+        const recs: string[] = Array.isArray(data.emails) ? data.emails.filter(Boolean) : []
+        if (recs.length > 0) {
+          setSelected(prev => {
+            const next = { ...prev }
+            recs.forEach(e => next[e] = true)
+            return next
+          })
+          setMsg(`Selected ${recs.length} recipients from Plex`)
+        }
+        await loadCustomers()
+      } else {
+        setMsg(data.error || 'Sync failed')
+      }
+    } catch (e: any) {
+      setMsg(e.message || 'Sync failed')
+    } finally {
+      setSyncing(false)
+      setTimeout(() => setMsg(''), 5000)
+    }
+  }
 
   const filtered = useMemo(() => {
     return customers.filter(c => {
@@ -93,7 +125,16 @@ export default function AdminEmailPage(){
     <main className="p-6 max-w-[95vw] mx-auto">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-3xl font-bold gradient-text">Email Center</h2>
-        <a href="/admin" className="btn-outline">← Back to Chat</a>
+        <div className="flex gap-3">
+          <button 
+            onClick={syncPlex} 
+            disabled={syncing}
+            className="btn-ghost text-xs border border-slate-700 hover:bg-slate-800"
+          >
+            {syncing ? 'Syncing...' : '↻ Sync Plex Users'}
+          </button>
+          <a href="/admin" className="btn-outline">← Back to Chat</a>
+        </div>
       </div>
 
       <div className="grid lg:grid-cols-12 gap-6">

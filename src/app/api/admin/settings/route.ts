@@ -3,21 +3,32 @@ import { cookies } from 'next/headers'
 import { createClient } from '@supabase/supabase-js'
 
 function svc(){
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY as string
-  if (!url || !key) return null
-  return createClient(url, key)
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !key) {
+    console.error('Supabase Admin Init Failed: Missing keys', { url: !!url, key: !!key })
+    return null
+  }
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+  })
 }
 
 export async function GET(){
   const supabase = svc()
+  let dbStatus = 'init'
   try{
     let data: any = null
     let error: any = null
     if (supabase){
+      dbStatus = 'connecting'
       const r = await supabase.from('admin_settings').select('*').maybeSingle()
       data = r.data || null
       error = r.error || null
+      dbStatus = error ? 'error' : (data ? 'found' : 'empty')
+      if (error) console.error('Supabase DB Error:', error)
+    } else {
+      dbStatus = 'no-client'
     }
     const jar = cookies()
     const raw = jar.get('admin_settings')?.value
@@ -33,14 +44,15 @@ export async function GET(){
     const safe: any = {}
     const allow = ['monthly_price','yearly_price','stream_monthly_price','stream_yearly_price','payment_lock','chat_online','canonical_host','hero_image_url','bg_music_url','bg_music_volume','bg_music_enabled','plex_token','plex_server_url']
     for (const k of allow){ if (merged && (merged as any)[k] !== undefined) safe[k] = (merged as any)[k] }
-    const res = NextResponse.json(isAdmin ? merged : safe, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate' } })
+    const res = NextResponse.json(isAdmin ? merged : safe, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate', 'X-DB-Status': dbStatus } })
     try {
       const toStore = isAdmin ? merged : safe
       res.cookies.set('admin_settings', encodeURIComponent(JSON.stringify(toStore)), { path: '/', maxAge: 60*60*24*365 })
     } catch {}
     return res
   }catch(e: any){
-    return NextResponse.json({ error: e?.message || 'Unknown error' }, { status: 500, headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate' } })
+    console.error('Settings GET Fatal:', e)
+    return NextResponse.json({ error: e?.message || 'Unknown error', dbStatus }, { status: 500, headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate' } })
   }
 }
 

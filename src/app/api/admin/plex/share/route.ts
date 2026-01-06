@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { cookies, headers } from 'next/headers'
-import { getPlexFriends, getOwnedServers, getAnyServerIdentifier } from '@/lib/plex'
+import { getPlexFriends, getOwnedServers, getAnyServerIdentifier, getServerIdentifierFromUrl } from '@/lib/plex'
 
 function svc(){
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
@@ -51,13 +51,25 @@ export async function POST(request: Request){
     if (!email) return NextResponse.json({ error: 'Email required' }, { status: 400 })
     const friends = await getPlexFriends(serverUrl, token)
     const friend = friends.find(f=> (f.email||'').toLowerCase() === String(email).toLowerCase())
-    const servers = await getOwnedServers(token)
-    let serverId = servers[0]?.id
+    
+    let serverId = ''
+    if (serverUrl && !serverUrl.includes('plex.tv')) {
+      // If we have a direct URL, try to get the ID from there first
+      const directId = await getServerIdentifierFromUrl(serverUrl, token)
+      if (directId) serverId = directId
+    }
+
+    if (!serverId) {
+      const servers = await getOwnedServers(token)
+      serverId = servers[0]?.id
+    }
+
     if (!serverId) {
       const any = await getAnyServerIdentifier(token)
-      if (!any?.serverId) return NextResponse.json({ error: 'No Plex servers found for this token' }, { status: 404 })
+      if (!any?.serverId) return NextResponse.json({ error: 'No Plex servers found for this token. Please check Admin Settings.' }, { status: 404 })
       serverId = any.serverId
     }
+
     const sectionIds = (Array.isArray(libraries) ? libraries : []).join(',')
     const body = new URLSearchParams()
     // Always include email when provided (Plex requires email or username)

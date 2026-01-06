@@ -73,8 +73,8 @@ export default function CustomerRegisterPage(){
         subscription_type: null, 
         streams: 1, 
         next_payment_date: null,
-        start_date: new Date().toISOString(),
-        subscription_status: 'inactive',
+        start_date: null,
+        subscription_status: 'registered',
         notes: plexUsername ? `Plex: ${plexUsername}` : undefined
       })
       

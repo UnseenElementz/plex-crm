@@ -37,7 +37,7 @@ export default function DatePicker({ value, onChange }: { value?: string; onChan
 
   const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December']
   const isSameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
-  const formatDMY = (d: Date) => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`
+  const formatDMY = (d: Date) => `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`
   const years = useMemo(()=>{
     const base = today.getFullYear()
     const arr: number[] = []

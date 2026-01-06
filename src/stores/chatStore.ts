@@ -61,7 +61,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setConversations: (conversations) => set({ conversations }),
   setCurrentConversation: (currentConversation) => set({ currentConversation }),
   setMessages: (messages) => set({ messages }),
-  addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),
+  addMessage: (message) => set((state) => ({
+    messages: state.messages.some(m => m.id === message.id) ? state.messages : [...state.messages, message]
+  })),
   setLoading: (isLoading) => set({ isLoading }),
   setError: (error) => set({ error }),
   setConnected: (isConnected) => set({ isConnected }),

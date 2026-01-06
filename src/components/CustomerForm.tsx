@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { calculatePrice, getTransactionFee, calculateNextDue } from '@/lib/pricing'
 import { CustomerCreateSchema, CustomerUpdateSchema, formatZodError } from '@/lib/validation'
+import DatePicker from '@/components/DatePicker'
 
 type Plan = 'monthly'|'yearly'
 type Customer = { id?: string; full_name: string; email: string; plan: Plan; streams: number; start_date?: string; next_due_date?: string; notes?: string; plex_username?: string }
@@ -11,9 +12,12 @@ export default function CustomerForm({ initial, onSaved, onCancel }: { initial?:
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
-  const price = calculatePrice(c.plan, c.streams)
+  const [pricingConfig, setPricingConfig] = useState<any>(null)
+  const price = calculatePrice(c.plan, c.streams, pricingConfig)
   const [dueInput, setDueInput] = useState('')
   const [startInput, setStartInput] = useState('')
+  const [showStartPicker, setShowStartPicker] = useState(false)
+  const [showDuePicker, setShowDuePicker] = useState(false)
   
   const formatDateForInput = (dateString: string | undefined): string => {
     if (!dateString) return ''
@@ -23,7 +27,7 @@ export default function CustomerForm({ initial, onSaved, onCancel }: { initial?:
       if (year < 2000 || year > 2100) return ''
       const month = String(date.getMonth() + 1).padStart(2, '0')
       const day = String(date.getDate()).padStart(2, '0')
-      return `${day}/${month}/${year}`
+      return `${day}.${month}.${year}`
     } catch {
       return ''
     }
@@ -32,12 +36,25 @@ export default function CustomerForm({ initial, onSaved, onCancel }: { initial?:
   const parseDateFromInput = (inputValue: string): string => {
     if (!inputValue) return ''
     try {
-      const parts = inputValue.split('/')
-      if (parts.length !== 3) return ''
-      const [dd, mm, yyyy] = parts
-      const d = parseInt(dd, 10)
-      const m = parseInt(mm, 10)
-      const y = parseInt(yyyy, 10)
+      let y = 0, m = 0, d = 0
+      if (/^\d{4}-\d{2}-\d{2}$/.test(inputValue)) {
+        const [yyyy, mm, dd] = inputValue.split('-')
+        y = parseInt(yyyy, 10)
+        m = parseInt(mm, 10)
+        d = parseInt(dd, 10)
+      } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(inputValue)) {
+        const [dd, mm, yyyy] = inputValue.split('/')
+        d = parseInt(dd, 10)
+        m = parseInt(mm, 10)
+        y = parseInt(yyyy, 10)
+      } else if (/^\d{2}\.\d{2}\.\d{4}$/.test(inputValue)) {
+        const [dd, mm, yyyy] = inputValue.split('.')
+        d = parseInt(dd, 10)
+        m = parseInt(mm, 10)
+        y = parseInt(yyyy, 10)
+      } else {
+        return ''
+      }
       if (!d || !m || !y) return ''
       const date = new Date(y, m - 1, d)
       if (isNaN(date.getTime())) return ''
@@ -48,22 +65,22 @@ export default function CustomerForm({ initial, onSaved, onCancel }: { initial?:
   }
   
   useEffect(()=>{ 
+    if (c.id) return
     const now = new Date()
-    const dd = String(now.getDate()).padStart(2,'0')
-    const mm = String(now.getMonth()+1).padStart(2,'0')
-    const yyyy = String(now.getFullYear())
     const midday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0)
-    setStartInput(prev=> prev || `${dd}/${mm}/${yyyy}`)
+    const todayStr = formatDateForInput(midday.toISOString())
+    setStartInput(prev=> prev || todayStr)
     setC(v=>({ 
       ...v, 
       start_date: v.start_date || midday.toISOString(), 
       next_due_date: v.next_due_date || calculateNextDue(v.plan || 'monthly', midday).toISOString() 
     }))
   }, [])
+  useEffect(()=>{ (async()=>{ try{ const r = await fetch('/api/admin/settings', { cache: 'no-store' }); if (r.ok){ const j = await r.json(); setPricingConfig(j) } } catch{} })() }, [])
   useEffect(()=>{ setDueInput(formatDateForInput(c.next_due_date)) }, [c.next_due_date])
   useEffect(()=>{ setStartInput(formatDateForInput(c.start_date)) }, [c.start_date])
   useEffect(()=>{ 
-    if (/^\d{2}\/\d{2}\/\d{4}$/.test(startInput)){
+    if (/^\d{4}-\d{2}-\d{2}$/.test(startInput) || /^\d{2}\/\d{2}\/\d{4}$/.test(startInput)){
       const iso = parseDateFromInput(startInput)
       if (iso){
         const d = new Date(iso)
@@ -79,13 +96,11 @@ export default function CustomerForm({ initial, onSaved, onCancel }: { initial?:
     try{
       const draft: any = { ...c }
       if (dueInput) {
-        if (!/^\d{2}\/\d{2}\/\d{4}$/.test(dueInput)) { setError('Next due date must be dd/MM/yyyy'); return }
         const iso = parseDateFromInput(dueInput)
         if (!iso) { setError('Invalid next due date'); return }
         draft.next_due_date = iso
       }
       if (startInput) {
-        if (!/^\d{2}\/\d{2}\/\d{4}$/.test(startInput)) { setError('Start date must be dd/MM/yyyy'); return }
         const iso = parseDateFromInput(startInput)
         if (!iso) { setError('Invalid start date'); return }
         draft.start_date = iso
@@ -133,55 +148,77 @@ export default function CustomerForm({ initial, onSaved, onCancel }: { initial?:
       <label className="label">Streams</label>
       <input className="input" type="number" min={1} value={c.streams} onChange={e=>setC({ ...c, streams: parseInt(e.target.value||'1',10) })} />
       <label className="label">Start date (optional)</label>
-      <input 
-        className="input"
-        type="text"
-        placeholder="dd/MM/yyyy"
-        value={startInput}
-        onChange={e=>{
-          const v = e.target.value
-          setStartInput(v)
-          if (/^\d{2}\/\d{2}\/\d{4}$/.test(v)){
-            const iso = parseDateFromInput(v)
-            if (iso) setC({ ...c, start_date: iso })
-          }
-        }}
-        onBlur={e=>{
-          const v = e.target.value
-          if (v && !/^\d{2}\/\d{2}\/\d{4}$/.test(v)){
-            setError('Start date must be dd/MM/yyyy')
-            setStartInput(formatDateForInput(c.start_date))
-          } else {
-            setError('')
-          }
-        }}
-        inputMode="numeric"
-      />
+      <div className="space-y-2">
+        <div className="flex gap-2">
+          <input 
+            className="input flex-1"
+            type="text"
+            placeholder="DD.MM.YYYY or YYYY-MM-DD"
+            value={startInput}
+            onChange={e=>{
+              const v = e.target.value
+              setStartInput(v)
+              const iso = parseDateFromInput(v)
+              if (iso) setC({ ...c, start_date: iso })
+            }}
+            onBlur={e=>{
+              const v = e.target.value
+              const iso = parseDateFromInput(v)
+              if (!iso){
+                setStartInput(formatDateForInput(c.start_date))
+              }
+            }}
+          />
+          <button type="button" className="btn" onClick={()=> setShowStartPicker(s=> !s)}>{showStartPicker ? 'Close' : 'Pick date'}</button>
+        </div>
+        {showStartPicker && (
+          <DatePicker 
+            value={c.start_date}
+            onChange={(iso)=>{
+              setC({ ...c, start_date: iso })
+              setStartInput(formatDateForInput(iso))
+              const d = new Date(iso)
+              const next = calculateNextDue(c.plan, d).toISOString()
+              setC(v=>({ ...v, next_due_date: next }))
+              setDueInput(formatDateForInput(next))
+            }}
+          />
+        )}
+      </div>
       <label className="label">Next due date</label>
-      <input 
-        className="input"
-        type="text"
-        placeholder="dd/MM/yyyy"
-        value={dueInput}
-        onChange={e=>{
-          const v = e.target.value
-          setDueInput(v)
-          if (/^\d{2}\/\d{2}\/\d{4}$/.test(v)){
-            const iso = parseDateFromInput(v)
-            if (iso) setC({ ...c, next_due_date: iso })
-          }
-        }}
-        onBlur={e=>{
-          const v = e.target.value
-          if (!/^\d{2}\/\d{2}\/\d{4}$/.test(v)){
-            setError('Next due date must be dd/MM/yyyy')
-            setDueInput(formatDateForInput(c.next_due_date))
-          } else {
-            setError('')
-          }
-        }}
-        inputMode="numeric"
-      />
+      <div className="space-y-2">
+        <div className="flex gap-2">
+          <input 
+            className="input flex-1"
+            type="text"
+            placeholder="DD.MM.YYYY or YYYY-MM-DD"
+            value={dueInput}
+            onChange={e=>{
+              const v = e.target.value
+              setDueInput(v)
+              const iso = parseDateFromInput(v)
+              if (iso) setC({ ...c, next_due_date: iso })
+            }}
+            onBlur={e=>{
+              const v = e.target.value
+              const iso = parseDateFromInput(v)
+              if (!iso){
+                setDueInput(formatDateForInput(c.next_due_date))
+              }
+            }}
+          />
+          <button type="button" className="btn" onClick={()=> setShowDuePicker(s=> !s)}>{showDuePicker ? 'Close' : 'Pick date'}</button>
+        </div>
+        {showDuePicker && (
+          <DatePicker 
+            value={c.next_due_date}
+            onChange={(iso)=>{
+              setC({ ...c, next_due_date: iso })
+              setDueInput(formatDateForInput(iso))
+            }}
+          />
+        )}
+      </div>
       <label className="label">Notes</label>
       <textarea className="input" value={c.notes || ''} onChange={e=>setC({ ...c, notes: e.target.value })} />
       <div>Auto price: £{price.toFixed(2)}</div>

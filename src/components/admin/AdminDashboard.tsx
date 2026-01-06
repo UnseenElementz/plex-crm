@@ -156,7 +156,7 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="flex h-screen bg-slate-900">
+    <div className="flex h-[calc(100vh-9rem)] md:h-[calc(100vh-10rem)] bg-slate-900 rounded-xl overflow-hidden border border-slate-800 shadow-xl">
       {/* Sidebar - Conversation List */}
       <div className={`${
         isMobile && selectedConversation ? 'hidden' : 'block'
@@ -165,15 +165,7 @@ export default function AdminDashboard() {
         <div className="p-4 border-b border-slate-800">
           <h1 className="text-xl font-semibold text-slate-200">Live Chat Admin</h1>
           <p className="text-sm text-slate-400">Manage customer conversations</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <a href="/admin/dashboard" className="px-2 py-1 rounded text-xs hover:bg-slate-800/50 text-slate-300 border border-transparent hover:border-cyan-500/30">Dashboard</a>
-            <a href="/admin" className="px-2 py-1 rounded text-xs bg-cyan-600/30 text-cyan-300 border border-cyan-500/30">Chat</a>
-            <a href="/admin/customers" className="px-2 py-1 rounded text-xs hover:bg-slate-800/50 text-slate-300 border border-transparent hover:border-cyan-500/30">Customers</a>
-            <a href="/admin/settings" className="px-2 py-1 rounded text-xs hover:bg-slate-800/50 text-slate-300 border border-transparent hover:border-cyan-500/30">Settings</a>
-            <a href="/admin/email" className="px-2 py-1 rounded text-xs hover:bg-slate-800/50 text-slate-300 border border-transparent hover:border-cyan-500/30">Mail</a>
-            <a href="/admin/admins" className="px-2 py-1 rounded text-xs hover:bg-slate-800/50 text-slate-300 border border-transparent hover:border-cyan-500/30">Admins</a>
-            <a href="/admin/security" className="px-2 py-1 rounded text-xs hover:bg-slate-800/50 text-slate-300 border border-transparent hover:border-cyan-500/30">Security</a>
-          </div>
+          
           <div className="mt-3 flex items-center gap-3">
             {chatOnline !== null && (
               <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${chatOnline ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border-amber-500/30'}`}>

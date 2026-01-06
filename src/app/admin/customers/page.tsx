@@ -3,7 +3,6 @@ import { useEffect, useMemo, useState } from 'react'
 import CustomerForm from '@/components/CustomerForm'
 import { calculatePrice, getStatus } from '@/lib/pricing'
 import { format } from 'date-fns'
-
 type Customer = { id: string; full_name: string; email: string; plan: 'monthly'|'yearly'; streams: number; next_due_date: string; start_date?: string; plex_username?: string; status?: 'active'|'inactive' }
 
 export default function AdminCustomersPage(){
@@ -33,6 +32,7 @@ export default function AdminCustomersPage(){
   const [shareLoading, setShareLoading] = useState(false)
   const [librariesLoading, setLibrariesLoading] = useState(false)
   const [shareMsg, setShareMsg] = useState('')
+  const [pricingConfig, setPricingConfig] = useState<any>(null)
 
   useEffect(()=>{ (async()=>{ 
     try{ 
@@ -74,6 +74,16 @@ export default function AdminCustomersPage(){
     } finally{ 
       setLoading(false) 
     } 
+  })() }, [])
+
+  useEffect(()=>{ (async()=>{
+    try{
+      const res = await fetch('/api/admin/settings', { cache: 'no-store' })
+      if (res.ok){
+        const data = await res.json()
+        setPricingConfig(data)
+      }
+    }catch{}
   })() }, [])
 
   async function syncPlex(){
@@ -121,13 +131,13 @@ export default function AdminCustomersPage(){
     const sorted = [...list]
     if (sortBy === 'newest') sorted.sort((a,b)=> new Date(b.start_date||0).getTime() - new Date(a.start_date||0).getTime())
     else if (sortBy === 'oldest') sorted.sort((a,b)=> new Date(a.start_date||0).getTime() - new Date(b.start_date||0).getTime())
-    else if (sortBy === 'price_high') sorted.sort((a,b)=> calculatePrice(b.plan as any, b.streams) - calculatePrice(a.plan as any, a.streams))
-    else if (sortBy === 'price_low') sorted.sort((a,b)=> calculatePrice(a.plan as any, a.streams) - calculatePrice(b.plan as any, b.streams))
+    else if (sortBy === 'price_high') sorted.sort((a,b)=> calculatePrice(b.plan as any, b.streams, pricingConfig) - calculatePrice(a.plan as any, a.streams, pricingConfig))
+    else if (sortBy === 'price_low') sorted.sort((a,b)=> calculatePrice(a.plan as any, a.streams, pricingConfig) - calculatePrice(b.plan as any, b.streams, pricingConfig))
     else if (sortBy === 'streams_high') sorted.sort((a,b)=> b.streams - a.streams)
     else if (sortBy === 'streams_low') sorted.sort((a,b)=> a.streams - b.streams)
     else if (sortBy === 'due_soon') sorted.sort((a,b)=> new Date(a.next_due_date).getTime() - new Date(b.next_due_date).getTime())
     return sorted
-  }, [customers, q, statusFilter, sortBy])
+  }, [customers, q, statusFilter, sortBy, pricingConfig])
 
   
   return (
@@ -264,13 +274,14 @@ export default function AdminCustomersPage(){
                   <th className="p-1.5 font-medium">Streams</th>
                   <th className="p-1.5 font-medium">Price</th>
                   <th className="p-1.5 font-medium">Status</th>
+                  <th className="p-1.5 font-medium">End Date</th>
                   <th className="p-1.5 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map(c=>{
                   const hasPlan = Boolean(c.plan)
-                  const price = hasPlan ? calculatePrice(c.plan as any, c.streams) : null
+                  const price = hasPlan ? calculatePrice(c.plan as any, c.streams, pricingConfig) : null
                   const statusLabel = !hasPlan ? 'Registered' : ((c.status === 'inactive') ? 'Inactive' : getStatus(new Date(c.next_due_date)))
                   return (
                     <tr key={c.id} className="border-b border-slate-800/30 hover:bg-slate-800/30 transition-all duration-200 group">
@@ -289,13 +300,19 @@ export default function AdminCustomersPage(){
                             {c.plan}
                           </span>
                         ) : (
-                          <div className="text-slate-400 text-xs">Registered: {c.start_date ? format(new Date(c.start_date), 'dd/MM/yyyy') : '-'}</div>
+                          <div className="text-slate-400 text-xs">
+                            <div>Registered: {c.start_date ? format(new Date(c.start_date), 'dd.MM.yyyy') : '-'}</div>
+                            <div>End: {c.next_due_date ? format(new Date(c.next_due_date), 'dd.MM.yyyy') : '-'}</div>
+                          </div>
                         )}
                       </td>
                       <td className="p-1.5 text-slate-400">{c.streams}</td>
                       <td className="p-1.5 font-medium text-slate-200">{price !== null ? `£${price.toFixed(2)}` : '—'}</td>
                       <td className="p-1.5">
                         <span className={`tag ${statusLabel.toLowerCase().replace(' ','-')}`}>{statusLabel}</span>
+                      </td>
+                      <td className="p-1.5 text-slate-400">
+                        {c.next_due_date ? format(new Date(c.next_due_date), 'dd.MM.yyyy') : '-'}
                       </td>
                       <td className="p-1.5">
                         <div className="relative inline-block">

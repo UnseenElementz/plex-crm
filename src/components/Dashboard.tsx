@@ -22,8 +22,10 @@ export default function Dashboard(){
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [filter, setFilter] = useState<'all' | 'monthly' | 'yearly' | 'overdue' | 'due-soon'>('all')
   const [showRevenueBreakdown, setShowRevenueBreakdown] = useState(false)
+  const [pricingConfig, setPricingConfig] = useState<any>(null)
 
   useEffect(()=>{ (async()=>{ try{ const res = await fetch('/api/customers'); const data = await res.json(); if (Array.isArray(data)) setCustomers(data); else setCustomers([]) } catch(e){ setCustomers(demo) } })() }, [])
+  useEffect(()=>{ (async()=>{ try{ const r = await fetch('/api/admin/settings', { cache: 'no-store' }); if (r.ok){ const j = await r.json(); setPricingConfig(j) } } catch{} })() }, [])
   
   const handleEdit = (customer: any) => {
     setEditItem(customer)
@@ -108,16 +110,16 @@ export default function Dashboard(){
     const monthly = customers.filter(d=>d.plan==='monthly').length
     const yearly = customers.filter(d=>d.plan==='yearly').length
     const totalStreams = customers.reduce((acc,d)=>acc+d.streams,0)
-    const revenue = customers.reduce((acc,d)=>acc+calculatePrice(d.plan,d.streams),0)
+    const revenue = customers.reduce((acc,d)=>acc+calculatePrice(d.plan,d.streams,pricingConfig),0)
     const dueSoon = customers.filter(d=>getStatus(new Date(d.next_due_date || d.nextDueDate))==='Due Soon').length
     const overdue = customers.filter(d=>getStatus(new Date(d.next_due_date || d.nextDueDate))==='Overdue').length
     
     // Calculate detailed breakdown
-    const monthlyRevenue = customers.filter(c => c.plan === 'monthly').reduce((acc, c) => acc + calculatePrice(c.plan, c.streams), 0)
-    const yearlyRevenue = customers.filter(c => c.plan === 'yearly').reduce((acc, c) => acc + calculatePrice(c.plan, c.streams), 0)
+    const monthlyRevenue = customers.filter(c => c.plan === 'monthly').reduce((acc, c) => acc + calculatePrice(c.plan, c.streams, pricingConfig), 0)
+    const yearlyRevenue = customers.filter(c => c.plan === 'yearly').reduce((acc, c) => acc + calculatePrice(c.plan, c.streams, pricingConfig), 0)
     const transactionFees = customers.reduce((acc, c) => acc + (c.plan === 'monthly' ? 0.30 : 0.30 * 12), 0) // Assuming £0.30 per transaction
     const netRevenue = revenue - transactionFees
-    const maintenanceCost = 140 // This should come from settings
+    const maintenanceCost = (pricingConfig?.monthly_maintenance ?? 140)
     const profit = netRevenue - maintenanceCost
     
     return { 
@@ -135,7 +137,7 @@ export default function Dashboard(){
       maintenanceCost,
       profit
     }
-  }, [customers])
+  }, [customers, pricingConfig])
 
   return (
     <div className="max-w-7xl mx-auto grid gap-6">
@@ -268,7 +270,7 @@ export default function Dashboard(){
             </thead>
             <tbody>
               {filteredCustomers.map(c=>{
-                const price = calculatePrice(c.plan, c.streams)
+                const price = calculatePrice(c.plan, c.streams, pricingConfig)
                 const status = getStatus(new Date(c.next_due_date || c.nextDueDate))
                 return (
                   <tr key={c.id || c.email} className="border-b border-slate-800/30 hover:bg-slate-800/30 transition-all duration-200 group">

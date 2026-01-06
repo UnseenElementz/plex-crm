@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import paypal from '@paypal/checkout-server-sdk'
 import { calculatePrice, type Plan } from '@/lib/pricing'
+import { createClient } from '@supabase/supabase-js'
 export const runtime = 'nodejs'
 const sanitize = (v?: string) => (v || '').trim().replace(/^['"]|['"]$/g, '')
 
@@ -18,6 +19,22 @@ function client() {
   return new paypal.core.PayPalHttpClient(env)
 }
 
+async function readPricingConfig(){
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY as string
+  if (!url || !key) return null
+  const s = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } })
+  const r = await s.from('admin_settings').select('*').maybeSingle()
+  const d: any = r.data || null
+  if (!d) return null
+  return {
+    monthly_price: Number(d.monthly_price) || 15,
+    yearly_price: Number(d.yearly_price) || 85,
+    stream_monthly_price: Number(d.stream_monthly_price) || 5,
+    stream_yearly_price: Number(d.stream_yearly_price) || 20,
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json()
@@ -25,7 +42,8 @@ export async function POST(request: Request) {
     if (plan && typeof plan === 'string') {
       const p = plan as Plan
       const s = typeof streams === 'number' ? streams : 1
-      amount = calculatePrice(p, s)
+      const cfg = await readPricingConfig()
+      amount = calculatePrice(p, s, cfg)
     }
     
     if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
