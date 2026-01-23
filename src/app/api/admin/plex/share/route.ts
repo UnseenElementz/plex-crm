@@ -58,27 +58,41 @@ export async function POST(request: Request){
     
     let serverId = ''
     if (serverUrl && !serverUrl.includes('plex.tv')) {
-      // If we have a direct URL, try to get the ID from there first
       const directId = await getServerIdentifierFromUrl(serverUrl, token)
-      if (directId) serverId = directId
+      if (directId) {
+          serverId = directId
+          machineIdentifier = directId
+      }
     }
 
     if (!serverId) {
       const servers = await getOwnedServers(token)
       serverId = servers[0]?.id
+      machineIdentifier = servers[0]?.machineIdentifier
     }
 
     if (!serverId) {
       const any = await getAnyServerIdentifier(token)
       if (!any?.serverId) return NextResponse.json({ error: 'No Plex servers found for this token. Please check Admin Settings.' }, { status: 404 })
       serverId = any.serverId
+      if (!machineIdentifier) machineIdentifier = any.machineIdentifier
     }
 
     const sectionIds = (Array.isArray(libraries) ? libraries : []).join(',')
+    
+    // Determine inviteEmail and username early
+    const inviteEmail = String(email || '').trim()
+    let username = friend?.username || ''
+    if (!username && s) {
+      try {
+        const { data: matches } = await s.from('customers').select('plex_username').eq('email', String(email)).limit(1)
+        username = (matches && matches[0]?.plex_username) || ''
+      } catch {}
+    }
+
     // If we have a sharedServerId (from update request), use it to update
     let existingSharedId = ''
     if (machineIdentifier) {
-        // Try to find existing share to update instead of create
         const resList = await fetch(`https://plex.tv/api/servers/${machineIdentifier}/shared_servers`, { headers: { 'X-Plex-Token': token } })
         if (resList.ok) {
             const text = await resList.text()
@@ -100,7 +114,6 @@ export async function POST(request: Request){
     }
 
     if (existingSharedId) {
-        // UPDATE existing share
         const updateBody = JSON.stringify({
             server_id: serverId,
             shared_server: {
@@ -125,35 +138,20 @@ export async function POST(request: Request){
         
         const ok = res.status >= 200 && res.status < 300
         if (ok) return NextResponse.json({ ok: true, server_id: serverId, updated: true })
-        // If update failed, fall through to try create? usually better to error or fallback
     }
 
     const body = new URLSearchParams()
-    // Always include email when provided (Plex requires email or username)
-    const inviteEmail = String(email || '').trim()
     if (inviteEmail) {
-      // Correct field for shared_server invite is 'identifier'
       body.set('shared_server[identifier]', inviteEmail)
     }
-    // Include username if we can infer it (from friends or customers)
-    let username = friend?.username || ''
-    if (!username && s) {
-      try {
-        const { data: matches } = await s.from('customers').select('plex_username').eq('email', String(email)).limit(1)
-        username = (matches && matches[0]?.plex_username) || ''
-      } catch {}
-    }
-    // Also set username as backup if identifier logic fails on some servers
     if (username) {
       body.set('shared_server[username]', username)
     }
-    // Prefer user_id if we have it
     if (friend?.id) body.set('shared_server[user_id]', friend.id)
-    // Required server
     body.set('shared_server[server_id]', serverId)
     if (sectionIds) body.set('shared_server[library_section_ids]', sectionIds)
-    // Hint invite intent
     body.set('shared_server[invited]', '1')
+    
     const res = await fetch(`https://plex.tv/api/servers/${serverId}/shared_servers`, {
       method: 'POST',
       headers: { 

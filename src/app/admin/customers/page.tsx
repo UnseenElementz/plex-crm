@@ -34,7 +34,7 @@ export default function AdminCustomersPage(){
   const [shareMsg, setShareMsg] = useState('')
   const [pricingConfig, setPricingConfig] = useState<any>(null)
 
-  useEffect(()=>{ (async()=>{ 
+  const loadCustomers = async () => {
     try{ 
       setLoading(true); 
       let ok = false
@@ -74,7 +74,9 @@ export default function AdminCustomersPage(){
     } finally{ 
       setLoading(false) 
     } 
-  })() }, [])
+  }
+
+  useEffect(()=>{ loadCustomers() }, [])
 
   useEffect(()=>{ (async()=>{
     try{
@@ -639,7 +641,7 @@ async function sendTranscode(email: string, setSendingEmail: (v: string | null)=
   finally{ setSendingEmail(null); setTimeout(()=> setSendMsg(''), 5000) }
 }
 
-async function sendChargebackBan(email: string, setSendingEmail: (v: string | null)=>void, setSendMsg: (v: string)=>void){
+async function sendChargebackBan(email: string, setSendingEmail: (v: string | null)=>void, setSendMsg: (v: string)=>void, refreshCustomers?: () => void){
   if (!confirm('Are you sure? This will BAN the user and send a termination email.')) return
   try{
     setSendingEmail(email)
@@ -655,6 +657,7 @@ async function sendChargebackBan(email: string, setSendingEmail: (v: string | nu
       }
     } else {
       setSendMsg('User banned and notice sent!')
+      if (refreshCustomers) refreshCustomers()
     }
   } catch(e: any){ setSendMsg(`Failed: ${e?.message || 'Network error'}`) }
   finally{ setSendingEmail(null); setTimeout(()=> setSendMsg(''), 5000) }
