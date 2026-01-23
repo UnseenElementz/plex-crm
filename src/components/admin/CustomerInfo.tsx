@@ -13,6 +13,19 @@ export default function CustomerInfo({ conversation }: CustomerInfoProps) {
   const { sendMessage, updateConversationStatus, updateConversationMetadata } = useChatStore()
   const [sending, setSending] = useState(false)
   const [sendMsg, setSendMsg] = useState('')
+  const [fetchedPlexUser, setFetchedPlexUser] = useState<string | null>(null)
+
+  useState(() => {
+      const email = (conversation as any).metadata?.email
+      if (email && !(conversation as any).metadata?.plex_username) {
+          fetch(`/api/admin/customers/details?email=${encodeURIComponent(email)}`)
+              .then(res => res.ok ? res.json() : null)
+              .then(data => {
+                  if (data?.plex_username) setFetchedPlexUser(data.plex_username)
+              })
+              .catch(() => {})
+      }
+  })
   const sendTemplate = async () => {
     await sendMessage(conversation.id, 'Thanks for reaching out! A team member will be with you shortly.', 'admin')
   }
@@ -48,15 +61,18 @@ export default function CustomerInfo({ conversation }: CustomerInfoProps) {
     <div className="p-4 space-y-6">
       {/* Header */}
       <div>
-        <h3 className="text-lg font-semibold text-gray-800 mb-2">Customer Info</h3>
+        <h3 className="text-lg font-semibold text-slate-200 mb-2">Customer Info</h3>
         <div className="flex items-center space-x-2">
-          <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-            <User className="w-5 h-5 text-blue-600" />
+          <div className="w-10 h-10 bg-blue-500/20 rounded-full flex items-center justify-center">
+            <User className="w-5 h-5 text-blue-400" />
           </div>
           <div>
-            <p className="font-medium text-gray-900">{(conversation as any).metadata?.full_name || (conversation as any).metadata?.email || `Customer #${conversation.id.slice(0, 8)}`}</p>
+            <p className="font-medium text-slate-200">{(conversation as any).metadata?.full_name || (conversation as any).metadata?.email || `Customer #${conversation.id.slice(0, 8)}`}</p>
             {(conversation as any).metadata?.email && (
-              <p className="text-sm text-gray-500">{(conversation as any).metadata?.email}</p>
+              <p className="text-sm text-slate-400">{(conversation as any).metadata?.email}</p>
+            )}
+            {fetchedPlexUser && !(conversation as any).metadata?.plex_username && (
+              <p className="text-sm text-slate-400">Plex: {fetchedPlexUser}</p>
             )}
           </div>
         </div>
@@ -64,7 +80,7 @@ export default function CustomerInfo({ conversation }: CustomerInfoProps) {
 
       {/* Session Info */}
       <div className="space-y-3">
-        <h4 className="font-medium text-gray-800 flex items-center">
+        <h4 className="font-medium text-slate-300 flex items-center">
           <Info className="w-4 h-4 mr-2" />
           Session Details
         </h4>
@@ -72,21 +88,27 @@ export default function CustomerInfo({ conversation }: CustomerInfoProps) {
         <div className="space-y-2 text-sm">
           {conversation.customer_ip && (
             <div className="flex items-center space-x-2">
-              <Globe className="w-4 h-4 text-gray-400" />
-              <span className="text-gray-600">IP: {conversation.customer_ip}</span>
+              <Globe className="w-4 h-4 text-slate-500" />
+              <span className="text-slate-400">IP: {conversation.customer_ip}</span>
+            </div>
+          )}
+          {(conversation as any).metadata?.plex_username && (
+            <div className="flex items-center space-x-2">
+              <User className="w-4 h-4 text-slate-500" />
+              <span className="text-slate-400">Plex: {(conversation as any).metadata.plex_username}</span>
             </div>
           )}
           
           <div className="flex items-center space-x-2">
-            <Calendar className="w-4 h-4 text-gray-400" />
-            <span className="text-gray-600">
+            <Calendar className="w-4 h-4 text-slate-500" />
+            <span className="text-slate-400">
               Started: {format(new Date(conversation.created_at), 'dd/MM/yyyy')}
             </span>
           </div>
           
           <div className="flex items-center space-x-2">
-            <Calendar className="w-4 h-4 text-gray-400" />
-            <span className="text-gray-600">
+            <Calendar className="w-4 h-4 text-slate-500" />
+            <span className="text-slate-400">
               Last update: {format(new Date(conversation.updated_at), 'dd/MM/yyyy')}
             </span>
           </div>
@@ -95,13 +117,13 @@ export default function CustomerInfo({ conversation }: CustomerInfoProps) {
 
       {/* Status */}
       <div className="space-y-3">
-        <h4 className="font-medium text-gray-800">Conversation Status</h4>
+        <h4 className="font-medium text-slate-300">Conversation Status</h4>
         
         <div className="space-y-2">
           <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-            conversation.status === 'active' ? 'bg-green-100 text-green-800' :
-            conversation.status === 'waiting' ? 'bg-yellow-100 text-yellow-800' :
-            'bg-gray-100 text-gray-800'
+            conversation.status === 'active' ? 'bg-emerald-500/20 text-emerald-300' :
+            conversation.status === 'waiting' ? 'bg-amber-500/20 text-amber-300' :
+            'bg-slate-700/50 text-slate-300'
           }`}>
             {conversation.status === 'active' ? 'Active' :
              conversation.status === 'waiting' ? 'Waiting for response' :
@@ -109,7 +131,7 @@ export default function CustomerInfo({ conversation }: CustomerInfoProps) {
           </div>
           
           {conversation.closed_at && (
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-slate-500">
               Closed: {format(new Date(conversation.closed_at), 'dd/MM/yyyy')}
             </p>
           )}
@@ -118,7 +140,7 @@ export default function CustomerInfo({ conversation }: CustomerInfoProps) {
 
       {/* Quick Actions */}
       <div className="space-y-3">
-        <h4 className="font-medium text-gray-800">Quick Actions</h4>
+        <h4 className="font-medium text-slate-300">Quick Actions</h4>
         
         <div className="space-y-2">
           <button onClick={sendTemplate} className="w-full px-3 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors">
@@ -141,15 +163,21 @@ export default function CustomerInfo({ conversation }: CustomerInfoProps) {
       </div>
 
       {/* Metadata */}
-      {conversation.metadata && Object.keys(conversation.metadata).length > 0 && (
+      {(conversation.metadata || fetchedPlexUser) && (
         <div className="space-y-3">
-          <h4 className="font-medium text-gray-800">Additional Info</h4>
+          <h4 className="font-medium text-slate-300">Additional Info</h4>
           
           <div className="space-y-1 text-sm">
-            {Object.entries(conversation.metadata).map(([key, value]) => (
+            {fetchedPlexUser && !(conversation as any).metadata?.plex_username && (
+                 <div className="flex justify-between">
+                    <span className="text-slate-400 capitalize">plex username:</span>
+                    <span className="text-slate-200">{fetchedPlexUser}</span>
+                 </div>
+            )}
+            {conversation.metadata && Object.entries(conversation.metadata).map(([key, value]) => (
               <div key={key} className="flex justify-between">
-                <span className="text-gray-600 capitalize">{key.replace(/_/g, ' ')}:</span>
-                <span className="text-gray-900">{String(value)}</span>
+                <span className="text-slate-400 capitalize">{key.replace(/_/g, ' ')}:</span>
+                <span className="text-slate-200">{String(value)}</span>
               </div>
             ))}
           </div>

@@ -16,7 +16,11 @@ export const revalidate = 0
 export async function POST(request: Request){
   const s = svc()
   try{
-    const { email, libraries } = await request.json()
+    const reqJson = await request.json()
+    const email = reqJson.email
+    const libraries = reqJson.libraries
+    let machineIdentifier = reqJson.machineIdentifier
+    
     let settings: any = null
     
     // Check headers first
@@ -71,6 +75,59 @@ export async function POST(request: Request){
     }
 
     const sectionIds = (Array.isArray(libraries) ? libraries : []).join(',')
+    // If we have a sharedServerId (from update request), use it to update
+    let existingSharedId = ''
+    if (machineIdentifier) {
+        // Try to find existing share to update instead of create
+        const resList = await fetch(`https://plex.tv/api/servers/${machineIdentifier}/shared_servers`, { headers: { 'X-Plex-Token': token } })
+        if (resList.ok) {
+            const text = await resList.text()
+            const blocks = text.split('</SharedServer>')
+            for (const block of blocks) {
+                if (!block.includes('<SharedServer')) continue
+                const attrs = block.match(/<SharedServer\s+([^>]+)>/)?.[1] || ''
+                const uEmail = attrs.match(/email="([^"]+)"/)?.[1] || ''
+                const uName = attrs.match(/username="([^"]+)"/)?.[1] || ''
+                
+                if ((uEmail && uEmail.toLowerCase() === inviteEmail.toLowerCase()) || 
+                    (uName && uName.toLowerCase() === inviteEmail.toLowerCase()) ||
+                    (username && uName.toLowerCase() === username.toLowerCase())) {
+                    existingSharedId = attrs.match(/id="([^"]+)"/)?.[1] || ''
+                    break
+                }
+            }
+        }
+    }
+
+    if (existingSharedId) {
+        // UPDATE existing share
+        const updateBody = JSON.stringify({
+            server_id: serverId,
+            shared_server: {
+                library_section_ids: sectionIds ? sectionIds.split(',').map(Number) : []
+            }
+        })
+        
+        const res = await fetch(`https://plex.tv/api/servers/${machineIdentifier}/shared_servers/${existingSharedId}`, {
+            method: 'PUT',
+            headers: { 
+                'X-Plex-Token': token, 
+                'X-Plex-Client-Identifier': 'plex-crm',
+                'X-Plex-Product': 'Plex CRM',
+                'X-Plex-Device': 'Web',
+                'X-Plex-Platform': 'Web',
+                'X-Plex-Version': '1.0',
+                'Accept': 'application/json', 
+                'Content-Type': 'application/json' 
+            },
+            body: updateBody
+        })
+        
+        const ok = res.status >= 200 && res.status < 300
+        if (ok) return NextResponse.json({ ok: true, server_id: serverId, updated: true })
+        // If update failed, fall through to try create? usually better to error or fallback
+    }
+
     const body = new URLSearchParams()
     // Always include email when provided (Plex requires email or username)
     const inviteEmail = String(email || '').trim()

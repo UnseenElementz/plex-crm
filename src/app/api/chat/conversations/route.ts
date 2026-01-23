@@ -47,9 +47,28 @@ export async function POST(request: Request){
   try {
     const body = await request.json()
     const { customer_ip, metadata } = body || {}
+    
+    // Auto-enrich with customer data if email is present
+    let enrichedMetadata = { ...metadata }
+    if (metadata?.email) {
+      const { data: customer } = await supabase
+        .from('customers')
+        .select('plex_username, full_name, name')
+        .eq('email', metadata.email)
+        .single()
+      
+      if (customer) {
+        enrichedMetadata = {
+          ...enrichedMetadata,
+          plex_username: customer.plex_username,
+          full_name: customer.full_name || customer.name || enrichedMetadata.full_name
+        }
+      }
+    }
+
     const { data, error } = await supabase
       .from('conversations')
-      .insert({ status: 'active', customer_ip, metadata, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .insert({ status: 'active', customer_ip, metadata: enrichedMetadata, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .select()
       .single()
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })

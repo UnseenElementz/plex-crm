@@ -346,6 +346,10 @@ export default function AdminCustomersPage(){
                                 className="btn-xs-outline w-full"
                                 onClick={()=>{ sendTranscode(c.email, setSendingEmail, setSendMsg); setOpenActionsId(null) }}
                               >Over Stream Warning</button>
+                              <button
+                                className="btn-xs-outline w-full text-rose-400 hover:text-rose-300 hover:border-rose-400"
+                                 onClick={()=>{ sendChargebackBan(c.email, setSendingEmail, setSendMsg, loadCustomers); setOpenActionsId(null) }}
+                               >Ban & Chargeback Notice</button>
                           <button
                             className="btn-xs-outline w-full"
                             onClick={()=>{ setLinkingItem(c); setLinkInput(c.plex_username || ''); setOpenActionsId(null) }}
@@ -630,6 +634,27 @@ async function sendTranscode(email: string, setSendingEmail: (v: string | null)=
       }
     } else {
       setSendMsg('Over-stream warning sent successfully!')
+    }
+  } catch(e: any){ setSendMsg(`Failed: ${e?.message || 'Network error'}`) }
+  finally{ setSendingEmail(null); setTimeout(()=> setSendMsg(''), 5000) }
+}
+
+async function sendChargebackBan(email: string, setSendingEmail: (v: string | null)=>void, setSendMsg: (v: string)=>void){
+  if (!confirm('Are you sure? This will BAN the user and send a termination email.')) return
+  try{
+    setSendingEmail(email)
+    setSendMsg('Sending ban notice...')
+    const res = await fetch('/api/warnings/chargeback', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email }) })
+    const data = await res.json()
+    if (!res.ok){
+      const errorMsg = data?.error || 'Unknown error'
+      if (String(errorMsg).includes('SMTP not configured')) {
+        setSendMsg('Email service not configured. Please contact admin.')
+      } else {
+        setSendMsg(`Failed: ${errorMsg}`)
+      }
+    } else {
+      setSendMsg('User banned and notice sent!')
     }
   } catch(e: any){ setSendMsg(`Failed: ${e?.message || 'Network error'}`) }
   finally{ setSendingEmail(null); setTimeout(()=> setSendMsg(''), 5000) }

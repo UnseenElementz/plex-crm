@@ -135,19 +135,6 @@ export default function Header(){
             )}
             {userRole === 'customer' && (
               <Link 
-                href="/customer/chat" 
-                prefetch={false}
-                className={`px-3 py-1 rounded text-sm transition-colors ${
-                  pathname === '/customer/chat'
-                    ? 'bg-cyan-500/30 text-cyan-300'
-                    : 'text-slate-400 hover:text-cyan-400 hover:bg-slate-800/30'
-                }`}
-              >
-                Chat
-              </Link>
-            )}
-            {userRole === 'customer' && (
-              <Link 
                 href="/customer/settings" 
                 prefetch={false}
                 className={`px-3 py-1 rounded text-sm transition-colors ${

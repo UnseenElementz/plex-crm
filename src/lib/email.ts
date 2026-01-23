@@ -136,6 +136,33 @@ export async function sendTranscodeWarning(to: string) {
   await transporter.sendMail({ from: process.env.SMTP_FROM || user, to, subject, text: body })
 }
 
+export function chargebackBanTemplate() {
+  return {
+    subject: 'Service Termination – Chargeback Notice',
+    body:
+`Hello,
+
+We have received notice that a chargeback was initiated for your recent payment.
+
+As a result, we can no longer provide you with service. Your account has been permanently terminated, and your IP address has been banned from our system effective immediately.
+
+Chargebacks are taken very seriously and are considered a breach of our agreement. This decision is final and cannot be reversed.
+
+Tank | Developer`
+  }
+}
+
+export async function sendChargebackBanEmail(to: string) {
+  const { subject, body } = chargebackBanTemplate()
+  const host = process.env.SMTP_HOST
+  const port = Number(process.env.SMTP_PORT || 465)
+  const user = process.env.SMTP_USER
+  const pass = process.env.SMTP_PASS
+  if (!host || !user || !pass) throw new Error('SMTP config missing')
+  const transporter = nodemailer.createTransport({ host, port, secure: port === 465, auth: { user, pass } })
+  await transporter.sendMail({ from: process.env.SMTP_FROM || user, to, subject, text: body })
+}
+
 export async function sendCustomEmail(to: string[], subject: string, body: string) {
   const host = process.env.SMTP_HOST
   const port = Number(process.env.SMTP_PORT || 465)
