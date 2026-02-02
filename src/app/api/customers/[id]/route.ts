@@ -34,7 +34,8 @@ export async function GET(_: Request, { params }: { params: { id: string } }){
       notes: row.notes,
       plex_username: (row.notes || '').match(/Plex:\s*(.+)/i)?.[1] || undefined,
       timezone: (row.notes || '').match(/Timezone:\s*(.+)/i)?.[1] || undefined,
-      status: row.status ?? row.subscription_status
+      status: row.status ?? row.subscription_status,
+      downloads: (row.notes || '').includes('Downloads: Yes')
     }
   })() : null
   return NextResponse.json(mapped)

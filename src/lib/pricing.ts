@@ -8,6 +8,7 @@ export type PricingConfig = {
   yearly_price: number
   stream_monthly_price: number
   stream_yearly_price: number
+  downloads_price?: number
 }
 
 function readPricingConfig(): PricingConfig | null {
@@ -21,17 +22,23 @@ function readPricingConfig(): PricingConfig | null {
       yearly_price: Number(s.yearly_price) || 85,
       stream_monthly_price: Number(s.stream_monthly_price) || 5,
       stream_yearly_price: Number(s.stream_yearly_price) || 20,
+      downloads_price: Number(s.downloads_price) || 20,
     }
   }catch{ return null }
 }
 
-export function calculatePrice(plan: Plan, streams: number, config?: PricingConfig | null): number {
+export function calculatePrice(plan: Plan, streams: number, config?: PricingConfig | null, downloads?: boolean): number {
   const cfg = config || readPricingConfig()
   const included = 1
   const extra = Math.max(0, streams - included)
   const base = plan === 'yearly' ? (cfg?.yearly_price ?? 85) : (cfg?.monthly_price ?? 15)
   const extraPrice = plan === 'yearly' ? (cfg?.stream_yearly_price ?? 20) : (cfg?.stream_monthly_price ?? 5)
-  return base + extra * extraPrice
+  
+  let total = base + extra * extraPrice
+  if (downloads) {
+    total += (cfg?.downloads_price ?? 20)
+  }
+  return total
 }
 
 export function getTransactionFee(plan: Plan): number {

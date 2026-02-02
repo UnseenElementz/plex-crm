@@ -5,19 +5,26 @@ import { CustomerCreateSchema, CustomerUpdateSchema, formatZodError } from '@/li
 import DatePicker from '@/components/DatePicker'
 
 type Plan = 'monthly'|'yearly'
-type Customer = { id?: string; full_name: string; email: string; plan: Plan; streams: number; start_date?: string; next_due_date?: string; notes?: string; plex_username?: string }
+type Customer = { id?: string; full_name: string; email: string; plan: Plan; streams: number; start_date?: string; next_due_date?: string; notes?: string; plex_username?: string; downloads?: boolean }
 
 export default function CustomerForm({ initial, onSaved, onCancel }: { initial?: Customer; onSaved?: (c: any)=>void; onCancel?: ()=>void }){
-  const [c, setC] = useState<Customer>(initial || { full_name:'', email:'', plan:'monthly', streams:1 })
+  const [c, setC] = useState<Customer>(initial || { full_name:'', email:'', plan:'yearly', streams:1 } as Customer)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [pricingConfig, setPricingConfig] = useState<any>(null)
-  const price = calculatePrice(c.plan, c.streams, pricingConfig)
+  const [price, setPrice] = useState(0)
+  const [downloads, setDownloads] = useState(initial?.downloads || false)
+  
   const [dueInput, setDueInput] = useState('')
   const [startInput, setStartInput] = useState('')
   const [showStartPicker, setShowStartPicker] = useState(false)
   const [showDuePicker, setShowDuePicker] = useState(false)
+
+  useEffect(()=>{
+    const p = calculatePrice(c.plan, c.streams, pricingConfig, downloads)
+    setPrice(p)
+  }, [c.plan, c.streams, downloads, pricingConfig])
   
   const formatDateForInput = (dateString: string | undefined): string => {
     if (!dateString) return ''
@@ -76,7 +83,12 @@ export default function CustomerForm({ initial, onSaved, onCancel }: { initial?:
       next_due_date: v.next_due_date || calculateNextDue(v.plan || 'monthly', midday).toISOString() 
     }))
   }, [])
-  useEffect(()=>{ (async()=>{ try{ const r = await fetch('/api/admin/settings', { cache: 'no-store' }); if (r.ok){ const j = await r.json(); setPricingConfig(j) } } catch{} })() }, [])
+  useEffect(()=>{ 
+    (async()=>{ try{
+      const res = await fetch('/api/admin/settings')
+      if (res.ok){ setPricingConfig(await res.json()) }
+    } catch{} })() 
+  }, [])
   useEffect(()=>{ setDueInput(formatDateForInput(c.next_due_date)) }, [c.next_due_date])
   useEffect(()=>{ setStartInput(formatDateForInput(c.start_date)) }, [c.start_date])
   useEffect(()=>{ 
@@ -95,6 +107,9 @@ export default function CustomerForm({ initial, onSaved, onCancel }: { initial?:
     setError(''); setSuccess(''); setLoading(true)
     try{
       const draft: any = { ...c }
+      // Explicitly include downloads field in the payload
+      draft.downloads = downloads
+      
       if (dueInput) {
         const iso = parseDateFromInput(dueInput)
         if (!iso) { setError('Invalid next due date'); return }
@@ -142,11 +157,32 @@ export default function CustomerForm({ initial, onSaved, onCancel }: { initial?:
       <input className="input" placeholder="Plex Username" value={c.plex_username || ''} onChange={e=>setC({ ...c, plex_username: e.target.value })} />
       <label className="label">Plan</label>
       <div className="flex gap-3 overflow-x-auto pb-1">
-        <button disabled={loading} className={`btn whitespace-nowrap ${c.plan==='monthly'?'active':''}`} onClick={()=>setC({ ...c, plan: 'monthly', next_due_date: calculateNextDue('monthly', new Date(c.start_date || new Date())).toISOString() })}>Monthly</button>
-        <button disabled={loading} className={`btn whitespace-nowrap ${c.plan==='yearly'?'active':''}`} onClick={()=>setC({ ...c, plan: 'yearly', next_due_date: calculateNextDue('yearly', new Date(c.start_date || new Date())).toISOString() })}>Yearly</button>
+        <button disabled={loading} className={`btn whitespace-nowrap ${c.plan==='yearly'?'active':''}`} onClick={()=>setC({ ...c, plan: 'yearly', next_due_date: calculateNextDue('yearly', new Date(c.start_date || new Date())).toISOString() })}>1 Year Hosting</button>
       </div>
       <label className="label">Streams</label>
-      <input className="input" type="number" min={1} value={c.streams} onChange={e=>setC({ ...c, streams: parseInt(e.target.value||'1',10) })} />
+      <select className="input" value={c.streams} onChange={e=>setC({ ...c, streams: Math.min(5, Math.max(1, parseInt(e.target.value||'1',10))) })}>
+        <option value={1}>1</option>
+        <option value={2}>2</option>
+        <option value={3}>3</option>
+        <option value={4}>4</option>
+        <option value={5}>5</option>
+      </select>
+
+      <div className="mt-2 p-3 bg-slate-800/50 rounded-lg border border-slate-700">
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input 
+            type="checkbox" 
+            className="checkbox checkbox-primary"
+            checked={downloads}
+            onChange={e => setDownloads(e.target.checked)}
+          />
+          <div>
+            <div className="font-medium text-slate-200">Add Downloads</div>
+            <div className="text-xs text-slate-400">Enable downloads for +£20.00</div>
+          </div>
+        </label>
+      </div>
+
       <label className="label">Start date (optional)</label>
       <div className="space-y-2">
         <div className="flex gap-2">

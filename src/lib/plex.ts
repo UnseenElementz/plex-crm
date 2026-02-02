@@ -63,6 +63,48 @@ export async function getPlexFriends(serverUrl: string, token: string): Promise<
   }
 }
 
+export async function getAllPlexUsers(token: string): Promise<PlexFriend[]> {
+  // 1. Get Friends
+  const friends = await getPlexFriends('https://plex.tv', token)
+  const usersMap = new Map<string, PlexFriend>()
+  friends.forEach(f => {
+      // Use email as primary key if available, else username
+      const key = f.email ? f.email.toLowerCase() : f.username.toLowerCase()
+      usersMap.set(key, f)
+  })
+
+  // 2. Get Shared Users from all servers (to catch pending invites or non-friend shares)
+  try {
+    const servers = await getOwnedServers(token)
+    for (const server of servers) {
+        const res = await fetch(`https://plex.tv/api/servers/${server.machineIdentifier}/shared_servers`, { headers: plexHeaders(token) })
+        if (!res.ok) continue
+        const text = await res.text()
+        const blocks = text.split('</SharedServer>')
+        for (const block of blocks) {
+            if (!block.includes('<SharedServer')) continue
+            const attrs = block.match(/<SharedServer\s+([^>]+)>/)?.[1] || ''
+            const id = attrs.match(/id="([^"]+)"/)?.[1] || ''
+            const username = attrs.match(/username="([^"]+)"/)?.[1] || ''
+            const email = attrs.match(/email="([^"]+)"/)?.[1] || ''
+            const thumb = attrs.match(/thumb="([^"]+)"/)?.[1] || ''
+            const userID = attrs.match(/userID="([^"]+)"/)?.[1] || id 
+
+            if (username || email) {
+                const key = email ? email.toLowerCase() : username.toLowerCase()
+                if (!usersMap.has(key)) {
+                    usersMap.set(key, { id: userID, title: username, username, email, thumb })
+                }
+            }
+        }
+    }
+  } catch (e) {
+      console.error('Error fetching shared users:', e)
+  }
+
+  return Array.from(usersMap.values())
+}
+
 export interface PlexLibrary {
   id: string
   title: string

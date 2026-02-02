@@ -15,6 +15,8 @@ export default function AdminEmailPage(){
   const [sending, setSending] = useState(false)
   const [msg, setMsg] = useState('')
   const [syncing, setSyncing] = useState(false)
+  const [unmatchedPlex, setUnmatchedPlex] = useState<string[]>([])
+  const [showUnmatched, setShowUnmatched] = useState(false)
 
   useEffect(()=>{ 
     loadCustomers()
@@ -41,13 +43,15 @@ export default function AdminEmailPage(){
       if (res.ok) {
         setMsg(data.message || 'Sync successful')
         const recs: string[] = Array.isArray(data.emails) ? data.emails.filter(Boolean) : []
+        const unmatched = data.unmatched_friends ? data.unmatched_friends.map((f:any) => f.email).filter(Boolean) : []
+        setUnmatchedPlex(unmatched)
         if (recs.length > 0) {
           setSelected(prev => {
             const next = { ...prev }
             recs.forEach(e => next[e] = true)
             return next
           })
-          setMsg(`Selected ${recs.length} recipients from Plex`)
+          setMsg(`Selected ${recs.length} recipients from Plex. Found ${unmatched.length} unmatched users.`)
         }
         await loadCustomers()
       } else {
@@ -133,6 +137,17 @@ export default function AdminEmailPage(){
           >
             {syncing ? 'Syncing...' : '↻ Sync Plex Users'}
           </button>
+          {unmatchedPlex.length > 0 && (
+            <button className="btn-ghost text-xs border border-amber-400/30 text-amber-400 hover:bg-amber-400/10" onClick={()=> {
+              setSelected({});
+              const next: Record<string, boolean> = {};
+              unmatchedPlex.forEach(e => next[e] = true);
+              setSelected(next);
+              setMsg(`Selected ${unmatchedPlex.length} unmatched Plex users`);
+            }}>
+              Select {unmatchedPlex.length} Unmatched Plex Users Only
+            </button>
+          )}
           <a href="/admin" className="btn-outline">← Back to Chat</a>
         </div>
       </div>

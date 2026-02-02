@@ -1,6 +1,6 @@
 "use client"
 
-export default function PayPalButton({ amount, currency = 'GBP', plan, streams }: { amount: number; currency?: string; customerEmail?: string; plan?: 'monthly'|'yearly'; streams?: number; onSuccess?: (orderId: string) => void }){
+export default function PayPalButton({ amount, currency = 'GBP', plan, streams, downloads, onSuccess }: { amount: number; currency?: string; customerEmail?: string; plan?: 'monthly'|'yearly'; streams?: number; downloads?: boolean; onSuccess?: (orderId: string) => void }){
   
   const getPlanLabel = (p?: string) => {
     if (p === 'yearly') return '1 Year Hosting'
@@ -9,7 +9,8 @@ export default function PayPalButton({ amount, currency = 'GBP', plan, streams }
 
   const currentPlanLabel = getPlanLabel(plan)
   const currentStreamsLabel = streams === 1 ? '1 Stream' : `${streams} Streams`
-  const yourReference = `${currentPlanLabel} – ${currentStreamsLabel}`
+  const currentDownloadsLabel = downloads ? ' + Downloads' : ''
+  const yourReference = `${currentPlanLabel} – ${currentStreamsLabel}${currentDownloadsLabel}`
 
   return (
     <div className="glass p-6 rounded-xl border border-amber-500/20 bg-amber-900/10 space-y-6">

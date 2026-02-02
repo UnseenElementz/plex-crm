@@ -19,6 +19,7 @@ type Customer = {
   startDate: string
   nextDueDate: string
   notes?: string
+  downloads?: boolean
 }
 
 export default function CustomerPortal() {
@@ -243,17 +244,13 @@ export default function CustomerPortal() {
             <h3 className="card-title">Subscription</h3>
             <div className="space-y-3">
               <label className="label">Plan</label>
-              <div className="flex gap-3">
-                <button className={`btn ${customer.plan==='monthly'?'active':''}`} onClick={()=>setCustomer(c=>({
-                  ...c,
-                  plan:'monthly',
-                  nextDueDate: calculateNextDue('monthly', new Date(c.startDate)).toISOString()
-                }))}>Monthly</button>
-                <button className={`btn ${customer.plan==='yearly'?'active':''}`} onClick={()=>setCustomer(c=>({
+              <div className="flex gap-2 mb-4">
+                {/* Monthly removed as per request */}
+                <button className={`btn w-full ${customer.plan==='yearly'?'active':''}`} onClick={()=>setCustomer(c=>({
                   ...c,
                   plan:'yearly',
                   nextDueDate: calculateNextDue('yearly', new Date(c.startDate)).toISOString()
-                }))}>Yearly</button>
+                }))}>1 Year Hosting</button>
               </div>
               <label className="label">Streams</label>
               <select className="input" value={customer.streams} onChange={e=>setCustomer(c=>({
@@ -266,14 +263,30 @@ export default function CustomerPortal() {
                 <option value={4}>4</option>
                 <option value={5}>5</option>
               </select>
-              <div className="mt-2 text-slate-200">Total price: £{price.toFixed(2)}</div>
+
+              <div className="mt-4 p-3 bg-slate-800/50 rounded-lg border border-slate-700">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    className="checkbox checkbox-primary"
+                    checked={customer.downloads || false}
+                    onChange={e => setCustomer(c => ({ ...c, downloads: e.target.checked }))}
+                  />
+                  <div>
+                    <div className="font-medium text-slate-200">Add Downloads</div>
+                    <div className="text-xs text-slate-400">Enable downloads for +£20.00</div>
+                  </div>
+                </label>
+              </div>
+
+              <div className="mt-4 text-slate-200 text-lg font-bold">Total price: £{price.toFixed(2)}</div>
               <div className="text-xs text-slate-400">£{getTransactionFee(customer.plan)} transaction fee applies</div>
               <div className="mt-1 text-slate-300">Next due: {format(new Date(customer.nextDueDate), 'dd/MM/yyyy')}</div>
               <div className={`mt-1 tag ${status.toLowerCase()}`}>Status: {status}</div>
             </div>
             <div className="mt-4 space-y-2" suppressHydrationWarning>
               {canPay ? (
-                <PayPalButton amount={price} plan={customer.plan} streams={customer.streams} customerEmail={customer.email} onSuccess={()=>{ }} />
+                <PayPalButton amount={price} plan={customer.plan} streams={customer.streams} downloads={customer.downloads} customerEmail={customer.email} onSuccess={()=>{ }} />
               ) : (
                 <div className="glass p-4 rounded-lg border border-amber-500/30 bg-amber-900/20 text-amber-300 text-sm">
                   Payments are temporarily locked. Active subscribers can extend before their due date.

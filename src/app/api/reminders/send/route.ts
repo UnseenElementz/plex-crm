@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
-import { sendRenewalEmail, renewalEmailTemplate0Days, renewalEmailTemplate7Days, renewalEmailTemplate30Days } from '@/lib/email'
-import { differenceInDays } from 'date-fns'
+import { sendRenewalEmail } from '@/lib/email'
+import { differenceInDays, format } from 'date-fns'
 import { createClient } from '@supabase/supabase-js'
 
 export async function POST(request: Request){
@@ -23,11 +23,112 @@ export async function POST(request: Request){
       return NextResponse.json({ error: 'SMTP not configured' }, { status: 400 })
     }
 
-    const { data: customers } = await supabase.from('customers').select('next_due_date,next_payment_date').eq('email', email).limit(1)
+    const { data: customers } = await supabase.from('customers').select('next_due_date,next_payment_date,subscription_status,status').eq('email', email).limit(1)
     const customer = customers?.[0]
     const dueDate = customer?.next_due_date || customer?.next_payment_date
-    const daysLeft = dueDate ? differenceInDays(new Date(dueDate), new Date()) : null
-    const tpl = (daysLeft === 30) ? renewalEmailTemplate30Days() : (daysLeft === 7) ? renewalEmailTemplate7Days() : (daysLeft !== null && daysLeft <= 0) ? renewalEmailTemplate0Days() : renewalEmailTemplate7Days()
+    const formattedDate = dueDate ? format(new Date(dueDate), 'dd MMM yyyy') : null
+    const isInactive = (customer?.status === 'inactive' || customer?.subscription_status === 'inactive')
+    
+    let emailBody = `I hope you’re doing well.
+
+This is a friendly reminder that your Plex service is coming up for renewal${formattedDate ? ' on ' + formattedDate : ''}. We send renewal emails well in advance so you have plenty of time to renew without any pressure.
+
+However, with how quickly the server is growing at the moment, we strongly recommend renewing before your expiry date to avoid the risk of losing your slot, as availability is limited.
+
+Please note: we no longer offer monthly subscriptions — all plans are now yearly only.
+
+💳 Payment Method
+
+PayPal: Streamzrus1@gmail.com
+(Please send as Friends & Family)
+
+📺 Subscription Options
+
+£85 per year – Includes full access to:
+
+All 4K HDR / Dolby Vision content
+
+1080p movies & TV shows
+
+International sports
+
+Additional streams: £20 per extra stream (allows multiple devices to watch at the same time).
+
+⬇️ New: Downloads Option
+
+We’ve also added a downloads feature for anyone who needs it:
+
+£20 add-on
+
+Ideal for travelling and saving mobile data
+
+🌐 Account & Renewal Info
+
+You can check your renewal date, payment instructions, and manage your account directly on our website:
+http://plex-crm.vercel.app
+
+Simply register or log in if you already have an account.
+
+If you do not wish to renew, please let us know. Our slots are limited, and we currently have people waiting to join.
+
+Thank you for your continued support.
+
+Kind regards,
+Neo
+Streamz R Us`
+
+    if (isInactive) {
+      emailBody = `I hope you’re doing well.
+
+We noticed that your Plex service is currently marked as INACTIVE. If you wish to restore access, please renew your subscription.
+
+${formattedDate ? 'Your service expired on: ' + formattedDate + '\n\n' : ''}To reactivate your account, please see the payment details below:
+
+Please note: we no longer offer monthly subscriptions — all plans are now yearly only.
+
+💳 Payment Method
+
+PayPal: Streamzrus1@gmail.com
+(Please send as Friends & Family)
+
+📺 Subscription Options
+
+£85 per year – Includes full access to:
+
+All 4K HDR / Dolby Vision content
+
+1080p movies & TV shows
+
+International sports
+
+Additional streams: £20 per extra stream (allows multiple devices to watch at the same time).
+
+⬇️ New: Downloads Option
+
+We’ve also added a downloads feature for anyone who needs it:
+
+£20 add-on
+
+Ideal for travelling and saving mobile data
+
+🌐 Account & Renewal Info
+
+You can manage your account directly on our website:
+http://plex-crm.vercel.app
+
+Simply register or log in if you already have an account.
+
+If you do not wish to renew, please let us know so we can remove your account to free up space.
+
+Thank you,
+Neo
+Streamz R Us`
+    }
+
+    const template = {
+      subject: isInactive ? 'Service Inactive - Renewal Required' : 'Plex Renewal Reminder',
+      body: emailBody
+    }
     
     // Temporarily set environment variables for the email function
     const originalEnv = {
@@ -45,7 +146,7 @@ export async function POST(request: Request){
     process.env.SMTP_FROM = settings.smtp_from || settings.smtp_user
     
     try {
-      await sendRenewalEmail(email, tpl)
+      await sendRenewalEmail(email, template)
       return NextResponse.json({ ok: true })
     } finally {
       // Restore original environment variables

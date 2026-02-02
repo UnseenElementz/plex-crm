@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import CustomerForm from '@/components/CustomerForm'
 import { calculatePrice, getStatus } from '@/lib/pricing'
 import { format } from 'date-fns'
-type Customer = { id: string; full_name: string; email: string; plan: 'monthly'|'yearly'; streams: number; next_due_date: string; start_date?: string; plex_username?: string; status?: 'active'|'inactive' }
+type Customer = { id: string; full_name: string; email: string; plan: 'monthly'|'yearly'; streams: number; next_due_date: string; start_date?: string; plex_username?: string; status?: 'active'|'inactive'; downloads?: boolean }
 
 export default function AdminCustomersPage(){
   // Single effect: ensure session then load customers (dev auto-login, prod redirect)
@@ -88,22 +88,27 @@ export default function AdminCustomersPage(){
     }catch{}
   })() }, [])
 
-  async function syncPlex(){
-    setSyncing(true); setSendMsg('Syncing with Plex...')
-    try{
-      const res = await fetch('/api/admin/plex/sync', { method:'POST' })
+  const syncPlex = async () => {
+    setSyncing(true)
+    setUnmatchedPlex([])
+    try {
+      const res = await fetch('/api/admin/plex/sync', { method: 'POST' })
       const data = await res.json()
-      if(res.ok){
-        setSendMsg(`Synced! Updated ${data.count} customers.`)
-        setUnmatchedPlex(data.unmatched || [])
-        // Reload customers
-        const r2 = await fetch('/api/customers')
-        if(r2.ok) setCustomers(await r2.json())
+      if (res.ok) {
+        if (data.unmatched_friends && data.unmatched_friends.length > 0) {
+           setUnmatchedPlex(data.unmatched_friends)
+        } else {
+           alert(`Synced! Updated ${data.count} customers. Total Plex Friends: ${data.total_friends}`)
+        }
+        loadCustomers()
       } else {
-        setSendMsg(data.error || 'Sync failed')
+        alert('Sync failed: ' + (data.error || 'Unknown error'))
       }
-    } catch(e){ setSendMsg('Network error') }
-    finally{ setSyncing(false); setTimeout(()=> setSendMsg(''), 5000) }
+    } catch (e) {
+      alert('Sync failed')
+    } finally {
+      setSyncing(false)
+    }
   }
 
   async function linkUnmatched(plexUser: { username: string }, customerId: string){
@@ -283,7 +288,7 @@ export default function AdminCustomersPage(){
               <tbody>
                 {filtered.map(c=>{
                   const hasPlan = Boolean(c.plan)
-                  const price = hasPlan ? calculatePrice(c.plan as any, c.streams, pricingConfig) : null
+                  const price = hasPlan ? calculatePrice(c.plan as any, c.streams, pricingConfig, c.downloads) : null
                   const statusLabel = !hasPlan ? 'Registered' : ((c.status === 'inactive') ? 'Inactive' : getStatus(new Date(c.next_due_date)))
                   return (
                     <tr key={c.id} className="border-b border-slate-800/30 hover:bg-slate-800/30 transition-all duration-200 group">

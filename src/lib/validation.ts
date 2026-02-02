@@ -11,7 +11,8 @@ export const CustomerCreateSchema = z.object({
   next_due_date: z.string().datetime(),
   notes: z.string().max(2000).optional(),
   plex_username: z.string().min(2).max(100).optional(),
-  timezone: z.string().max(100).optional()
+  timezone: z.string().max(100).optional(),
+  downloads: z.boolean().optional()
 })
 
 export const CustomerUpdateSchema = CustomerCreateSchema.partial().extend({

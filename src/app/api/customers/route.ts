@@ -42,7 +42,8 @@ export async function GET(){
       notes: c.notes,
       plex_username: (c.notes || '').match(/Plex:\s*(.+)/i)?.[1] || undefined,
       timezone: (c.notes || '').match(/Timezone:\s*(.+)/i)?.[1] || undefined,
-      status: c.status ?? c.subscription_status
+      status: c.status ?? c.subscription_status,
+      downloads: (c.notes || '').includes('Downloads: Yes')
     }
   })
   return NextResponse.json(mapped)

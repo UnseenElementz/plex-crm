@@ -24,11 +24,30 @@ export default function AdminDashboard() {
     fetchMessages,
     refreshMessages,
     createConversation,
+    updateConversationStatus,
+    endConversation,
+    deleteConversation,
     isLoading,
     error,
     connectSocket,
     disconnectSocket
   } = useChatStore()
+
+  // Handle deletion safely
+  const handleDelete = async () => {
+    if (!selectedConversation) return
+    if (!confirm('Delete this conversation permanently?')) return
+    
+    // Optimistic UI update - go back to list immediately
+    const id = selectedConversation.id
+    setSelectedConversation(null)
+    
+    // Perform deletion
+    await deleteConversation(id)
+    
+    // Force refresh list to ensure sync
+    setTimeout(() => refreshConversations(), 1000)
+  }
 
   useEffect(() => {
     try{

@@ -22,6 +22,7 @@ export default function AdminSettingsPage() {
     yearly_price: '85',
     stream_monthly_price: '5',
     stream_yearly_price: '20',
+    downloads_price: '20',
     three_year_price: '180',
     stream_three_year_price: '40',
     bg_music_url: '',
@@ -333,6 +334,7 @@ export default function AdminSettingsPage() {
         yearly_price: parseFloat(settings.yearly_price) || 85,
         stream_monthly_price: parseFloat(settings.stream_monthly_price) || 5,
         stream_yearly_price: parseFloat(settings.stream_yearly_price) || 20,
+        downloads_price: parseFloat(settings.downloads_price) || 20,
         three_year_price: parseFloat(settings.three_year_price) || 180,
         stream_three_year_price: parseFloat(settings.stream_three_year_price) || 40,
         smtp_host: settings.smtp_host,
@@ -717,6 +719,17 @@ export default function AdminSettingsPage() {
                 step="0.01"
                 value={settings.stream_yearly_price}
                 onChange={e=>setSettings({...settings, stream_yearly_price: e.target.value})}
+                onKeyPress={handleKeyPress}
+              />
+            </div>
+            <div>
+              <label className="label">Downloads Addon Price (£)</label>
+              <input 
+                className="input" 
+                type="number"
+                step="0.01"
+                value={settings.downloads_price}
+                onChange={e=>setSettings({...settings, downloads_price: e.target.value})}
                 onKeyPress={handleKeyPress}
               />
             </div>

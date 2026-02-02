@@ -20,7 +20,7 @@ export default function RegisterPage(){
     const user = data.user
     if (!user) { setError('No user'); return }
     await s.from('profiles').insert({ user_id: user.id, email, role: 'customer' })
-    await s.from('customers').insert({ full_name: fullName || email, email, plan: 'monthly', streams: 1, next_due_date: new Date().toISOString() })
+    await s.from('customers').insert({ full_name: fullName || email, email, plan: 'yearly', streams: 1, next_due_date: new Date().toISOString() })
     router.push('/customer')
   }
 

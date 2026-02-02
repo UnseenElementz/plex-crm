@@ -32,18 +32,19 @@ async function readPricingConfig(){
     yearly_price: Number(d.yearly_price) || 85,
     stream_monthly_price: Number(d.stream_monthly_price) || 5,
     stream_yearly_price: Number(d.stream_yearly_price) || 20,
+    downloads_price: Number(d.downloads_price) || 20,
   }
 }
 
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    let { amount, currency = 'GBP', plan, streams } = body || {}
+    let { amount, currency = 'GBP', plan, streams, downloads } = body || {}
     if (plan && typeof plan === 'string') {
       const p = plan as Plan
       const s = typeof streams === 'number' ? streams : 1
       const cfg = await readPricingConfig()
-      amount = calculatePrice(p, s, cfg)
+      amount = calculatePrice(p, s, cfg, downloads)
     }
     
     if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {

@@ -20,7 +20,7 @@ export default function CustomerRegisterPage(){
     const s = getSupabase()
     if (!s){ 
       try {
-        const profile = { fullName, email, plan: 'monthly', streams: 1, nextDueDate: new Date().toISOString(), plexUsername }
+        const profile = { fullName, email, plan: 'yearly', streams: 1, nextDueDate: new Date().toISOString(), plexUsername }
         if (typeof window !== 'undefined') {
           localStorage.setItem('customerProfile', JSON.stringify(profile))
           sessionStorage.setItem('customerDemo', 'true')
