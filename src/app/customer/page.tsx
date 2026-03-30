@@ -104,7 +104,8 @@ export default function CustomerPortal() {
             streams: Math.min(5, customerData.streams || 1),
             startDate: customerData.start_date || new Date().toISOString(),
             nextDueDate: customerData.next_payment_date || calculateNextDue(customerData.subscription_type || 'monthly', new Date()).toISOString(),
-            notes: customerData.notes || ''
+            notes: customerData.notes || '',
+            downloads: (customerData.notes || '').includes('Downloads: Yes')
           })
         setHasSubscription(true)
         setAuthState('ready')
@@ -179,12 +180,29 @@ export default function CustomerPortal() {
   const handleSaveChanges = async () => {
     setSaving(true)
     try {
-      // Simulate saving to backend
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      const payload = {
+        full_name: customer.fullName,
+        email: customer.email,
+        plan: customer.plan,
+        streams: customer.streams,
+        downloads: customer.downloads,
+        notes: customer.notes,
+        next_due_date: customer.nextDueDate
+      }
+      
+      const res = await fetch(`/api/customers/${customer.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to save')
+      
       alert('Changes saved successfully!')
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving changes:', error)
-      alert('Failed to save changes. Please try again.')
+      alert(error.message || 'Failed to save changes')
     } finally {
       setSaving(false)
     }
@@ -244,14 +262,28 @@ export default function CustomerPortal() {
             <h3 className="card-title">Subscription</h3>
             <div className="space-y-3">
               <label className="label">Plan</label>
-              <div className="flex gap-2 mb-4">
-                {/* Monthly removed as per request */}
+              <div className="grid grid-cols-1 gap-2 mb-4">
                 <button className={`btn w-full ${customer.plan==='yearly'?'active':''}`} onClick={()=>setCustomer(c=>({
                   ...c,
                   plan:'yearly',
                   nextDueDate: calculateNextDue('yearly', new Date(c.startDate)).toISOString()
                 }))}>1 Year Hosting</button>
+                <button className={`btn w-full ${customer.plan==='movies_only'?'active':''}`} onClick={()=>setCustomer(c=>({
+                  ...c,
+                  plan:'movies_only',
+                  nextDueDate: calculateNextDue('movies_only', new Date(c.startDate)).toISOString()
+                }))}>Movies Only</button>
+                <button className={`btn w-full ${customer.plan==='tv_only'?'active':''}`} onClick={()=>setCustomer(c=>({
+                  ...c,
+                  plan:'tv_only',
+                  nextDueDate: calculateNextDue('tv_only', new Date(c.startDate)).toISOString()
+                }))}>TV Shows Only</button>
               </div>
+              
+              <div className="p-3 bg-cyan-900/20 border border-cyan-500/30 rounded-lg text-xs text-slate-300">
+                <strong>Note:</strong> Movies Only and TV Shows Only packages still contain kids content and all other genres like sports, etc.
+              </div>
+
               <label className="label">Streams</label>
               <select className="input" value={customer.streams} onChange={e=>setCustomer(c=>({
                 ...c,

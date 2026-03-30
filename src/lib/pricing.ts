@@ -1,13 +1,13 @@
 import { addMonths, addYears, differenceInDays } from 'date-fns'
 
-export type Plan = 'monthly' | 'yearly'
+export type Plan = 'monthly' | 'yearly' | 'movies_only' | 'tv_only'
 export const TRANSACTION_FEE = 5
 
 export type PricingConfig = {
-  monthly_price: number
   yearly_price: number
-  stream_monthly_price: number
   stream_yearly_price: number
+  movies_only_price: number
+  tv_only_price: number
   downloads_price?: number
 }
 
@@ -18,10 +18,10 @@ function readPricingConfig(): PricingConfig | null {
     if (!raw) return null
     const s = JSON.parse(raw)
     return {
-      monthly_price: Number(s.monthly_price) || 15,
       yearly_price: Number(s.yearly_price) || 85,
-      stream_monthly_price: Number(s.stream_monthly_price) || 5,
       stream_yearly_price: Number(s.stream_yearly_price) || 20,
+      movies_only_price: Number(s.movies_only_price) || 60,
+      tv_only_price: Number(s.tv_only_price) || 60,
       downloads_price: Number(s.downloads_price) || 20,
     }
   }catch{ return null }
@@ -31,8 +31,20 @@ export function calculatePrice(plan: Plan, streams: number, config?: PricingConf
   const cfg = config || readPricingConfig()
   const included = 1
   const extra = Math.max(0, streams - included)
-  const base = plan === 'yearly' ? (cfg?.yearly_price ?? 85) : (cfg?.monthly_price ?? 15)
-  const extraPrice = plan === 'yearly' ? (cfg?.stream_yearly_price ?? 20) : (cfg?.stream_monthly_price ?? 5)
+  
+  let base = 85
+  let extraPrice = 20
+
+  if (plan === 'yearly') {
+    base = cfg?.yearly_price ?? 85
+    extraPrice = cfg?.stream_yearly_price ?? 20
+  } else if (plan === 'movies_only') {
+    base = cfg?.movies_only_price ?? 60
+    extraPrice = 0
+  } else if (plan === 'tv_only') {
+    base = cfg?.tv_only_price ?? 60
+    extraPrice = 0
+  }
   
   let total = base + extra * extraPrice
   if (downloads) {
@@ -46,7 +58,10 @@ export function getTransactionFee(plan: Plan): number {
 }
 
 export function calculateNextDue(plan: Plan, startDate: Date): Date {
-  return plan === 'yearly' ? addYears(startDate, 1) : addMonths(startDate, 1)
+  if (plan === 'movies_only' || plan === 'tv_only' || plan === 'yearly') {
+    return addYears(startDate, 1)
+  }
+  return addMonths(startDate, 1)
 }
 
 export function getStatus(nextDue: Date): 'Active' | 'Due Soon' | 'Due Today' | 'Overdue' {

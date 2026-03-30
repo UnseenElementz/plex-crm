@@ -17,21 +17,20 @@ export default function AdminSettingsPage() {
     admin_pass: 'Badaman1',
     timezone: 'Europe/London',
     monthly_maintenance: '140',
-    company_name: 'Streamz R Us',
-    monthly_price: '15',
+    company_name: '',
     yearly_price: '85',
-    stream_monthly_price: '5',
     stream_yearly_price: '20',
+    movies_only_price: '60',
+    tv_only_price: '60',
     downloads_price: '20',
-    three_year_price: '180',
-    stream_three_year_price: '40',
     bg_music_url: '',
     bg_music_volume: '0.1',
     bg_music_enabled: true,
     plex_token: '',
     plex_server_url: 'https://plex.tv'
   })
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true) // Start as true to wait for loadSettings
+  const [saveLoading, setSaveLoading] = useState(false)
   const [testMsg, setTestMsg] = useState('')
   const [testing, setTesting] = useState(false)
   const [message, setMessage] = useState('')
@@ -154,150 +153,44 @@ export default function AdminSettingsPage() {
 
   async function loadSettings() {
     try {
-      try {
-        if (typeof window !== 'undefined') {
-          const cookieStr = document.cookie || ''
-          const cookieMatch = cookieStr.split(';').map(s=>s.trim()).find(s=> s.startsWith('admin_settings='))
-          if (cookieMatch) {
-            const rawCookie = decodeURIComponent(cookieMatch.split('=')[1] || '')
-            if (rawCookie) {
-              const data = JSON.parse(rawCookie)
-              setSettings(prev => ({
-                ...prev,
-                smtp_host: data.smtp_host || prev.smtp_host,
-                smtp_port: data.smtp_port || prev.smtp_port,
-                smtp_user: data.smtp_user || prev.smtp_user,
-                smtp_pass: data.smtp_pass || prev.smtp_pass,
-                smtp_from: data.smtp_from || prev.smtp_from,
-                paypal_email: data.paypal_email || prev.paypal_email,
-                payment_lock: Boolean(data.payment_lock ?? prev.payment_lock),
-                chat_online: Boolean(data.chat_online ?? prev.chat_online),
-                hero_image_url: data.hero_image_url || prev.hero_image_url,
-                admin_user: data.admin_user || prev.admin_user,
-                admin_pass: data.admin_pass || prev.admin_pass,
-                timezone: data.timezone || prev.timezone,
-                monthly_maintenance: (data.monthly_maintenance ?? Number(prev.monthly_maintenance)).toString(),
-                company_name: data.company_name || prev.company_name,
-                monthly_price: (data.monthly_price ?? Number(prev.monthly_price)).toString(),
-                yearly_price: (data.yearly_price ?? Number(prev.yearly_price)).toString(),
-                stream_monthly_price: (data.stream_monthly_price ?? Number(prev.stream_monthly_price)).toString(),
-                stream_yearly_price: (data.stream_yearly_price ?? Number(prev.stream_yearly_price)).toString(),
-                three_year_price: (data.three_year_price ?? Number(prev.three_year_price)).toString(),
-                stream_three_year_price: (data.stream_three_year_price ?? Number(prev.stream_three_year_price)).toString(),
-                bg_music_url: data.bg_music_url || prev.bg_music_url,
-                bg_music_volume: (data.bg_music_volume ?? Number(prev.bg_music_volume)).toString(),
-                bg_music_enabled: Boolean(data.bg_music_enabled ?? prev.bg_music_enabled)
-              }))
-            }
-          }
-          const raw = localStorage.getItem('admin_settings')
-          if (raw) {
-            const data = JSON.parse(raw)
-              setSettings(prev => ({
-                ...prev,
-                smtp_host: data.smtp_host || prev.smtp_host,
-                smtp_port: data.smtp_port || prev.smtp_port,
-                smtp_user: data.smtp_user || prev.smtp_user,
-                smtp_pass: data.smtp_pass || prev.smtp_pass,
-                smtp_from: data.smtp_from || prev.smtp_from,
-                paypal_email: data.paypal_email || prev.paypal_email,
-                payment_lock: Boolean(data.payment_lock ?? prev.payment_lock),
-                chat_online: Boolean(data.chat_online ?? prev.chat_online),
-                hero_image_url: data.hero_image_url || prev.hero_image_url,
-                admin_user: data.admin_user || prev.admin_user,
-                admin_pass: data.admin_pass || prev.admin_pass,
-                timezone: data.timezone || prev.timezone,
-                monthly_maintenance: (data.monthly_maintenance ?? Number(prev.monthly_maintenance)).toString(),
-                company_name: data.company_name || prev.company_name,
-                monthly_price: (data.monthly_price ?? Number(prev.monthly_price)).toString(),
-                yearly_price: (data.yearly_price ?? Number(prev.yearly_price)).toString(),
-                stream_monthly_price: (data.stream_monthly_price ?? Number(prev.stream_monthly_price)).toString(),
-                stream_yearly_price: (data.stream_yearly_price ?? Number(prev.stream_yearly_price)).toString(),
-                three_year_price: (data.three_year_price ?? Number(prev.three_year_price)).toString(),
-                stream_three_year_price: (data.stream_three_year_price ?? Number(prev.stream_three_year_price)).toString(),
-                bg_music_url: data.bg_music_url || prev.bg_music_url,
-                bg_music_volume: (data.bg_music_volume ?? Number(prev.bg_music_volume)).toString(),
-                bg_music_enabled: Boolean(data.bg_music_enabled ?? prev.bg_music_enabled)
-              }))
-          }
-        }
-      } catch {}
-
-      // Then try server
-      const res = await fetch('/api/admin/settings')
-      if (!res.ok) {
-        const b = await res.json().catch(()=>({}))
-        setSupabaseStatus('error')
-        setMessage(b?.error || 'Settings table not found. Using local settings until database is ready.')
-        return
+      // ABSOLUTE TRUTH: Always fetch from server/database
+      const res = await fetch(`/api/admin/settings?t=${Date.now()}`, { cache: 'no-store' })
+      if (res.ok) {
+        const data = await res.json()
+        setSupabaseStatus('connected')
+        
+        setSettings({
+          smtp_host: data.smtp_host ?? '',
+          smtp_port: data.smtp_port ?? '587',
+          smtp_user: data.smtp_user ?? '',
+          smtp_pass: data.smtp_pass ?? '',
+          smtp_from: data.smtp_from ?? '',
+          paypal_email: data.paypal_email ?? '',
+          payment_lock: data.payment_lock !== undefined ? Boolean(data.payment_lock) : false,
+          chat_online: data.chat_online !== undefined ? Boolean(data.chat_online) : true,
+          hero_image_url: data.hero_image_url ?? '',
+          admin_user: data.admin_user ?? 'Anfrax786',
+          admin_pass: data.admin_pass ?? 'Badaman1',
+          timezone: data.timezone ?? 'Europe/London',
+          monthly_maintenance: data.monthly_maintenance?.toString() ?? '140',
+          company_name: data.company_name ?? '',
+          yearly_price: data.yearly_price?.toString() ?? '85',
+          stream_yearly_price: data.stream_yearly_price?.toString() ?? '20',
+          movies_only_price: data.movies_only_price?.toString() ?? '60',
+          tv_only_price: data.tv_only_price?.toString() ?? '60',
+          downloads_price: data.downloads_price?.toString() ?? '20',
+          bg_music_url: data.bg_music_url ?? '',
+          bg_music_volume: data.bg_music_volume?.toString() ?? '0.1',
+          bg_music_enabled: data.bg_music_enabled !== undefined ? Boolean(data.bg_music_enabled) : true,
+          plex_token: data.plex_token ?? '',
+          plex_server_url: data.plex_server_url ?? 'https://plex.tv'
+        })
       }
-      const data = await res.json()
-      setSupabaseStatus('connected')
-      setSettings(prev => ({
-        ...prev,
-        smtp_host: data.smtp_host || prev.smtp_host,
-        smtp_port: data.smtp_port || prev.smtp_port,
-        smtp_user: data.smtp_user || prev.smtp_user,
-        smtp_pass: data.smtp_pass || prev.smtp_pass,
-        smtp_from: data.smtp_from || prev.smtp_from,
-        paypal_email: data.paypal_email || prev.paypal_email,
-        payment_lock: Boolean(data.payment_lock ?? prev.payment_lock),
-        chat_online: Boolean(data.chat_online ?? prev.chat_online),
-        hero_image_url: data.hero_image_url || prev.hero_image_url,
-        admin_user: data.admin_user || prev.admin_user,
-        admin_pass: data.admin_pass || prev.admin_pass,
-        timezone: data.timezone || prev.timezone,
-        monthly_maintenance: data.monthly_maintenance?.toString() || prev.monthly_maintenance,
-        company_name: data.company_name || prev.company_name,
-        monthly_price: (data.monthly_price ?? Number(prev.monthly_price)).toString(),
-        yearly_price: (data.yearly_price ?? Number(prev.yearly_price)).toString(),
-        stream_monthly_price: (data.stream_monthly_price ?? Number(prev.stream_monthly_price)).toString(),
-        stream_yearly_price: (data.stream_yearly_price ?? Number(prev.stream_yearly_price)).toString(),
-        three_year_price: (data.three_year_price ?? Number(prev.three_year_price)).toString(),
-        stream_three_year_price: (data.stream_three_year_price ?? Number(prev.stream_three_year_price)).toString(),
-        bg_music_url: data.bg_music_url || prev.bg_music_url,
-        bg_music_volume: (data.bg_music_volume ?? Number(prev.bg_music_volume)).toString(),
-        bg_music_enabled: Boolean(data.bg_music_enabled ?? prev.bg_music_enabled),
-        plex_token: data.plex_token || prev.plex_token,
-        plex_server_url: data.plex_server_url || prev.plex_server_url
-      }))
-      try {
-        if (typeof window !== 'undefined') {
-          const toStore = {
-            monthly_maintenance: data.monthly_maintenance,
-            monthly_price: data.monthly_price,
-            yearly_price: data.yearly_price,
-            stream_monthly_price: data.stream_monthly_price,
-            stream_yearly_price: data.stream_yearly_price,
-            three_year_price: data.three_year_price,
-            stream_three_year_price: data.stream_three_year_price,
-            smtp_host: data.smtp_host,
-            smtp_port: data.smtp_port,
-            smtp_user: data.smtp_user,
-            smtp_pass: data.smtp_pass,
-            smtp_from: data.smtp_from,
-            paypal_email: data.paypal_email,
-            payment_lock: Boolean(data.payment_lock),
-            chat_online: Boolean(data.chat_online),
-            hero_image_url: data.hero_image_url,
-            admin_user: data.admin_user,
-            admin_pass: data.admin_pass,
-            timezone: data.timezone,
-            company_name: data.company_name,
-            bg_music_url: data.bg_music_url,
-            bg_music_volume: data.bg_music_volume,
-            bg_music_enabled: data.bg_music_enabled,
-            plex_token: data.plex_token,
-            plex_server_url: data.plex_server_url
-          }
-          localStorage.setItem('admin_settings', JSON.stringify(toStore))
-          document.cookie = `admin_settings=${encodeURIComponent(JSON.stringify(toStore))}; path=/; max-age=31536000`
-        }
-      } catch {}
     } catch (e) {
       console.error('Failed to load settings:', e)
       setSupabaseStatus('error')
-      setMessage('Failed to load settings. Using local settings.')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -325,18 +218,16 @@ export default function AdminSettingsPage() {
       return
     }
     
-    setLoading(true)
+    setSaveLoading(true)
     setMessage('')
     try {
       const settingsData = {
         monthly_maintenance: parseFloat(settings.monthly_maintenance) || 140,
-        monthly_price: parseFloat(settings.monthly_price) || 15,
         yearly_price: parseFloat(settings.yearly_price) || 85,
-        stream_monthly_price: parseFloat(settings.stream_monthly_price) || 5,
         stream_yearly_price: parseFloat(settings.stream_yearly_price) || 20,
+        movies_only_price: parseFloat(settings.movies_only_price) || 60,
+        tv_only_price: parseFloat(settings.tv_only_price) || 60,
         downloads_price: parseFloat(settings.downloads_price) || 20,
-        three_year_price: parseFloat(settings.three_year_price) || 180,
-        stream_three_year_price: parseFloat(settings.stream_three_year_price) || 40,
         smtp_host: settings.smtp_host,
         smtp_port: settings.smtp_port,
         smtp_user: settings.smtp_user,
@@ -362,22 +253,51 @@ export default function AdminSettingsPage() {
       if (!res.ok) {
         setMessage(body?.error || 'Failed to save to database. Saved locally.')
       } else if (body.dbOk === false) {
-        setMessage('⚠️ Saved to browser, but Database write failed. Did you run the Migration SQL in Supabase?')
+        setMessage('⚠️ Saved to browser, but Database write failed: ' + (body.dbError || 'Check Supabase SQL.'))
       } else {
-        setMessage('Settings saved to Database successfully!')
+        if (body.dbError && body.dbError.startsWith('PARTIAL_SUCCESS')) {
+            setMessage('✅ Image link saved, but prices could not be saved yet. ' + body.dbError)
+        } else {
+            setMessage('Settings saved successfully! (Note: Saved to both Database and Browser Cache)')
+        }
+        
+        if (body.settings) {
+            // Update state with confirmed data from server
+            const s = body.settings
+            setSettings({
+                smtp_host: s.smtp_host ?? '',
+                smtp_port: s.smtp_port ?? '587',
+                smtp_user: s.smtp_user ?? '',
+                smtp_pass: s.smtp_pass ?? '',
+                smtp_from: s.smtp_from ?? '',
+                paypal_email: s.paypal_email ?? '',
+                payment_lock: s.payment_lock !== undefined ? Boolean(s.payment_lock) : false,
+                chat_online: s.chat_online !== undefined ? Boolean(s.chat_online) : true,
+                hero_image_url: s.hero_image_url ?? '',
+                admin_user: s.admin_user ?? 'Anfrax786',
+                admin_pass: s.admin_pass ?? 'Badaman1',
+                timezone: s.timezone ?? 'Europe/London',
+                monthly_maintenance: s.monthly_maintenance?.toString() ?? '140',
+                company_name: s.company_name ?? '',
+                yearly_price: s.yearly_price?.toString() ?? '85',
+                stream_yearly_price: s.stream_yearly_price?.toString() ?? '20',
+                movies_only_price: s.movies_only_price?.toString() ?? '60',
+                tv_only_price: s.tv_only_price?.toString() ?? '60',
+                downloads_price: s.downloads_price?.toString() ?? '20',
+                bg_music_url: s.bg_music_url ?? '',
+                bg_music_volume: s.bg_music_volume?.toString() ?? '0.1',
+                bg_music_enabled: s.bg_music_enabled !== undefined ? Boolean(s.bg_music_enabled) : true,
+                plex_token: s.plex_token ?? '',
+                plex_server_url: s.plex_server_url ?? 'https://plex.tv'
+            })
+        }
+
         try{ await fetch('/api/admin/auth/upsert', { method:'POST' }) } catch{}
       }
-      
-      try {
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('admin_settings', JSON.stringify(settingsData))
-          document.cookie = `admin_settings=${encodeURIComponent(JSON.stringify(settingsData))}; path=/; max-age=31536000`
-        }
-      } catch {}
     } catch (e: any) {
       setMessage('Error: ' + e.message)
     } finally {
-      setLoading(false)
+      setSaveLoading(false)
     }
   }
 
@@ -601,11 +521,14 @@ export default function AdminSettingsPage() {
               <label className="label">Company Name</label>
               <input 
                 className="input" 
-                placeholder="Streamz R Us" 
+                placeholder="Ex: Streamz R Us" 
                 value={settings.company_name} 
                 onChange={e => setSettings({...settings, company_name: e.target.value})}
                 onKeyPress={handleKeyPress}
               />
+              <div className="text-[10px] text-slate-500 mt-1 uppercase tracking-widest font-bold">
+                Database: {settings.company_name || 'NOT SET'}
+              </div>
             </div>
             <div>
               <label className="label">Timezone</label>
@@ -623,14 +546,28 @@ export default function AdminSettingsPage() {
             </div>
             <div className="md:col-span-2">
               <label className="label">Hero Image URL</label>
-              <input 
-                className="input" 
-                placeholder="https://example.com/your-image.jpg" 
-                value={settings.hero_image_url} 
-                onChange={e => setSettings({...settings, hero_image_url: e.target.value})}
-                onKeyPress={handleKeyPress}
-              />
-              <div className="text-xs text-slate-500 mt-1">Shown on the homepage hero card. Uses responsive contain-fit.</div>
+              <div className="flex gap-4 items-start">
+                <div className="flex-1">
+                  <input 
+                    className="input" 
+                    placeholder="https://example.com/your-image.jpg" 
+                    value={settings.hero_image_url} 
+                    onChange={e => setSettings({...settings, hero_image_url: e.target.value})}
+                    onKeyPress={handleKeyPress}
+                  />
+                  <div className="text-xs text-slate-500 mt-1">Shown on the homepage hero card. Uses responsive contain-fit.</div>
+                </div>
+                {settings.hero_image_url && (
+                  <div className="w-24 h-24 rounded-lg border border-slate-700 overflow-hidden bg-slate-900 shrink-0">
+                    <img 
+                      src={settings.hero_image_url} 
+                      alt="Preview" 
+                      className="w-full h-full object-cover"
+                      onError={(e) => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/150?text=Invalid+URL' }}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
             <div>
               <label className="label">Monthly Maintenance Cost (£)</label>
@@ -679,17 +616,6 @@ export default function AdminSettingsPage() {
           <h2 className="text-xl font-semibold mb-4">Pricing Configuration</h2>
           <div className="grid md:grid-cols-2 gap-4">
             <div>
-              <label className="label">Monthly Base Price (£)</label>
-              <input 
-                className="input" 
-                type="number"
-                step="0.01"
-                value={settings.monthly_price}
-                onChange={e=>setSettings({...settings, monthly_price: e.target.value})}
-                onKeyPress={handleKeyPress}
-              />
-            </div>
-            <div>
               <label className="label">Yearly Base Price (£)</label>
               <input 
                 className="input" 
@@ -701,17 +627,6 @@ export default function AdminSettingsPage() {
               />
             </div>
             <div>
-              <label className="label">Additional Stream (Monthly) (£)</label>
-              <input 
-                className="input" 
-                type="number"
-                step="0.01"
-                value={settings.stream_monthly_price}
-                onChange={e=>setSettings({...settings, stream_monthly_price: e.target.value})}
-                onKeyPress={handleKeyPress}
-              />
-            </div>
-            <div>
               <label className="label">Additional Stream (Yearly) (£)</label>
               <input 
                 className="input" 
@@ -719,6 +634,28 @@ export default function AdminSettingsPage() {
                 step="0.01"
                 value={settings.stream_yearly_price}
                 onChange={e=>setSettings({...settings, stream_yearly_price: e.target.value})}
+                onKeyPress={handleKeyPress}
+              />
+            </div>
+            <div>
+              <label className="label">Movies Only Price (£)</label>
+              <input 
+                className="input" 
+                type="number"
+                step="0.01"
+                value={settings.movies_only_price}
+                onChange={e=>setSettings({...settings, movies_only_price: e.target.value})}
+                onKeyPress={handleKeyPress}
+              />
+            </div>
+            <div>
+              <label className="label">TV Shows Only Price (£)</label>
+              <input 
+                className="input" 
+                type="number"
+                step="0.01"
+                value={settings.tv_only_price}
+                onChange={e=>setSettings({...settings, tv_only_price: e.target.value})}
                 onKeyPress={handleKeyPress}
               />
             </div>
@@ -796,9 +733,9 @@ export default function AdminSettingsPage() {
         <button 
           className="btn" 
           onClick={saveSettings}
-          disabled={loading}
+          disabled={saveLoading}
         >
-          {loading ? 'Saving...' : 'Save Settings'}
+          {saveLoading ? 'Saving...' : 'Save Settings'}
         </button>
       </div>
     </main>

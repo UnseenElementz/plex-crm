@@ -86,13 +86,15 @@ create policy payments_admin_all
 
 -- Admin settings table (admin-only)
 create table if not exists public.admin_settings (
-  id int primary key default 1,
+  id bigint primary key default 1,
   smtp_host text,
   smtp_port text,
   smtp_user text,
   smtp_pass text,
   smtp_from text,
   paypal_email text,
+  plex_token text,
+  plex_server_url text default 'https://plex.tv',
   timezone text default 'Europe/London',
   monthly_maintenance numeric(10,2) default 140,
   company_name text default 'Streamz R Us',
@@ -130,6 +132,9 @@ alter table public.admin_settings add column if not exists two_year_price numeri
 alter table public.admin_settings add column if not exists stream_two_year_price numeric(10,2) default 35;
 alter table public.admin_settings add column if not exists three_year_price numeric(10,2) default 180;
 alter table public.admin_settings add column if not exists stream_three_year_price numeric(10,2) default 40;
+alter table public.admin_settings add column if not exists movies_only_price numeric(10,2) default 60;
+alter table public.admin_settings add column if not exists tv_only_price numeric(10,2) default 60;
+alter table public.admin_settings add column if not exists downloads_price numeric(10,2) default 20;
 -- Live chat tables
 create table if not exists public.messages (
   id uuid primary key default gen_random_uuid(),

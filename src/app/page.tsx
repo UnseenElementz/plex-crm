@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 export default function Home() {
   const [parallaxY, setParallaxY] = useState(0)
   const [heroImageUrl, setHeroImageUrl] = useState<string>('')
+  const [companyName, setCompanyName] = useState('Streamz R Us')
   const ticking = useRef(false)
   useEffect(()=>{
     const onScroll = () => {
@@ -23,12 +24,13 @@ export default function Home() {
   useEffect(()=>{
     (async()=>{
       try{
-        const res = await fetch('/api/admin/settings')
+        const res = await fetch('/api/admin/settings', { cache: 'no-store' })
         if (res.ok){
           const data = await res.json()
           const raw = data?.hero_image_url || ''
           const clean = typeof raw === 'string' ? raw.replace(/^["'`\s]+|["'`\s]+$/g, '').trim() : ''
           setHeroImageUrl(clean)
+          if (data.company_name) setCompanyName(data.company_name)
         }
       } catch{}
     })()
@@ -75,7 +77,7 @@ export default function Home() {
         <div className="max-w-6xl mx-auto grid md:grid-cols-[1.2fr_0.8fr] gap-10 items-center">
           <div className="metallic-card p-10 fade-up" style={{ animationDelay: '120ms' }}>
             <h1 className="text-5xl md:text-6xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-cyan-200 via-white to-blue-200">
-              Streamz R Us
+              {companyName}
             </h1>
             <p className="mt-3 text-slate-300 text-lg">
               Ultimate Hosting Experiance

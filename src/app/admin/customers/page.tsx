@@ -33,6 +33,9 @@ export default function AdminCustomersPage(){
   const [librariesLoading, setLibrariesLoading] = useState(false)
   const [shareMsg, setShareMsg] = useState('')
   const [pricingConfig, setPricingConfig] = useState<any>(null)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [bulkActionMsg, setBulkActionMsg] = useState('')
+  const [isBulkLoading, setIsBulkLoading] = useState(false)
 
   const loadCustomers = async () => {
     try{ 
@@ -95,10 +98,13 @@ export default function AdminCustomersPage(){
       const res = await fetch('/api/admin/plex/sync', { method: 'POST' })
       const data = await res.json()
       if (res.ok) {
+        const total = data.total_friends ?? 0
+        const count = data.count ?? 0
+        
         if (data.unmatched_friends && data.unmatched_friends.length > 0) {
            setUnmatchedPlex(data.unmatched_friends)
         } else {
-           alert(`Synced! Updated ${data.count} customers. Total Plex Friends: ${data.total_friends}`)
+           alert(`Synced! Updated ${count} customers. Total Plex Friends: ${total}`)
         }
         loadCustomers()
       } else {
@@ -145,6 +151,185 @@ export default function AdminCustomersPage(){
     else if (sortBy === 'due_soon') sorted.sort((a,b)=> new Date(a.next_due_date).getTime() - new Date(b.next_due_date).getTime())
     return sorted
   }, [customers, q, statusFilter, sortBy, pricingConfig])
+
+  const toggleSelectAll = () => {
+    if (selectedIds.length === filtered.length) {
+      setSelectedIds([])
+    } else {
+      setSelectedIds(filtered.map(c => c.id))
+    }
+  }
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
+
+  async function handleBulkReminder() {
+    if (selectedIds.length === 0) return
+    setIsBulkLoading(true)
+    setBulkActionMsg(`Sending reminders to ${selectedIds.length} customers...`)
+    let successCount = 0
+    let failCount = 0
+    
+    const selectedCustomers = customers.filter(c => selectedIds.includes(c.id))
+    
+    for (const c of selectedCustomers) {
+      try {
+        const res = await fetch('/api/reminders/send', { 
+          method:'POST', 
+          headers:{ 'Content-Type':'application/json' }, 
+          body: JSON.stringify({ email: c.email }) 
+        })
+        if (res.ok) successCount++
+        else failCount++
+      } catch {
+        failCount++
+      }
+    }
+    
+    setBulkActionMsg(`Bulk Action: ${successCount} sent, ${failCount} failed.`)
+    setIsBulkLoading(false)
+    setSelectedIds([])
+    setTimeout(() => setBulkActionMsg(''), 5000)
+  }
+
+  async function handleBulkStatus(status: 'active' | 'inactive') {
+    if (selectedIds.length === 0) return
+    setIsBulkLoading(true)
+    setBulkActionMsg(`Updating status for ${selectedIds.length} customers...`)
+    let successCount = 0
+    let failCount = 0
+    
+    for (const id of selectedIds) {
+      try {
+        const res = await fetch(`/api/customers/${id}`, { 
+          method:'PATCH', 
+          headers:{ 'Content-Type':'application/json' }, 
+          body: JSON.stringify({ subscription_status: status }) 
+        })
+        if (res.ok) {
+          setCustomers(prev => prev.map(c => c.id === id ? { ...c, status } : c))
+          successCount++
+        } else failCount++
+      } catch {
+        failCount++
+      }
+    }
+    
+    setBulkActionMsg(`Bulk Action: ${successCount} updated, ${failCount} failed.`)
+    setIsBulkLoading(false)
+    setSelectedIds([])
+    setTimeout(() => setBulkActionMsg(''), 5000)
+  }
+
+  async function handleBulkDelete() {
+    if (selectedIds.length === 0) return
+    if (!confirm(`Are you sure you want to delete ${selectedIds.length} customers? This cannot be undone.`)) return
+    
+    setIsBulkLoading(true)
+    setBulkActionMsg(`Deleting ${selectedIds.length} customers...`)
+    let successCount = 0
+    let failCount = 0
+    
+    for (const id of selectedIds) {
+      try {
+        const res = await fetch(`/api/customers/${id}`, { method: 'DELETE' })
+        if (res.ok) {
+          setCustomers(prev => prev.filter(c => c.id !== id))
+          successCount++
+        } else failCount++
+      } catch {
+        failCount++
+      }
+    }
+    
+    setBulkActionMsg(`Bulk Action: ${successCount} deleted, ${failCount} failed.`)
+    setIsBulkLoading(false)
+    setSelectedIds([])
+    setTimeout(() => setBulkActionMsg(''), 5000)
+  }
+
+  async function handleBulkTranscode() {
+    if (selectedIds.length === 0) return
+    setIsBulkLoading(true)
+    setBulkActionMsg(`Sending over-stream warnings to ${selectedIds.length} customers...`)
+    let successCount = 0
+    let failCount = 0
+    const selectedCustomers = customers.filter(c => selectedIds.includes(c.id))
+    for (const c of selectedCustomers) {
+      try {
+        const res = await fetch('/api/warnings/transcode', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email: c.email }) })
+        if (res.ok) successCount++
+        else failCount++
+      } catch { failCount++ }
+    }
+    setBulkActionMsg(`Bulk Action: ${successCount} warnings sent, ${failCount} failed.`)
+    setIsBulkLoading(false)
+    setSelectedIds([])
+    setTimeout(() => setBulkActionMsg(''), 5000)
+  }
+
+  async function handleBulkSignedUp() {
+    if (selectedIds.length === 0) return
+    setIsBulkLoading(true)
+    setBulkActionMsg(`Sending setup instructions to ${selectedIds.length} customers...`)
+    let successCount = 0
+    let failCount = 0
+    const selectedCustomers = customers.filter(c => selectedIds.includes(c.id))
+    for (const c of selectedCustomers) {
+      try {
+        const res = await fetch('/api/onboarding/signed-up', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email: c.email }) })
+        if (res.ok) successCount++
+        else failCount++
+      } catch { failCount++ }
+    }
+    setBulkActionMsg(`Bulk Action: ${successCount} setup emails sent, ${failCount} failed.`)
+    setIsBulkLoading(false)
+    setSelectedIds([])
+    setTimeout(() => setBulkActionMsg(''), 5000)
+  }
+
+  async function handleBulkChargebackBan() {
+    if (selectedIds.length === 0) return
+    if (!confirm(`Are you sure? This will BAN ${selectedIds.length} users and send termination emails.`)) return
+    setIsBulkLoading(true)
+    setBulkActionMsg(`Banning ${selectedIds.length} customers...`)
+    let successCount = 0
+    let failCount = 0
+    const selectedCustomers = customers.filter(c => selectedIds.includes(c.id))
+    for (const c of selectedCustomers) {
+      try {
+        const res = await fetch('/api/warnings/chargeback', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email: c.email }) })
+        if (res.ok) successCount++
+        else failCount++
+      } catch { failCount++ }
+    }
+    setBulkActionMsg(`Bulk Action: ${successCount} users banned, ${failCount} failed.`)
+    setIsBulkLoading(false)
+    setSelectedIds([])
+    loadCustomers()
+    setTimeout(() => setBulkActionMsg(''), 5000)
+  }
+
+  async function handleBulkTwoYears() {
+    if (selectedIds.length === 0) return
+    setIsBulkLoading(true)
+    setBulkActionMsg(`Sending service updates to ${selectedIds.length} customers...`)
+    let successCount = 0
+    let failCount = 0
+    const selectedCustomers = customers.filter(c => selectedIds.includes(c.id))
+    for (const c of selectedCustomers) {
+      try {
+        const res = await fetch('/api/admin/email/two-years', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email: c.email }) })
+        if (res.ok) successCount++
+        else failCount++
+      } catch { failCount++ }
+    }
+    setBulkActionMsg(`Bulk Action: ${successCount} updates sent, ${failCount} failed.`)
+    setIsBulkLoading(false)
+    setSelectedIds([])
+    setTimeout(() => setBulkActionMsg(''), 5000)
+  }
 
   
   return (
@@ -250,6 +435,69 @@ export default function AdminCustomersPage(){
         </div>
       )}
 
+      {bulkActionMsg && (
+        <div className={`p-4 rounded-xl mb-6 flex items-center justify-between ${bulkActionMsg.includes('failed') ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'}`}>
+          <div className="flex items-center gap-2">
+            {isBulkLoading && <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>}
+            <span>{bulkActionMsg}</span>
+          </div>
+          {!isBulkLoading && <button className="text-xs opacity-50 hover:opacity-100" onClick={() => setBulkActionMsg('')}>✕</button>}
+        </div>
+      )}
+
+      {selectedIds.length > 0 && (
+        <div className="glass p-4 rounded-2xl mb-6 border border-cyan-500/30 flex items-center justify-between sticky top-4 z-40 shadow-xl backdrop-blur-xl">
+          <div className="flex items-center gap-4">
+            <div className="bg-cyan-500/20 px-3 py-1 rounded-full border border-cyan-500/30 text-cyan-400 text-sm font-bold">
+              {selectedIds.length} Selected
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button 
+                className="btn-xs bg-cyan-600 hover:bg-cyan-500 text-white" 
+                onClick={handleBulkReminder}
+                disabled={isBulkLoading}
+              >Send Reminders</button>
+              <button 
+                className="btn-xs-outline" 
+                onClick={handleBulkTranscode}
+                disabled={isBulkLoading}
+              >Over Stream Warning</button>
+              <button 
+                className="btn-xs-outline" 
+                onClick={handleBulkSignedUp}
+                disabled={isBulkLoading}
+              >Signed Up</button>
+              <button 
+                className="btn-xs-outline" 
+                onClick={handleBulkTwoYears}
+                disabled={isBulkLoading}
+              >2 Years</button>
+              <button 
+                className="btn-xs-outline" 
+                onClick={() => handleBulkStatus('active')}
+                disabled={isBulkLoading}
+              >Set Active</button>
+              <button 
+                className="btn-xs-outline" 
+                onClick={() => handleBulkStatus('inactive')}
+                disabled={isBulkLoading}
+              >Set Inactive</button>
+              <button 
+                className="btn-xs-outline text-rose-400 border-rose-400/30 hover:bg-rose-500/10" 
+                onClick={handleBulkChargebackBan}
+                disabled={isBulkLoading}
+              >Ban & Chargeback</button>
+              <button 
+                className="btn-xs-outline text-rose-400 border-rose-400/30 hover:bg-rose-500/10" 
+                onClick={handleBulkDelete}
+                disabled={isBulkLoading}
+              >Delete</button>
+            </div>
+          </div>
+          <button className="btn-xs-outline" onClick={() => setSelectedIds([])}>Deselect All</button>
+        </div>
+      )}
+
       <div className="card-solid p-6 rounded-2xl border border-cyan-500/10">
         {loading && (
           <div className="flex items-center justify-center py-8">
@@ -275,6 +523,14 @@ export default function AdminCustomersPage(){
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left text-slate-300 border-b border-slate-700/50">
+                  <th className="p-1.5 w-8">
+                    <input 
+                      type="checkbox" 
+                      className="checkbox checkbox-xs checkbox-info" 
+                      checked={filtered.length > 0 && selectedIds.length === filtered.length}
+                      onChange={toggleSelectAll}
+                    />
+                  </th>
                   <th className="p-1.5 font-medium">Name</th>
                   <th className="p-1.5 font-medium">Email / Plex</th>
                   <th className="p-1.5 font-medium">Plan</th>
@@ -291,7 +547,15 @@ export default function AdminCustomersPage(){
                   const price = hasPlan ? calculatePrice(c.plan as any, c.streams, pricingConfig, c.downloads) : null
                   const statusLabel = !hasPlan ? 'Registered' : ((c.status === 'inactive') ? 'Inactive' : getStatus(new Date(c.next_due_date)))
                   return (
-                    <tr key={c.id} className="border-b border-slate-800/30 hover:bg-slate-800/30 transition-all duration-200 group">
+                    <tr key={c.id} className={`border-b border-slate-800/30 hover:bg-slate-800/30 transition-all duration-200 group ${selectedIds.includes(c.id) ? 'bg-cyan-900/10' : ''}`}>
+                      <td className="p-1.5">
+                        <input 
+                          type="checkbox" 
+                          className="checkbox checkbox-xs checkbox-info" 
+                          checked={selectedIds.includes(c.id)}
+                          onChange={() => toggleSelect(c.id)}
+                        />
+                      </td>
                       <td className="p-1.5">
                         <div className="font-medium text-slate-200 group-hover:text-cyan-400 transition-colors">
                           {c.full_name}

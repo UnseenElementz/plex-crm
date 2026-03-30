@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
 import { sendRenewalEmail } from '@/lib/email'
-import { differenceInDays, format } from 'date-fns'
+import { format } from 'date-fns'
 import { createClient } from '@supabase/supabase-js'
+import { calculatePrice } from '@/lib/pricing'
 
 export async function POST(request: Request){
-  const { email } = await request.json()
+  const { email, preview } = await request.json()
   if (!email) return NextResponse.json({ error: 'email required' }, { status: 400 })
   
   try {
@@ -19,19 +20,46 @@ export async function POST(request: Request){
       .select('*')
       .single()
     
-    if (!settings || !settings.smtp_host || !settings.smtp_user || !settings.smtp_pass) {
+    if (!preview && (!settings || !settings.smtp_host || !settings.smtp_user || !settings.smtp_pass)) {
       return NextResponse.json({ error: 'SMTP not configured' }, { status: 400 })
     }
 
-    const { data: customers } = await supabase.from('customers').select('next_due_date,next_payment_date,subscription_status,status').eq('email', email).limit(1)
+    const { data: customers } = await supabase
+      .from('customers')
+      .select('next_due_date,next_payment_date,subscription_status,status,plan,subscription_type,streams,notes,full_name,name')
+      .eq('email', email)
+      .limit(1)
     const customer = customers?.[0]
     const dueDate = customer?.next_due_date || customer?.next_payment_date
     const formattedDate = dueDate ? format(new Date(dueDate), 'dd MMM yyyy') : null
     const isInactive = (customer?.status === 'inactive' || customer?.subscription_status === 'inactive')
+    const plan = (customer?.plan || customer?.subscription_type || 'yearly') as 'monthly'|'yearly'
+    const streams = Number(customer?.streams || 1)
+    const downloads = /Downloads:\s*Yes/i.test(String(customer?.notes || ''))
+    const pricingConfig = {
+      monthly_price: Number(settings?.monthly_price) || 15,
+      yearly_price: Number(settings?.yearly_price) || 85,
+      stream_monthly_price: Number(settings?.stream_monthly_price) || 5,
+      stream_yearly_price: Number(settings?.stream_yearly_price) || 20,
+      downloads_price: Number(settings?.downloads_price) || 20
+    }
+    const amount = calculatePrice(plan, streams, pricingConfig, downloads)
+    const pkgName = plan === 'yearly' ? 'Yearly' : 'Monthly'
+    const extras = Math.max(0, streams - 1)
+    const detailsBlock = [
+      `Plan: ${pkgName}`,
+      `Streams: ${streams}${extras > 0 ? ` (includes 1 + ${extras} extra)` : ''}`,
+      `Downloads: ${downloads ? 'Yes' : 'No'}`,
+      `Amount Due: £${amount.toFixed(2)}`,
+      formattedDate ? `Due Date: ${formattedDate}` : null
+    ].filter(Boolean).join('\n')
     
     let emailBody = `I hope you’re doing well.
 
 This is a friendly reminder that your Plex service is coming up for renewal${formattedDate ? ' on ' + formattedDate : ''}. We send renewal emails well in advance so you have plenty of time to renew without any pressure.
+
+Account Summary
+${detailsBlock}
 
 However, with how quickly the server is growing at the moment, we strongly recommend renewing before your expiry date to avoid the risk of losing your slot, as availability is limited.
 
@@ -84,6 +112,9 @@ We noticed that your Plex service is currently marked as INACTIVE. If you wish t
 
 ${formattedDate ? 'Your service expired on: ' + formattedDate + '\n\n' : ''}To reactivate your account, please see the payment details below:
 
+Account Summary
+${detailsBlock}
+
 Please note: we no longer offer monthly subscriptions — all plans are now yearly only.
 
 💳 Payment Method
@@ -128,6 +159,11 @@ Streamz R Us`
     const template = {
       subject: isInactive ? 'Service Inactive - Renewal Required' : 'Plex Renewal Reminder',
       body: emailBody
+    }
+    
+    // Preview mode: return template without sending
+    if (preview) {
+      return NextResponse.json({ ok: true, preview: { subject: template.subject, body: template.body } })
     }
     
     // Temporarily set environment variables for the email function

@@ -3,13 +3,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getStatus } from '@/lib/pricing'
 
-type Customer = { id: string; full_name: string; email: string; status: string; next_due_date: string; plan?: string }
+type Customer = { id: string; full_name: string; email: string; status: string; next_due_date: string; plan?: string; streams?: number }
 
 export default function AdminEmailPage(){
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [filter, setFilter] = useState<'all'|'active'|'inactive'|'due_soon'|'overdue'>('all')
+  const [search, setSearch] = useState('')
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
   const [sending, setSending] = useState(false)
@@ -70,6 +71,9 @@ export default function AdminEmailPage(){
       const hasPlan = Boolean(c.plan)
       const rawStatus = (c.status === 'inactive') ? 'Inactive' : (hasPlan ? getStatus(new Date(c.next_due_date)) : 'Inactive')
       
+      const matchesSearch = (c.full_name + c.email).toLowerCase().includes(search.toLowerCase())
+      if (!matchesSearch) return false
+
       if (filter === 'all') return true
       if (filter === 'active') return rawStatus === 'Active'
       if (filter === 'inactive') return rawStatus === 'Inactive' || !hasPlan
@@ -77,7 +81,41 @@ export default function AdminEmailPage(){
       if (filter === 'overdue') return rawStatus === 'Overdue'
       return true
     })
-  }, [customers, filter])
+  }, [customers, filter, search])
+
+  const selectDueSoon2Months = () => {
+    const twoMonthsFromNow = new Date()
+    twoMonthsFromNow.setMonth(twoMonthsFromNow.getMonth() + 2)
+    const now = new Date()
+    
+    const next = { ...selected }
+    customers.forEach(c => {
+      if (!c.next_due_date) return
+      const due = new Date(c.next_due_date)
+      if (due >= now && due <= twoMonthsFromNow) {
+        next[c.email] = true
+      }
+    })
+    setSelected(next)
+    setMsg(`Selected customers due within 2 months`)
+    setTimeout(() => setMsg(''), 4000)
+  }
+
+  const selectByStreams = (minStreams: number, maxStreams?: number) => {
+    const next = { ...selected }
+    let count = 0
+    customers.forEach(c => {
+      // Need to cast c as any since Customer type might not have streams
+      const streams = (c as any).streams || 0
+      if (streams >= minStreams && (maxStreams === undefined || streams <= maxStreams)) {
+        next[c.email] = true
+        count++
+      }
+    })
+    setSelected(next)
+    setMsg(`Selected ${count} customers with ${maxStreams ? `${minStreams}-${maxStreams}` : `${minStreams}+`} streams`)
+    setTimeout(() => setMsg(''), 4000)
+  }
 
   const selectAll = useMemo(() => {
     return filtered.length > 0 && filtered.every(c => selected[c.email])
@@ -155,7 +193,14 @@ export default function AdminEmailPage(){
       <div className="grid lg:grid-cols-12 gap-6">
         {/* Sidebar / List */}
         <div className="lg:col-span-5 flex flex-col h-[calc(100vh-12rem)]">
-          <div className="glass p-4 rounded-t-2xl border-b-0 rounded-b-none z-10 relative">
+          <div className="glass p-4 rounded-t-2xl border-b-0 rounded-b-none z-10 relative space-y-3">
+            <input 
+              className="input w-full text-sm" 
+              placeholder="Search customers..." 
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+            
             <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin">
               {(['all', 'active', 'inactive', 'due_soon', 'overdue'] as const).map(f => (
                 <button 
@@ -171,6 +216,15 @@ export default function AdminEmailPage(){
                 </button>
               ))}
             </div>
+
+            <div className="flex flex-wrap gap-2 pt-1">
+              <button className="btn-xs-outline" onClick={selectDueSoon2Months}>Due Soon (2 Months)</button>
+              <button className="btn-xs-outline" onClick={() => selectByStreams(1, 1)}>1 Stream</button>
+              <button className="btn-xs-outline" onClick={() => selectByStreams(2, 2)}>2 Streams</button>
+              <button className="btn-xs-outline" onClick={() => selectByStreams(3)}>3+ Streams</button>
+              <button className="btn-xs-outline text-rose-400 border-rose-400/30" onClick={() => setSelected({})}>Clear All</button>
+            </div>
+
             <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-700/50">
               <label className="inline-flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" checked={selectAll} onChange={toggleAll} className="checkbox checkbox-xs checkbox-info" />

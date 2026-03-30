@@ -18,7 +18,7 @@ export async function GET(_: Request, { params }: { params: { id: string } }){
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   const row = data?.[0]
   const mapped = row ? (()=>{
-    const plan = ((row.notes || '').includes('Term: 3y')) ? 'three_year' : (row.plan ?? row.subscription_type)
+    const plan = (row.plan ?? row.subscription_type)
     const rawNext = row.next_due_date ?? row.next_payment_date
     const d = rawNext ? new Date(rawNext) : null
     const year = d ? d.getFullYear() : 0
@@ -89,7 +89,6 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   if (payload.full_name !== undefined) dbPayload.name = payload.full_name
   if (payload.email !== undefined) dbPayload.email = payload.email
   if (payload.plan !== undefined) dbPayload.subscription_type = payload.plan
-  if (payload.plan === 'three_year') dbPayload.subscription_type = 'yearly'
   if (payload.streams !== undefined) dbPayload.streams = payload.streams
   if (payload.start_date !== undefined) dbPayload.start_date = payload.start_date
   if (payload.next_due_date !== undefined) dbPayload.next_payment_date = payload.next_due_date
@@ -100,9 +99,9 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     // However, for simplicity, if any of these are missing, we should probably fetch.
     
     let currentNotes = ''
-    let currentTerm = false
     let currentPlex = ''
     let currentTimezone = ''
+    let currentDownloads = false
     
     // Fetch existing if we are missing any component or if we just want to be safe
     // We already check for duplicates with email, but let's fetch current row if not already fetched
@@ -117,8 +116,8 @@ export async function PATCH(request: Request, { params }: { params: { id: string
         const tzM = currentNotes.match(/Timezone:\s*([^\n]+)/i)
         if (tzM) currentTimezone = tzM[1].trim()
         
-        const termM = currentNotes.includes('Term: 3y')
-        currentTerm = termM
+        const dlM = currentNotes.includes('Downloads: Yes')
+        currentDownloads = dlM
         
         // Remove the virtual fields from the "base" notes to get the user's actual notes
         // This is a bit hacky because we store everything in one string. 
@@ -126,7 +125,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
         currentNotes = currentNotes
           .replace(/Plex:\s*[^\n]+\n?/gi, '')
           .replace(/Timezone:\s*[^\n]+\n?/gi, '')
-          .replace(/Term: 3y\n?/gi, '')
+          .replace(/Downloads: Yes\n?/gi, '')
           .trim()
       }
     }
@@ -134,10 +133,15 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     const notes = payload.notes !== undefined ? (payload.notes ?? '').trim() : currentNotes
     const plex = payload.plex_username !== undefined ? payload.plex_username?.trim() : currentPlex
     const tz = payload.timezone !== undefined ? payload.timezone?.trim() : currentTimezone
-    
-    // Term is derived from plan, so we trust payload.plan or fallback to existing check? 
-    // If payload.plan is present, we use it. If not, we should probably preserve existing term status OR check existing plan column?
-    const combined = [notes || undefined, plex ? `Plex: ${plex}` : undefined, tz ? `Timezone: ${tz}` : undefined].filter(Boolean).join('\n')
+
+    const downloads = payload.downloads !== undefined ? payload.downloads : currentDownloads
+
+    const combined = [
+      notes || undefined, 
+      plex ? `Plex: ${plex}` : undefined, 
+      tz ? `Timezone: ${tz}` : undefined,
+      downloads ? 'Downloads: Yes' : undefined
+    ].filter(Boolean).join('\n')
     dbPayload.notes = combined
   }
   if (!client){

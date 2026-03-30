@@ -4,6 +4,8 @@ export default function PayPalButton({ amount, currency = 'GBP', plan, streams, 
   
   const getPlanLabel = (p?: string) => {
     if (p === 'yearly') return '1 Year Hosting'
+    if (p === 'movies_only') return 'M hosting Only'
+    if (p === 'tv_only') return 'T Hosting Only'
     return 'Monthly Hosting'
   }
 

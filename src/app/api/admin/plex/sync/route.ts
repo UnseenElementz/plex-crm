@@ -41,8 +41,16 @@ export async function POST(request: Request){
 
     // 2. Fetch Plex Friends (and Shared Users)
     const friends = await getAllPlexUsers(settings.plex_token)
-    if (!friends.length) {
-      return NextResponse.json({ message: 'No Plex friends found or API error', count: 0 })
+    
+    // Return a structured response even if friends is empty to avoid 'undefined'
+    if (!friends || !Array.isArray(friends) || friends.length === 0) {
+      return NextResponse.json({ 
+        ok: true, 
+        count: 0, 
+        total_friends: 0,
+        unmatched_friends: [],
+        message: 'No active Plex library shares found' 
+      })
     }
 
     // 3. Fetch Local Customers

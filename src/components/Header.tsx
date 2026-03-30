@@ -8,11 +8,21 @@ import { usePathname } from 'next/navigation'
 export default function Header(){
   const [email, setEmail] = useState<string | null>(null)
   const [userRole, setUserRole] = useState<string | null>(null)
+  const [companyName, setCompanyName] = useState('Streamz R Us')
   const pathname = usePathname()
   const router = useRouter()
   
   useEffect(()=>{ 
     (async()=>{ 
+      // Fetch company name from settings
+      try {
+        const res = await fetch('/api/admin/settings')
+        if (res.ok) {
+          const data = await res.json()
+          if (data.company_name) setCompanyName(data.company_name)
+        }
+      } catch {}
+
       const s = getSupabase(); 
       const alias = (process.env.NEXT_PUBLIC_ADMIN_ALIAS_EMAIL || 'admin@streamzrus.local').toLowerCase()
       const cookieStr = typeof document !== 'undefined' ? (document.cookie || '') : ''
@@ -54,7 +64,7 @@ export default function Header(){
   
   return (
     <header className="flex items-center justify-between p-4">
-      <div className="font-semibold"><Link href="/" prefetch={false}>Streamz R Us</Link></div>
+      <div className="font-semibold"><Link href="/" prefetch={false}>{companyName}</Link></div>
       <div className="flex items-center gap-4">
         {email && userRole && (
           <div className="flex items-center gap-2 text-sm">

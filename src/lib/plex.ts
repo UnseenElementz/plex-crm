@@ -31,10 +31,12 @@ export async function getPlexFriends(serverUrl: string, token: string): Promise<
   try {
     // Try cloud first if serverUrl is just plex.tv
     const isCloud = serverUrl.includes('plex.tv')
-    const target = isCloud ? 'https://plex.tv/api/users' : `${serverUrl}/users` // Simplified, actually friends endpoint is better on plex.tv
     
     // Plex.tv API for friends/users
-    const res = await fetch('https://plex.tv/api/users', { headers: plexHeaders(token) })
+    const res = await fetch('https://plex.tv/api/users', { 
+      headers: plexHeaders(token),
+      cache: 'no-store'
+    })
     
     if (!res.ok) throw new Error(`Plex API Error: ${res.status}`)
     const text = await res.text()
@@ -64,20 +66,16 @@ export async function getPlexFriends(serverUrl: string, token: string): Promise<
 }
 
 export async function getAllPlexUsers(token: string): Promise<PlexFriend[]> {
-  // 1. Get Friends
-  const friends = await getPlexFriends('https://plex.tv', token)
   const usersMap = new Map<string, PlexFriend>()
-  friends.forEach(f => {
-      // Use email as primary key if available, else username
-      const key = f.email ? f.email.toLowerCase() : f.username.toLowerCase()
-      usersMap.set(key, f)
-  })
 
-  // 2. Get Shared Users from all servers (to catch pending invites or non-friend shares)
+  // 1. Get Shared Users from all servers (These are people with ACTUAL access)
   try {
     const servers = await getOwnedServers(token)
     for (const server of servers) {
-        const res = await fetch(`https://plex.tv/api/servers/${server.machineIdentifier}/shared_servers`, { headers: plexHeaders(token) })
+        const res = await fetch(`https://plex.tv/api/servers/${server.machineIdentifier}/shared_servers`, { 
+          headers: plexHeaders(token),
+          cache: 'no-store'
+        })
         if (!res.ok) continue
         const text = await res.text()
         const blocks = text.split('</SharedServer>')
@@ -92,6 +90,7 @@ export async function getAllPlexUsers(token: string): Promise<PlexFriend[]> {
 
             if (username || email) {
                 const key = email ? email.toLowerCase() : username.toLowerCase()
+                // If they are in shared_servers, they have access.
                 if (!usersMap.has(key)) {
                     usersMap.set(key, { id: userID, title: username, username, email, thumb })
                 }
@@ -101,6 +100,29 @@ export async function getAllPlexUsers(token: string): Promise<PlexFriend[]> {
   } catch (e) {
       console.error('Error fetching shared users:', e)
   }
+
+  // 2. Get Friends (Optional: only use to augment data, or if no servers found)
+  // We'll skip adding friends who aren't already in usersMap to avoid "old members"
+  // unless the map is completely empty (maybe no servers yet?)
+  try {
+    const friends = await getPlexFriends('https://plex.tv', token)
+    friends.forEach(f => {
+        const key = f.email ? f.email.toLowerCase() : f.username.toLowerCase()
+        if (usersMap.has(key)) {
+            // Augment existing entry with friend data if needed
+            const existing = usersMap.get(key)!
+            usersMap.set(key, {
+                ...existing,
+                email: existing.email || f.email,
+                thumb: existing.thumb || f.thumb
+            })
+        } else if (usersMap.size === 0) {
+            // If we found NO shared servers, fallback to friends just in case
+            // usersMap.set(key, f) 
+            // Actually, better to stick to shared_servers only if we want accuracy.
+        }
+    })
+  } catch {}
 
   return Array.from(usersMap.values())
 }
@@ -186,7 +208,10 @@ async function parseLibraries(res: Response): Promise<{ libraries: PlexLibrary[]
 // Helper to get ALL possible URIs for owned servers
 async function getAllConnectionCandidates(token: string): Promise<string[]> {
   try {
-    const res = await fetch('https://plex.tv/pms/resources?includeHttps=1&includeRelay=1&includeManaged=1', { headers: plexHeaders(token) })
+    const res = await fetch('https://plex.tv/pms/resources?includeHttps=1&includeRelay=1&includeManaged=1', { 
+      headers: plexHeaders(token),
+      cache: 'no-store'
+    })
     if (!res.ok) return []
     const text = await res.text()
     const uris: string[] = []
@@ -217,7 +242,10 @@ export interface PlexServerInfo {
 
 export async function getOwnedServers(token: string): Promise<PlexServerInfo[]> {
   try{
-    const res = await fetch('https://plex.tv/api/servers', { headers: plexHeaders(token) })
+    const res = await fetch('https://plex.tv/api/servers', { 
+      headers: plexHeaders(token),
+      cache: 'no-store'
+    })
     if (!res.ok) throw new Error(`Servers fetch failed: ${res.status}`)
     const text = await res.text()
     const matches = text.matchAll(/<Server\s+([^>]+)>/g)
@@ -239,7 +267,10 @@ export async function getOwnedServers(token: string): Promise<PlexServerInfo[]> 
 
 export async function getPreferredServerUri(token: string): Promise<string> {
   try{
-    const res = await fetch('https://plex.tv/pms/resources?includeHttps=1&includeRelay=1&includeManaged=1', { headers: plexHeaders(token) })
+    const res = await fetch('https://plex.tv/pms/resources?includeHttps=1&includeRelay=1&includeManaged=1', { 
+      headers: plexHeaders(token),
+      cache: 'no-store'
+    })
     if (!res.ok) throw new Error(`Resources fetch failed: ${res.status}`)
     const text = await res.text()
     // Find first owned server device

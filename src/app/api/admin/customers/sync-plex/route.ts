@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
-import { getPlexFriends } from '@/lib/plex'
+import { getAllPlexUsers } from '@/lib/plex'
 
 function svc(){
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
@@ -26,11 +26,17 @@ export async function POST(request: Request){
       return NextResponse.json({ error: 'Plex not configured in settings' }, { status: 400 })
     }
 
-    // Fetch friends from Plex
-    const friends = await getPlexFriends(settings.plex_server_url, settings.plex_token)
+    // Fetch ONLY active library shares from Plex
+    const friends = await getAllPlexUsers(settings.plex_token)
     
-    if (!friends.length) {
-      return NextResponse.json({ message: 'No Plex friends found', count: 0, added: 0 })
+    if (!friends || !friends.length) {
+      return NextResponse.json({ 
+        ok: true, 
+        message: 'No active Plex library shares found', 
+        count: 0, 
+        added: 0,
+        emails: [] 
+      })
     }
 
     // Get existing customers to minimize writes
