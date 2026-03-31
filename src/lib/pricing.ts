@@ -40,10 +40,10 @@ export function calculatePrice(plan: Plan, streams: number, config?: PricingConf
     extraPrice = cfg?.stream_yearly_price ?? 20
   } else if (plan === 'movies_only') {
     base = cfg?.movies_only_price ?? 60
-    extraPrice = 0
+    extraPrice = cfg?.stream_yearly_price ?? 20
   } else if (plan === 'tv_only') {
     base = cfg?.tv_only_price ?? 60
-    extraPrice = 0
+    extraPrice = cfg?.stream_yearly_price ?? 20
   }
   
   let total = base + extra * extraPrice

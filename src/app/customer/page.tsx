@@ -148,7 +148,7 @@ export default function CustomerPortal() {
     })(); 
   }, [])
 
-  const price = useMemo(() => calculatePrice(customer.plan, customer.streams, pricingConfig), [customer, pricingConfig])
+  const price = useMemo(() => calculatePrice(customer.plan, customer.streams, pricingConfig, customer.downloads), [customer, pricingConfig])
   const status = useMemo(() => {
     if (!hasSubscription) return 'Inactive'
     const inactive = (customer as any).subscription_status === 'inactive'
@@ -281,7 +281,7 @@ export default function CustomerPortal() {
               </div>
               
               <div className="p-3 bg-cyan-900/20 border border-cyan-500/30 rounded-lg text-xs text-slate-300">
-                <strong>Note:</strong> Movies Only and TV Shows Only packages still contain kids content and all other genres like sports, etc.
+                <strong>Note:</strong> Movies Only and TV Shows Only packages still contain Kids Tv and all other genres like sports, etc.
               </div>
 
               <label className="label">Streams</label>
