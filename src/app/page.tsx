@@ -108,14 +108,26 @@ export default function Home() {
               background: 'radial-gradient(100% 100% at 20% 10%, rgba(0, 230, 255, 0.25) 0%, rgba(0, 230, 255, 0.04) 60%, rgba(255,255,255,0.03) 100%)'
             }}></div>
             {heroImageUrl && (
-              <img
-                src={proxied(heroImageUrl)}
-                alt="Streamz R Us — Your entertainment universe awaits"
-                className="absolute inset-0 w-full h-full object-cover rounded-2xl"
-                onError={(e)=>{ const t = e.target as HTMLImageElement; t.style.display = 'none' }}
-                loading="lazy"
-                decoding="async"
-              />
+              <>
+                <img
+                  src={proxied(heroImageUrl)}
+                  alt=""
+                  className="absolute inset-0 w-full h-full object-cover scale-110 blur-md opacity-45"
+                  onError={(e)=>{ const t = e.target as HTMLImageElement; t.style.display = 'none' }}
+                  loading="lazy"
+                  decoding="async"
+                />
+                <div className="absolute inset-0 p-5 md:p-7">
+                  <img
+                    src={proxied(heroImageUrl)}
+                    alt={`${companyName} hero`}
+                    className="w-full h-full object-contain"
+                    onError={(e)=>{ const t = e.target as HTMLImageElement; t.style.display = 'none' }}
+                    loading="lazy"
+                    decoding="async"
+                  />
+                </div>
+              </>
             )}
             <div className="absolute -top-4 -left-4 w-24 h-24 rounded-full bg-cyan-400/30 blur-xl float-slow"></div>
             <div className="absolute -bottom-6 -right-6 w-32 h-32 rounded-full bg-blue-400/25 blur-xl float-slower"></div>
