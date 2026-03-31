@@ -1,6 +1,8 @@
 "use client"
 
-export default function PayPalButton({ amount, currency = 'GBP', plan, streams, downloads, onSuccess }: { amount: number; currency?: string; customerEmail?: string; plan?: 'monthly'|'yearly'; streams?: number; downloads?: boolean; onSuccess?: (orderId: string) => void }){
+import { type Plan } from '@/lib/pricing'
+
+export default function PayPalButton({ amount, currency = 'GBP', plan, streams, downloads, onSuccess }: { amount: number; currency?: string; customerEmail?: string; plan?: Plan; streams?: number; downloads?: boolean; onSuccess?: (orderId: string) => void }){
   
   const getPlanLabel = (p?: string) => {
     if (p === 'yearly') return '1 Year Hosting'

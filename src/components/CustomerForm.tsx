@@ -1,10 +1,9 @@
 "use client"
 import { useEffect, useState } from 'react'
-import { calculatePrice, getTransactionFee, calculateNextDue } from '@/lib/pricing'
+import { calculatePrice, getTransactionFee, calculateNextDue, type Plan } from '@/lib/pricing'
 import { CustomerCreateSchema, CustomerUpdateSchema, formatZodError } from '@/lib/validation'
 import DatePicker from '@/components/DatePicker'
 
-type Plan = 'monthly'|'yearly'
 type Customer = { id?: string; full_name: string; email: string; plan: Plan; streams: number; start_date?: string; next_due_date?: string; notes?: string; plex_username?: string; downloads?: boolean }
 
 export default function CustomerForm({ initial, onSaved, onCancel }: { initial?: Customer; onSaved?: (c: any)=>void; onCancel?: ()=>void }){

@@ -33,18 +33,18 @@ export async function POST(request: Request){
     const dueDate = customer?.next_due_date || customer?.next_payment_date
     const formattedDate = dueDate ? format(new Date(dueDate), 'dd MMM yyyy') : null
     const isInactive = (customer?.status === 'inactive' || customer?.subscription_status === 'inactive')
-    const plan = (customer?.plan || customer?.subscription_type || 'yearly') as 'monthly'|'yearly'
+    const plan = (customer?.plan || customer?.subscription_type || 'yearly') as any
     const streams = Number(customer?.streams || 1)
     const downloads = /Downloads:\s*Yes/i.test(String(customer?.notes || ''))
     const pricingConfig = {
-      monthly_price: Number(settings?.monthly_price) || 15,
       yearly_price: Number(settings?.yearly_price) || 85,
-      stream_monthly_price: Number(settings?.stream_monthly_price) || 5,
       stream_yearly_price: Number(settings?.stream_yearly_price) || 20,
+      movies_only_price: Number(settings?.movies_only_price) || 60,
+      tv_only_price: Number(settings?.tv_only_price) || 60,
       downloads_price: Number(settings?.downloads_price) || 20
     }
     const amount = calculatePrice(plan, streams, pricingConfig, downloads)
-    const pkgName = plan === 'yearly' ? 'Yearly' : 'Monthly'
+    const pkgName = plan === 'yearly' ? 'Yearly' : (plan === 'movies_only' ? 'Movies Only' : (plan === 'tv_only' ? 'TV Shows Only' : 'Monthly'))
     const extras = Math.max(0, streams - 1)
     const detailsBlock = [
       `Plan: ${pkgName}`,

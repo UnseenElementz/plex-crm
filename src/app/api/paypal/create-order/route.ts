@@ -24,14 +24,14 @@ async function readPricingConfig(){
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY as string
   if (!url || !key) return null
   const s = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } })
-  const r = await s.from('admin_settings').select('*').maybeSingle()
+  const r = await s.from('admin_settings').select('*').eq('id', 1).maybeSingle()
   const d: any = r.data || null
   if (!d) return null
   return {
-    monthly_price: Number(d.monthly_price) || 15,
     yearly_price: Number(d.yearly_price) || 85,
-    stream_monthly_price: Number(d.stream_monthly_price) || 5,
     stream_yearly_price: Number(d.stream_yearly_price) || 20,
+    movies_only_price: Number(d.movies_only_price) || 60,
+    tv_only_price: Number(d.tv_only_price) || 60,
     downloads_price: Number(d.downloads_price) || 20,
   }
 }
