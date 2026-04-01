@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { cookies, headers } from 'next/headers'
-import { getPlexLibraries, getPlexSharedSections } from '@/lib/plex'
+import { getPlexLibraries, getPlexLibrariesForMachine, getPlexSharedSections } from '@/lib/plex'
 
 function svc(){
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
@@ -18,6 +18,7 @@ export async function GET(request: Request){
   try{
     const { searchParams } = new URL(request.url)
     const email = searchParams.get('email')
+    const machineIdentifierOverride = searchParams.get('machineIdentifier') || searchParams.get('server_machine_id')
     
     let settings: any = null
     
@@ -51,7 +52,9 @@ export async function GET(request: Request){
     const serverUrl = settings?.plex_server_url || 'https://plex.tv'
     if (!token) return NextResponse.json({ error: 'Plex token not configured' }, { status: 400 })
     
-    const { libraries, machineIdentifier } = await getPlexLibraries(serverUrl, token)
+    const { libraries, machineIdentifier } = machineIdentifierOverride
+      ? await getPlexLibrariesForMachine(serverUrl, token, machineIdentifierOverride)
+      : await getPlexLibraries(serverUrl, token)
     let shared: string[] = []
     
     if (email) {

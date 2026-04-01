@@ -41,8 +41,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   
   const navItems = [
     { href: '/admin', label: 'Chat' },
+    { href: '/admin/requests', label: 'Requests' },
     { href: '/admin/customers', label: 'Customers' },
     { href: '/admin/email', label: 'Mail' },
+    { href: '/admin/plex-tools', label: 'Plex Tools' },
     { href: '/admin/settings', label: 'Settings' },
     { href: '/admin/admins', label: 'Admins' },
     { href: '/admin/security', label: 'Security' },

@@ -4,6 +4,21 @@ import { useEffect, useMemo, useState } from 'react'
 import { getStatus } from '@/lib/pricing'
 
 type Customer = { id: string; full_name: string; email: string; status: string; next_due_date: string; plan?: string; streams?: number }
+type PlexLinkRow = {
+  status: 'linked' | 'email_mismatch' | 'not_in_crm' | 'missing_plex_email'
+  linked_by: 'email' | 'plex_username' | null
+  recipient_email: string
+  plex_email: string
+  plex_username: string
+  customer_id: string | null
+  customer_email: string | null
+  customer_name: string | null
+}
+type PlexPreview = {
+  totals: { total: number; linked: number; mismatched: number; not_in_crm: number; missing_plex_email: number }
+  rows: PlexLinkRow[]
+  emails: string[]
+}
 
 export default function AdminEmailPage(){
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -16,8 +31,11 @@ export default function AdminEmailPage(){
   const [sending, setSending] = useState(false)
   const [msg, setMsg] = useState('')
   const [syncing, setSyncing] = useState(false)
-  const [unmatchedPlex, setUnmatchedPlex] = useState<string[]>([])
-  const [showUnmatched, setShowUnmatched] = useState(false)
+  const [plexPreview, setPlexPreview] = useState<PlexPreview | null>(null)
+  const [showPlexPreview, setShowPlexPreview] = useState(false)
+  const [plexFilter, setPlexFilter] = useState<'all'|'mismatch'|'not_in_crm'>('all')
+  const [includeNotInCrm, setIncludeNotInCrm] = useState(false)
+  const [confirmingSync, setConfirmingSync] = useState(false)
 
   useEffect(()=>{ 
     loadCustomers()
@@ -37,32 +55,72 @@ export default function AdminEmailPage(){
 
   async function syncPlex() {
     setSyncing(true)
-    setMsg('Syncing with Plex...')
+    setMsg('Loading Plex sync preview...')
     try {
-      const res = await fetch('/api/admin/customers/sync-plex', { method: 'POST' })
-      const data = await res.json()
+      const res = await fetch('/api/admin/customers/sync-plex', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'email', action: 'preview' })
+      })
+      const data = await res.json().catch(()=>null)
       if (res.ok) {
-        setMsg(data.message || 'Sync successful')
-        const recs: string[] = Array.isArray(data.emails) ? data.emails.filter(Boolean) : []
-        const unmatched = data.unmatched_friends ? data.unmatched_friends.map((f:any) => f.email).filter(Boolean) : []
-        setUnmatchedPlex(unmatched)
-        if (recs.length > 0) {
-          setSelected(prev => {
-            const next = { ...prev }
-            recs.forEach(e => next[e] = true)
-            return next
-          })
-          setMsg(`Selected ${recs.length} recipients from Plex. Found ${unmatched.length} unmatched users.`)
+        const preview: PlexPreview = {
+          totals: data?.totals || { total: 0, linked: 0, mismatched: 0, not_in_crm: 0, missing_plex_email: 0 },
+          rows: Array.isArray(data?.rows) ? data.rows : [],
+          emails: Array.isArray(data?.emails) ? data.emails : []
         }
-        await loadCustomers()
+        setPlexPreview(preview)
+        setPlexFilter('all')
+        setIncludeNotInCrm(false)
+        setShowPlexPreview(true)
+        setMsg('')
       } else {
-        setMsg(data.error || 'Sync failed')
+        setMsg(data?.error || 'Sync failed')
       }
     } catch (e: any) {
       setMsg(e.message || 'Sync failed')
     } finally {
       setSyncing(false)
       setTimeout(() => setMsg(''), 5000)
+    }
+  }
+
+  const previewRows = useMemo(() => {
+    const rows = plexPreview?.rows || []
+    if (plexFilter === 'mismatch') return rows.filter(r => r.status === 'email_mismatch')
+    if (plexFilter === 'not_in_crm') return rows.filter(r => r.status === 'not_in_crm')
+    return rows
+  }, [plexPreview, plexFilter])
+
+  async function confirmPlexSyncSelection(){
+    const rows = plexPreview?.rows || []
+    const eligible = rows.filter(r => r.status !== 'missing_plex_email')
+    const picked = eligible.filter(r => r.status !== 'not_in_crm' || includeNotInCrm)
+    const emails = Array.from(new Set(picked.map(r => String(r.recipient_email || '').trim()).filter(Boolean)))
+    const mismatchRows = picked.filter(r => r.status === 'email_mismatch')
+    const mismatchCustomerIds = mismatchRows.map(r => r.customer_id).filter(Boolean)
+
+    setSelected(Object.fromEntries(emails.map(e => [e, true])))
+    setShowPlexPreview(false)
+    setMsg(`Selected ${emails.length} recipients from Plex. Mismatches: ${mismatchRows.length}. Not in CRM: ${picked.filter(r => r.status === 'not_in_crm').length}.`)
+
+    setConfirmingSync(true)
+    try {
+      await fetch('/api/admin/customers/sync-plex', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'email',
+          action: 'confirm',
+          include_unmatched: includeNotInCrm,
+          selected_count: emails.length,
+          mismatch_count: mismatchRows.length,
+          mismatch_customer_ids: mismatchCustomerIds
+        })
+      })
+    } catch {}
+    finally {
+      setConfirmingSync(false)
     }
   }
 
@@ -175,17 +233,6 @@ export default function AdminEmailPage(){
           >
             {syncing ? 'Syncing...' : '↻ Sync Plex Users'}
           </button>
-          {unmatchedPlex.length > 0 && (
-            <button className="btn-ghost text-xs border border-amber-400/30 text-amber-400 hover:bg-amber-400/10" onClick={()=> {
-              setSelected({});
-              const next: Record<string, boolean> = {};
-              unmatchedPlex.forEach(e => next[e] = true);
-              setSelected(next);
-              setMsg(`Selected ${unmatchedPlex.length} unmatched Plex users`);
-            }}>
-              Select {unmatchedPlex.length} Unmatched Plex Users Only
-            </button>
-          )}
           <a href="/admin" className="btn-outline">← Back to Chat</a>
         </div>
       </div>
@@ -281,7 +328,7 @@ export default function AdminEmailPage(){
                   }
                 </div>
               </div>
-              
+
               <div>
                 <label className="label mb-1">Subject</label>
                 <input 
@@ -322,6 +369,85 @@ export default function AdminEmailPage(){
           </div>
         </div>
       </div>
+      {showPlexPreview && plexPreview && (
+        <div className="fixed inset-0 modal-backdrop flex items-center justify-center p-4 z-50">
+          <div className="glass p-4 rounded-xl w-full max-w-3xl border border-cyan-500/30 bg-slate-900/80 max-h-[85vh] overflow-hidden">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-lg font-semibold text-slate-200">Plex Sync Preview</div>
+              <button className="btn-xs-outline" onClick={()=> setShowPlexPreview(false)} disabled={confirmingSync}>Close</button>
+            </div>
+            <div className="mt-2 grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+              <div className="glass p-2 rounded-lg border border-slate-700">
+                <div className="text-slate-400">Total</div>
+                <div className="text-slate-200 font-semibold">{plexPreview.totals.total}</div>
+              </div>
+              <div className="glass p-2 rounded-lg border border-emerald-500/20">
+                <div className="text-slate-400">Linked</div>
+                <div className="text-emerald-300 font-semibold">{plexPreview.totals.linked}</div>
+              </div>
+              <div className="glass p-2 rounded-lg border border-amber-500/20">
+                <div className="text-slate-400">Email Mismatch</div>
+                <div className="text-amber-300 font-semibold">{plexPreview.totals.mismatched}</div>
+              </div>
+              <div className="glass p-2 rounded-lg border border-rose-500/20">
+                <div className="text-slate-400">Not In CRM</div>
+                <div className="text-rose-300 font-semibold">{plexPreview.totals.not_in_crm}</div>
+              </div>
+              <div className="glass p-2 rounded-lg border border-slate-700">
+                <div className="text-slate-400">Missing Email</div>
+                <div className="text-slate-200 font-semibold">{plexPreview.totals.missing_plex_email}</div>
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button className={`btn-xs-outline ${plexFilter==='all'?'border-cyan-500/50 text-cyan-300':''}`} onClick={()=> setPlexFilter('all')}>All</button>
+              <button className={`btn-xs-outline ${plexFilter==='mismatch'?'border-amber-500/50 text-amber-300':''}`} onClick={()=> setPlexFilter('mismatch')}>Email Mismatch</button>
+              <button className={`btn-xs-outline ${plexFilter==='not_in_crm'?'border-rose-500/50 text-rose-300':''}`} onClick={()=> setPlexFilter('not_in_crm')}>Not In CRM</button>
+              <label className="ml-auto inline-flex items-center gap-2 text-xs text-slate-300">
+                <input type="checkbox" className="checkbox checkbox-xs checkbox-info" checked={includeNotInCrm} onChange={e=> setIncludeNotInCrm(e.target.checked)} />
+                Include not-in-CRM
+              </label>
+            </div>
+
+            <div className="mt-3 overflow-y-auto max-h-[48vh] border border-slate-700 rounded-lg">
+              <div className="grid grid-cols-12 gap-2 px-3 py-2 text-[11px] text-slate-400 border-b border-slate-700 bg-slate-900/40">
+                <div className="col-span-2">Status</div>
+                <div className="col-span-3">Plex Username</div>
+                <div className="col-span-3">Plex Email</div>
+                <div className="col-span-4">Customer Email</div>
+              </div>
+              {previewRows.map((r, idx)=> (
+                <div key={r.plex_email + ':' + r.plex_username + ':' + idx} className="grid grid-cols-12 gap-2 px-3 py-2 text-xs border-b border-slate-800">
+                  <div className="col-span-2">
+                    {r.status === 'linked' && <span className="text-emerald-300">Linked</span>}
+                    {r.status === 'email_mismatch' && <span className="text-amber-300">Mismatch</span>}
+                    {r.status === 'not_in_crm' && <span className="text-rose-300">Not In CRM</span>}
+                    {r.status === 'missing_plex_email' && <span className="text-slate-400">Missing Email</span>}
+                  </div>
+                  <div className="col-span-3 truncate text-slate-200">{r.plex_username || '-'}</div>
+                  <div className="col-span-3 truncate text-slate-200">{r.plex_email || '-'}</div>
+                  <div className="col-span-4 truncate text-slate-200">
+                    {r.customer_email || (r.status === 'not_in_crm' ? '-' : '')}
+                    {r.status === 'email_mismatch' && r.linked_by && (
+                      <span className="ml-2 text-[10px] text-slate-500">({r.linked_by})</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {previewRows.length === 0 && (
+                <div className="p-4 text-sm text-slate-400">No rows</div>
+              )}
+            </div>
+
+            <div className="mt-3 flex justify-end gap-2">
+              <button className="btn-xs-outline" onClick={()=> setShowPlexPreview(false)} disabled={confirmingSync}>Cancel</button>
+              <button className="btn-xs" onClick={confirmPlexSyncSelection} disabled={confirmingSync}>
+                {confirmingSync ? 'Confirming...' : 'Confirm & Select'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }

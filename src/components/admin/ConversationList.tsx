@@ -8,12 +8,18 @@ interface ConversationListProps {
   conversations: Conversation[]
   selectedConversation: Conversation | null
   onSelectConversation: (conversation: Conversation) => void
+  selectMode?: boolean
+  selectedIds?: Record<string, boolean>
+  onToggleSelect?: (conversationId: string) => void
 }
 
 export default function ConversationList({
   conversations,
   selectedConversation,
-  onSelectConversation
+  onSelectConversation,
+  selectMode = false,
+  selectedIds = {},
+  onToggleSelect
 }: ConversationListProps) {
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -52,7 +58,10 @@ export default function ConversationList({
         conversations.map((conversation) => (
           <div
             key={conversation.id}
-            onClick={() => onSelectConversation(conversation)}
+            onClick={() => {
+              if (selectMode) onToggleSelect?.(conversation.id)
+              else onSelectConversation(conversation)
+            }}
             className={`p-4 cursor-pointer hover:bg-gray-50 transition-colors ${
               selectedConversation?.id === conversation.id ? 'bg-blue-50 border-r-2 border-blue-600' : ''
             }`}
@@ -60,6 +69,14 @@ export default function ConversationList({
             <div className="flex items-start justify-between">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center space-x-2 mb-1">
+                  {selectMode && (
+                    <input
+                      type="checkbox"
+                      checked={Boolean(selectedIds[conversation.id])}
+                      onChange={() => onToggleSelect?.(conversation.id)}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  )}
                   <User className="w-4 h-4 text-gray-400" />
                   <span className="text-sm font-medium text-gray-900 truncate">
                     {(conversation as any).metadata?.full_name || (conversation as any).metadata?.email || `Customer #${conversation.id.slice(0, 8)}`}

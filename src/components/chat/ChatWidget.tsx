@@ -112,7 +112,8 @@ export default function ChatWidget({
         const res = await fetch('/api/admin/settings')
         if (res.ok){
           const data = await res.json()
-          setChatOnline(Boolean(data?.chat_online ?? true))
+          const avail = String(data?.chat_availability ?? (data?.chat_online === false ? 'off' : 'active')).toLowerCase()
+          setChatOnline(avail !== 'off')
         }
       } catch{}
     })()
@@ -140,6 +141,7 @@ export default function ChatWidget({
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!message.trim()) return
+    if (!chatOnline) return
     if (!conversationId) {
       await initializeConversation()
     }

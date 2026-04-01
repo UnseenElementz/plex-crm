@@ -26,12 +26,6 @@ export default function AdminCustomersPage(){
   const [unmatchedPlex, setUnmatchedPlex] = useState<Array<{ id: string; username: string; email: string; thumb: string }>>([])
   const [linkUnmatchedModal, setLinkUnmatchedModal] = useState<{ id: string; username: string } | null>(null)
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
-  const [manageShareItem, setManageShareItem] = useState<Customer | null>(null)
-  const [libraries, setLibraries] = useState<Array<{ id: string; title: string; type: string }>>([])
-  const [selectedLibs, setSelectedLibs] = useState<string[]>([])
-  const [shareLoading, setShareLoading] = useState(false)
-  const [librariesLoading, setLibrariesLoading] = useState(false)
-  const [shareMsg, setShareMsg] = useState('')
   const [pricingConfig, setPricingConfig] = useState<any>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [bulkActionMsg, setBulkActionMsg] = useState('')
@@ -625,60 +619,11 @@ export default function AdminCustomersPage(){
                             className="btn-xs-outline w-full"
                             onClick={()=>{ setLinkingItem(c); setLinkInput(c.plex_username || ''); setOpenActionsId(null) }}
                           >Link Plex Username</button>
-                          <button
-                            className="btn-xs-outline w-full"
-                            onClick={()=>{ 
-                              setOpenActionsId(null)
-                              setManageShareItem(c)
-                              setLibrariesLoading(true)
-                              setLibraries([])
-                              setSelectedLibs([])
-                              setShareMsg('')
-                              // Load libraries in background
-                              const headers = { 'Content-Type': 'application/json' } as any
-                              let tokenFound = false
-                              try {
-                                const raw = localStorage.getItem('admin_settings')
-                                if (raw) {
-                                  const s = JSON.parse(raw)
-                                  if (s.plex_token) {
-                                    headers['X-Plex-Token-Local'] = s.plex_token
-                                    if (s.plex_server_url) headers['X-Plex-Url-Local'] = s.plex_server_url
-                                    tokenFound = true
-                                  }
-                                }
-                              } catch {}
-
-                              if (!tokenFound) {
-                                try {
-                                  const cookieMatch = document.cookie.split(';').map(s=>s.trim()).find(s=> s.startsWith('admin_settings='))
-                                  if (cookieMatch) {
-                                    const rawCookie = decodeURIComponent(cookieMatch.split('=')[1] || '')
-                                    const s = JSON.parse(rawCookie)
-                                    if (s.plex_token) {
-                                      headers['X-Plex-Token-Local'] = s.plex_token
-                                      if (s.plex_server_url) headers['X-Plex-Url-Local'] = s.plex_server_url
-                                    }
-                                  }
-                                } catch {}
-                              }
-                              
-                              const encodedEmail = encodeURIComponent(c.email || '')
-                              const encodedUsername = encodeURIComponent(c.plex_username || '')
-                              fetch(`/api/admin/plex/libraries?email=${encodedEmail}&username=${encodedUsername}`, { headers, cache: 'no-store' })
-                                .then(r => r.json())
-                                .then(j => {
-                                  setLibraries(j.libraries || [])
-                                  // Pre-select shared libraries
-                                  if (j.shared && Array.isArray(j.shared)) {
-                                    setSelectedLibs(j.shared)
-                                  }
-                                  if (j.error) setShareMsg(`Failed: ${j.error}`)
-                                })
-                                .catch(() => {})
-                                .finally(() => setLibrariesLoading(false))
-                            }}
-                          >Manage Plex Share</button>
+                          <a
+                            className="btn-xs-outline w-full text-center"
+                            href={`/admin/plex-tools?email=${encodeURIComponent(c.email || '')}`}
+                            onClick={()=> setOpenActionsId(null)}
+                          >Manage Plex</a>
                           <button
                             className="btn-xs-outline w-full"
                             disabled={sendingEmail===c.email}
@@ -707,94 +652,7 @@ export default function AdminCustomersPage(){
             </table>
           </div>
         )}
-        {manageShareItem && (
-          <div className="fixed inset-0 modal-backdrop flex items-center justify-center p-4 z-50">
-            <div className="glass p-6 rounded-2xl w-full max-w-md border border-cyan-500/30">
-              <div className="text-lg font-semibold text-slate-200 mb-2">Manage Plex Share</div>
-              <div className="text-slate-400 text-sm mb-4">{manageShareItem.email}</div>
-              {shareMsg && (
-                <div className={`text-sm mb-3 ${shareMsg.startsWith('Failed') ? 'text-rose-400' : 'text-emerald-400'}`}>
-                  {shareMsg}
-                  {shareMsg.includes('Plex token not configured') && (
-                    <div className="mt-2">
-                      <a href="/admin/settings" className="btn-xs bg-cyan-600 hover:bg-cyan-500 text-white">Go to Settings to Configure Plex</a>
-                    </div>
-                  )}
-                </div>
-              )}
-              
-              {!librariesLoading && libraries.length > 0 && (
-                <div className="flex justify-end mb-2">
-                   <button 
-                     className="text-xs text-cyan-400 hover:text-cyan-300 transition-colors"
-                     onClick={() => {
-                       if (selectedLibs.length === libraries.length) setSelectedLibs([])
-                       else setSelectedLibs(libraries.map(l => l.id))
-                     }}
-                   >
-                     {selectedLibs.length === libraries.length ? 'Deselect All' : 'Select All'}
-                   </button>
-                </div>
-              )}
-
-              <div className="space-y-2 max-h-60 overflow-y-auto">
-                {librariesLoading && <div className="text-slate-400 text-sm animate-pulse">Loading libraries...</div>}
-                {!librariesLoading && libraries.length===0 && <div className="text-slate-500 text-xs">No libraries found. You can still add this user to Plex.</div>}
-                {libraries.map(lib=>(
-                  <label key={lib.id} className="inline-flex items-center gap-2 text-sm text-slate-300">
-                    <input type="checkbox" checked={selectedLibs.includes(lib.id)} onChange={e=>{
-                      setSelectedLibs(prev=> e.target.checked ? [...prev, lib.id] : prev.filter(x=>x!==lib.id))
-                    }} />
-                    <span>{lib.title} <span className="text-slate-500">({lib.type})</span></span>
-                  </label>
-                ))}
-              </div>
-              <div className="flex justify-end gap-2 mt-4">
-                <button className="btn-outline" onClick={()=>{ setManageShareItem(null); setSelectedLibs([]) }}>Close</button>
-                <button className="btn-outline" disabled={shareLoading} onClick={async ()=>{
-                  setShareLoading(true)
-                  setShareMsg('')
-                  try{
-                    const headers = { 'Content-Type': 'application/json' } as any
-                    try {
-                      const raw = localStorage.getItem('admin_settings')
-                      if (raw) {
-                        const s = JSON.parse(raw)
-                        if (s.plex_token) headers['X-Plex-Token-Local'] = s.plex_token
-                        if (s.plex_server_url) headers['X-Plex-Url-Local'] = s.plex_server_url
-                      }
-                    } catch {}
-                    
-                    const r = await fetch('/api/admin/plex/unshare', { method:'POST', headers, body: JSON.stringify({ email: manageShareItem.email }) })
-                    const j = await r.json().catch(()=>({}))
-                    if (!r.ok){ setShareMsg('Failed: ' + (j?.error || 'Remove error') + (j?.response ? (' - ' + j.response) : '')); setSendMsg(j?.error || 'Failed to remove') } else { setShareMsg('Removed from Plex'); setSendMsg('Removed from Plex') }
-                  } catch(e:any){ setShareMsg('Failed: ' + (e?.message || 'Error')); setSendMsg(e?.message || 'Failed') }
-                  finally{ setShareLoading(false); setTimeout(()=> setSendMsg(''), 5000) }
-                }}>Remove from Plex</button>
-                <button className="btn" disabled={shareLoading} onClick={async ()=>{
-                  setShareLoading(true)
-                  setShareMsg('')
-                  try{
-                    const headers = { 'Content-Type': 'application/json' } as any
-                    try {
-                      const raw = localStorage.getItem('admin_settings')
-                      if (raw) {
-                        const s = JSON.parse(raw)
-                        if (s.plex_token) headers['X-Plex-Token-Local'] = s.plex_token
-                        if (s.plex_server_url) headers['X-Plex-Url-Local'] = s.plex_server_url
-                      }
-                    } catch {}
-
-                    const r = await fetch('/api/admin/plex/share', { method:'POST', headers, body: JSON.stringify({ email: manageShareItem.email, libraries: selectedLibs }) })
-                    const j = await r.json().catch(()=>({}))
-                    if (!r.ok){ setShareMsg('Failed: ' + (j?.error || 'Invite error') + (j?.response ? (' - ' + j.response) : '')); setSendMsg(j?.error || 'Failed to add') } else { setShareMsg('Updated'); setSendMsg('Updated Plex share') }
-                  } catch(e:any){ setShareMsg('Failed: ' + (e?.message || 'Error')); setSendMsg(e?.message || 'Failed') }
-                  finally{ setShareLoading(false); setTimeout(()=> setSendMsg(''), 5000) }
-                }}>{selectedLibs.length > 0 ? 'Save Changes' : 'Add to Plex'}</button>
-              </div>
-            </div>
-          </div>
-        )}
+        
         {pendingDelete && (
           <div className="fixed inset-0 modal-backdrop flex items-center justify-center p-4 z-50">
             <div className="glass p-6 rounded-2xl w-full max-w-md border border-rose-500/30">

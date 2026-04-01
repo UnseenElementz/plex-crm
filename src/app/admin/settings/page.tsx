@@ -221,6 +221,17 @@ export default function AdminSettingsPage() {
     setSaveLoading(true)
     setMessage('')
     try {
+      try {
+        const check = await fetch('/api/admin/auth/session', { cache: 'no-store' })
+        if (!check.ok) {
+          const s = getSupabase()
+          const { data: { user } } = s ? await s.auth.getUser() : { data: { user: null } as any }
+          if (user?.email) {
+            await fetch('/api/admin/auth/session', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email: user.email }) }).catch(()=>{})
+          }
+        }
+      } catch {}
+
       const settingsData = {
         monthly_maintenance: parseFloat(settings.monthly_maintenance) || 140,
         yearly_price: parseFloat(settings.yearly_price) || 85,
@@ -251,7 +262,11 @@ export default function AdminSettingsPage() {
       const body = await res.json().catch(()=>({}))
       
       if (!res.ok) {
-        setMessage(body?.error || 'Failed to save to database. Saved locally.')
+        if (res.status === 401) {
+          setMessage('Unauthorized: admin session missing. Please log in again, then try Save.')
+        } else {
+          setMessage(body?.error || 'Failed to save to database. Saved locally.')
+        }
       } else if (body.dbOk === false) {
         setMessage('⚠️ Saved to browser, but Database write failed: ' + (body.dbError || 'Check Supabase SQL.'))
       } else {
@@ -293,6 +308,7 @@ export default function AdminSettingsPage() {
         }
 
         try{ await fetch('/api/admin/auth/upsert', { method:'POST' }) } catch{}
+        try{ await loadSettings() } catch {}
       }
     } catch (e: any) {
       setMessage('Error: ' + e.message)

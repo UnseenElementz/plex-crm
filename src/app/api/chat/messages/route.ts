@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { nextConversationStatus } from '@/lib/chatIdle'
 
 export async function GET(request: Request){
   const urlObj = new URL(request.url)
@@ -73,10 +74,20 @@ export async function POST(request: Request){
       .select()
       .single()
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-    await supabase
-      .from('conversations')
-      .update({ updated_at: new Date().toISOString() })
-      .eq('id', conversation_id)
+    try{
+      const nowIso = new Date().toISOString()
+      const { data: conv } = await supabase
+        .from('conversations')
+        .select('status,metadata')
+        .eq('id', conversation_id)
+        .maybeSingle()
+      const meta: any = conv?.metadata || {}
+      meta.last_message_at = nowIso
+      if (sender_type === 'admin') meta.last_admin_at = nowIso
+      if (sender_type === 'customer') meta.last_customer_at = nowIso
+      const nextStatus = conv?.status ? nextConversationStatus({ current: conv.status, senderType: sender_type }) : undefined
+      await supabase.from('conversations').update({ updated_at: nowIso, status: nextStatus, metadata: meta }).eq('id', conversation_id)
+    } catch {}
     return NextResponse.json(data)
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Unknown error' }, { status: 500 })

@@ -5,22 +5,27 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const BUCKET = 'chat-attachments'
-const MAX_SIZE = 10 * 1024 * 1024
+const MAX_SIZE = 5 * 1024 * 1024
 const ALLOWED = new Set([
   'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-  'image/heic',
-  'image/heif',
-  'application/pdf',
-  'text/plain',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  'application/pdf'
 ])
 
-function sanitize(name: string){
-  return name.replace(/[^a-zA-Z0-9._-]/g, '_')
+function getExt(type: string, name: string){
+  const lower = String(name || '').toLowerCase()
+  if (type === 'application/pdf' || lower.endsWith('.pdf')) return 'pdf'
+  if (type === 'image/jpeg' || lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'jpg'
+  return ''
+}
+
+async function basicScan(file: File, type: string){
+  const buf = Buffer.from(await file.arrayBuffer())
+  if (type === 'application/pdf') {
+    const head = buf.subarray(0, 5).toString('utf8')
+    if (head !== '%PDF-') throw new Error('Invalid PDF file')
+  } else if (type === 'image/jpeg') {
+    if (buf.length < 3 || buf[0] !== 0xff || buf[1] !== 0xd8 || buf[2] !== 0xff) throw new Error('Invalid JPEG file')
+  }
 }
 
 export async function POST(request: Request){
@@ -39,11 +44,15 @@ export async function POST(request: Request){
     const type = (file.type || '').toLowerCase()
     const size = (file as any).size as number
     if (!ALLOWED.has(type)) return NextResponse.json({ error: 'File type not allowed' }, { status: 400 })
-    if (size > MAX_SIZE) return NextResponse.json({ error: 'File too large (max 10MB)' }, { status: 400 })
+    if (size > MAX_SIZE) return NextResponse.json({ error: 'File too large (max 5MB)' }, { status: 400 })
+
+    const ext = getExt(type, (file as any).name || '')
+    if (!ext) return NextResponse.json({ error: 'File type not allowed' }, { status: 400 })
+    try { await basicScan(file as any, type) } catch(e: any){ return NextResponse.json({ error: e?.message || 'File rejected' }, { status: 400 }) }
     
     try { await supabase.storage.createBucket(BUCKET, { public: true }) } catch {}
     
-    const name = `${conversationId}/${Date.now()}_${sanitize((file as any).name || 'upload')}`
+    const name = `uploads/chat/${crypto.randomUUID()}.${ext}`
     const { data, error } = await supabase.storage.from(BUCKET).upload(name, file as any, { contentType: type, upsert: false, cacheControl: '3600' })
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
     const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(data.path)

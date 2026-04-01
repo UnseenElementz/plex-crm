@@ -1,24 +1,31 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useMemo, useRef, useState, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useChatStore } from '@/stores/chatStore'
 import ConversationList from './ConversationList'
 import ChatArea from './ChatArea'
 import CustomerInfo from './CustomerInfo'
 import { Conversation } from '@/stores/chatStore'
+import DashboardStats from './DashboardStats'
+import { shouldAutoWait } from '@/lib/chatIdle'
 
 export default function AdminDashboard() {
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'closed' | 'waiting'>('active')
   const [isMobile, setIsMobile] = useState(false)
-  const [chatOnline, setChatOnline] = useState<boolean | null>(null)
   const [saving, setSaving] = useState(false)
+  const [idleMinutes, setIdleMinutes] = useState(5)
+  const lastActiveNotifiedRef = useRef<number>(0)
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({})
   const searchParams = useSearchParams()
   
   const {
     conversations,
+    stats,
+    adminAvailability,
     fetchConversations,
     refreshConversations,
     fetchMessages,
@@ -30,7 +37,9 @@ export default function AdminDashboard() {
     isLoading,
     error,
     connectSocket,
-    disconnectSocket
+    disconnectSocket,
+    setAdminAvailability,
+    hydrateAdminAvailability
   } = useChatStore()
 
   // Handle deletion safely
@@ -58,8 +67,20 @@ export default function AdminDashboard() {
       }
     }catch{}
     fetchConversations()
-    connectSocket()
-    ;(async()=>{ try{ const res = await fetch('/api/admin/settings'); if(res.ok){ const d = await res.json(); setChatOnline(Boolean(d?.chat_online ?? true)) } } catch{} })()
+    ;(async()=>{
+      await hydrateAdminAvailability()
+      const avail = useChatStore.getState().adminAvailability
+      if (avail !== 'off') connectSocket()
+      try{
+        const res = await fetch('/api/admin/settings', { cache: 'no-store' as any })
+        if(res.ok){
+          const d = await res.json().catch(()=>null)
+          const n = Number(d?.chat_idle_timeout_minutes || 5)
+          setIdleMinutes(Number.isFinite(n) && n > 0 ? n : 5)
+        }
+      } catch{}
+    })()
+    try{ if (typeof Notification !== 'undefined' && Notification.permission === 'default') Notification.requestPermission().catch(()=>{}) } catch {}
     
     // Check for mobile
     const checkMobile = () => {
@@ -76,6 +97,14 @@ export default function AdminDashboard() {
       clearInterval(interval)
     }
   }, [])
+
+  useEffect(() => {
+    if (adminAvailability === 'off') {
+      disconnectSocket()
+    } else {
+      connectSocket()
+    }
+  }, [adminAvailability])
 
   useEffect(() => {
     if (selectedConversation) {
@@ -129,6 +158,39 @@ export default function AdminDashboard() {
 
   // Live updates come from realtime subscriptions; manual fetch occurs on selection only.
 
+  useEffect(() => {
+    const activeNow = stats.active
+    if (adminAvailability !== 'waiting') {
+      lastActiveNotifiedRef.current = activeNow
+      return
+    }
+    if (activeNow > lastActiveNotifiedRef.current) {
+      lastActiveNotifiedRef.current = activeNow
+      try{
+        if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          new Notification('New live chat', { body: 'A customer started a chat.' })
+        }
+      } catch {}
+    }
+  }, [stats.active, adminAvailability])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const mins = idleMinutes
+      if (!mins || mins <= 0) return
+      const now = Date.now()
+      const list = useChatStore.getState().conversations || []
+      list
+        .filter(c => c.status === 'active')
+        .forEach(c => {
+          const meta: any = (c as any).metadata || {}
+          if (shouldAutoWait({ lastAdminAt: meta.last_admin_at, lastCustomerAt: meta.last_customer_at, nowMs: now, idleMinutes: mins })) {
+            useChatStore.getState().updateConversationStatus(c.id, 'waiting')
+          }
+        })
+    }, 60000)
+    return () => clearInterval(interval)
+  }, [idleMinutes])
   const filteredConversations = (() => {
     const byKey = new Map<string, Conversation>()
     for (const c of conversations) {
@@ -161,18 +223,44 @@ export default function AdminDashboard() {
     setSelectedConversation(conversation)
   }
 
-  async function updateChatOnline(next: boolean){
+  const toggleSelect = (conversationId: string) => {
+    setSelectedIds(prev => ({ ...prev, [conversationId]: !prev[conversationId] }))
+  }
+
+  const selectedCount = useMemo(() => Object.values(selectedIds).filter(Boolean).length, [selectedIds])
+
+  const bulkDelete = async () => {
+    const ids = Object.entries(selectedIds).filter(([, v]) => v).map(([id]) => id)
+    if (!ids.length) return
+    if (!confirm(`Delete ${ids.length} conversation(s) permanently?`)) return
+    setSelectedConversation(null)
+    for (const id of ids) {
+      try { await deleteConversation(id) } catch {}
+    }
+    setSelectedIds({})
+    setSelectMode(false)
+    setTimeout(() => refreshConversations(), 800)
+  }
+
+  async function updateAvailability(next: 'off' | 'waiting' | 'active'){
+    setAdminAvailability(next)
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem('admin_chat_availability', next) } catch {}
     setSaving(true)
     try{
       const g = await fetch('/api/admin/settings')
       const cur = g.ok ? await g.json() : {}
-      const payload = { ...cur, chat_online: next }
+      const payload = { ...cur, chat_availability: next }
       const r = await fetch('/api/admin/settings', { method:'PUT', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(payload) })
       if (!r.ok) return
-      setChatOnline(next)
     } catch{}
     finally{ setSaving(false) }
   }
+
+  const availabilityLabel = useMemo(() => {
+    if (adminAvailability === 'off') return { text: 'Off', cls: 'bg-rose-500/20 text-rose-300 border-rose-500/30' }
+    if (adminAvailability === 'waiting') return { text: 'Waiting', cls: 'bg-amber-500/20 text-amber-300 border-amber-500/30' }
+    return { text: 'Active', cls: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' }
+  }, [adminAvailability])
 
   return (
     <div className="flex h-[calc(100vh-9rem)] md:h-[calc(100vh-10rem)] bg-slate-900 rounded-xl overflow-hidden border border-slate-800 shadow-xl">
@@ -186,15 +274,26 @@ export default function AdminDashboard() {
           <p className="text-sm text-slate-400">Manage customer conversations</p>
           
           <div className="mt-3 flex items-center gap-3">
-            {chatOnline !== null && (
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${chatOnline ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border-amber-500/30'}`}>
-                {chatOnline ? 'Online' : 'Offline'}
-              </span>
-            )}
-            <label className="inline-flex items-center gap-2">
-              <input type="checkbox" checked={Boolean(chatOnline)} onChange={e=> updateChatOnline(e.target.checked)} disabled={saving || chatOnline===null} />
-              <span className="text-xs text-slate-400">Chat Availability</span>
-            </label>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${availabilityLabel.cls}`}>
+              {availabilityLabel.text}
+            </span>
+            <div className="inline-flex rounded-lg overflow-hidden border border-slate-700">
+              <button
+                className={`px-2 py-1 text-[11px] ${adminAvailability === 'off' ? 'bg-slate-800 text-slate-200' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'}`}
+                onClick={() => updateAvailability('off')}
+                disabled={saving}
+              >Off</button>
+              <button
+                className={`px-2 py-1 text-[11px] ${adminAvailability === 'waiting' ? 'bg-slate-800 text-slate-200' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'}`}
+                onClick={() => updateAvailability('waiting')}
+                disabled={saving}
+              >Waiting</button>
+              <button
+                className={`px-2 py-1 text-[11px] ${adminAvailability === 'active' ? 'bg-slate-800 text-slate-200' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'}`}
+                onClick={() => updateAvailability('active')}
+                disabled={saving}
+              >Active</button>
+            </div>
           </div>
         </div>
 
@@ -218,6 +317,43 @@ export default function AdminDashboard() {
             <option value="waiting">Waiting</option>
             <option value="closed">Closed</option>
           </select>
+          <div className="flex gap-2">
+            <button
+              className="btn-ghost text-xs border border-slate-700 hover:bg-slate-800 flex-1"
+              onClick={() => { setSelectMode(v => !v); setSelectedIds({}) }}
+            >
+              {selectMode ? 'Cancel' : 'Select'}
+            </button>
+            <button
+              className="btn-ghost text-xs border border-rose-500/30 text-rose-300 hover:bg-rose-500/10 flex-1 disabled:opacity-50"
+              disabled={!selectMode || selectedCount === 0}
+              onClick={bulkDelete}
+            >
+              Delete ({selectedCount})
+            </button>
+          </div>
+          {selectMode && (
+            <div className="flex gap-2">
+              <button
+                className="btn-ghost text-xs border border-slate-700 hover:bg-slate-800 flex-1"
+                onClick={() => {
+                  setSelectedIds(prev => {
+                    const next = { ...prev }
+                    filteredConversations.forEach(c => { next[c.id] = true })
+                    return next
+                  })
+                }}
+              >
+                Select All
+              </button>
+              <button
+                className="btn-ghost text-xs border border-slate-700 hover:bg-slate-800 flex-1"
+                onClick={() => setSelectedIds({})}
+              >
+                Clear
+              </button>
+            </div>
+          )}
           {!isLoading && !error && conversations.length === 0 && (
             <div className="mt-2">
               <button
@@ -249,6 +385,9 @@ export default function AdminDashboard() {
               conversations={filteredConversations}
               selectedConversation={selectedConversation}
               onSelectConversation={handleConversationSelect}
+              selectMode={selectMode}
+              selectedIds={selectedIds}
+              onToggleSelect={toggleSelect}
             />
           )}
         </div>
@@ -317,10 +456,14 @@ export default function AdminDashboard() {
         )}
       </div>
 
-      {/* Customer Info Sidebar */}
-      {selectedConversation && !isMobile && (
-        <div className="w-64 bg-slate-900/60 border-l border-slate-800">
-          <CustomerInfo conversation={selectedConversation} />
+      {!isMobile && (
+        <div className="w-80 bg-slate-900/60 border-l border-slate-800 overflow-y-auto">
+          <div className="p-4 border-b border-slate-800">
+            <DashboardStats conversations={filteredConversations} stats={stats} onOpenConversation={handleConversationSelect} />
+          </div>
+          {selectedConversation && (
+            <CustomerInfo conversation={selectedConversation} />
+          )}
         </div>
       )}
     </div>

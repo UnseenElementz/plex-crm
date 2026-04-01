@@ -23,7 +23,7 @@ export async function GET(request: Request){
   
   const { data, error } = await supabase
     .from('customers')
-    .select('*')
+    .select('name,email,subscription_type,streams,next_payment_date,subscription_status,notes')
     .eq('email', email)
     .single()
 
@@ -31,9 +31,14 @@ export async function GET(request: Request){
     return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
   }
 
+  const notes = String((data as any).notes || '')
+  const plexUsername = notes.match(/Plex:\s*([^\n]+)/i)?.[1]?.trim() || ''
   return NextResponse.json({
-    plex_username: data.plex_username,
-    full_name: data.full_name || data.name,
-    status: data.status || data.subscription_status
+    plex_username: plexUsername,
+    full_name: (data as any).name || '',
+    status: (data as any).subscription_status || 'inactive',
+    subscription_type: (data as any).subscription_type || '',
+    streams: (data as any).streams || 1,
+    next_payment_date: (data as any).next_payment_date || null
   })
 }

@@ -32,7 +32,7 @@ export async function POST(request: Request){
     try{
       const body = await request.json()
       const { customer_ip, metadata } = body || {}
-      const row = { id: crypto.randomUUID(), status: 'active', customer_ip: customer_ip || null, metadata: metadata || {}, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), closed_at: null }
+      const row = { id: crypto.randomUUID(), status: 'waiting', customer_ip: customer_ip || null, metadata: metadata || {}, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), closed_at: null }
       const { cookies } = await import('next/headers')
       const jar = cookies()
       const raw = jar.get('admin_conversations')?.value
@@ -53,22 +53,28 @@ export async function POST(request: Request){
     if (metadata?.email) {
       const { data: customer } = await supabase
         .from('customers')
-        .select('plex_username, full_name, name')
+        .select('name,subscription_type,streams,subscription_status,next_payment_date,notes')
         .eq('email', metadata.email)
         .single()
       
       if (customer) {
+        const notes = String((customer as any).notes || '')
+        const plexUsername = notes.match(/Plex:\s*([^\n]+)/i)?.[1]?.trim() || ''
         enrichedMetadata = {
           ...enrichedMetadata,
-          plex_username: customer.plex_username,
-          full_name: customer.full_name || customer.name || enrichedMetadata.full_name
+          plex_username: plexUsername || (enrichedMetadata as any).plex_username,
+          full_name: (customer as any).name || (enrichedMetadata as any).full_name,
+          subscription_type: (customer as any).subscription_type || (enrichedMetadata as any).subscription_type,
+          streams: (customer as any).streams || (enrichedMetadata as any).streams,
+          subscription_status: (customer as any).subscription_status || (enrichedMetadata as any).subscription_status,
+          next_payment_date: (customer as any).next_payment_date || (enrichedMetadata as any).next_payment_date
         }
       }
     }
 
     const { data, error } = await supabase
       .from('conversations')
-      .insert({ status: 'active', customer_ip, metadata: enrichedMetadata, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .insert({ status: 'waiting', customer_ip, metadata: enrichedMetadata, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .select()
       .single()
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })

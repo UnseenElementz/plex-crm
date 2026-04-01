@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getPlexFriends } from '@/lib/plex'
+import { getOwnedServers, getPlexFriends } from '@/lib/plex'
 
 export async function POST(request: Request){
   try {
@@ -32,6 +32,11 @@ export async function POST(request: Request){
     // Simple check if it looks like XML
     if (!text.includes('<?xml')) {
       return NextResponse.json({ error: 'Invalid response from Plex' }, { status: 502 })
+    }
+
+    const servers = await getOwnedServers(token)
+    if (!servers.length) {
+      return NextResponse.json({ ok: true, message: 'Token is valid, but no claimed Plex server is linked to this account. Use a token from the server owner account and ensure the server is claimed.' })
     }
 
     return NextResponse.json({ ok: true, message: 'Connection successful!' })

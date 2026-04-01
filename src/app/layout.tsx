@@ -11,6 +11,7 @@ export const metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   const BackgroundAudio = dynamic(() => import('@/components/BackgroundAudio'), { ssr: false })
+  const ToasterClient = dynamic(() => import('@/components/ToasterClient'), { ssr: false })
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen text-slate-100 relative overflow-x-hidden">
@@ -32,6 +33,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             {children}
           </main>
           <BackgroundAudio />
+          <ToasterClient />
         </div>
         <Script id="silence-abort-errors" strategy="beforeInteractive">
           {`(function(){

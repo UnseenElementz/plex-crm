@@ -5,7 +5,7 @@ import { type Plan } from '@/lib/pricing'
 export default function PayPalButton({ amount, currency = 'GBP', plan, streams, downloads, onSuccess }: { amount: number; currency?: string; customerEmail?: string; plan?: Plan; streams?: number; downloads?: boolean; onSuccess?: (orderId: string) => void }){
   
   const getPlanLabel = (p?: string) => {
-    if (p === 'yearly') return '1 Year Hosting'
+    if (p === 'yearly') return 'Full Package'
     if (p === 'movies_only') return 'M hosting Only'
     if (p === 'tv_only') return 'T Hosting Only'
     return 'Monthly Hosting'
@@ -29,8 +29,8 @@ export default function PayPalButton({ amount, currency = 'GBP', plan, streams, 
         <div className="bg-black/20 p-4 rounded-lg border border-white/5">
           <p className="mb-2">The payment reference should clearly state the package you selected, for example:</p>
           <ul className="list-none space-y-1 text-slate-400 italic mb-3 pl-2 border-l-2 border-slate-600">
-            <li>– 1 Year Hosting – 2 Streams</li>
-            <li>– 3 Years Hosting – 1 Stream</li>
+            <li>– Full Package – 2 Streams</li>
+            <li>– Movies Only – 1 Stream</li>
           </ul>
           
           <div className="mt-3 pt-3 border-t border-white/10">

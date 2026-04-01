@@ -44,7 +44,7 @@ export async function GET(){
     if (!finalSettings && error) return NextResponse.json({ error: error.message }, { status: 404 })
     
     const safe: any = {}
-    const allow = ['company_name','yearly_price','stream_yearly_price','movies_only_price','tv_only_price','downloads_price','payment_lock','chat_online','canonical_host','hero_image_url','bg_music_url','bg_music_volume','bg_music_enabled','plex_token','plex_server_url']
+    const allow = ['company_name','yearly_price','stream_yearly_price','movies_only_price','tv_only_price','downloads_price','payment_lock','chat_online','chat_availability','chat_idle_timeout_minutes','canonical_host','hero_image_url','bg_music_url','bg_music_volume','bg_music_enabled','plex_token','plex_server_url']
     for (const k of allow){ if (finalSettings && finalSettings[k] !== undefined) safe[k] = finalSettings[k] }
     
     const res = NextResponse.json(isAdmin ? (finalSettings || {}) : safe, { 
@@ -79,7 +79,7 @@ export async function PUT(request: Request){
       'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_from', 
       'paypal_email', 'timezone', 'monthly_maintenance', 'company_name',
       'yearly_price', 'stream_yearly_price', 'movies_only_price', 'tv_only_price',
-      'downloads_price', 'payment_lock', 'chat_online', 'hero_image_url',
+      'downloads_price', 'payment_lock', 'chat_online', 'chat_availability', 'chat_idle_timeout_minutes', 'hero_image_url',
       'admin_user', 'admin_pass', 'plex_token', 'plex_server_url',
       'bg_music_url', 'bg_music_volume', 'bg_music_enabled'
     ]
@@ -87,6 +87,22 @@ export async function PUT(request: Request){
     const row: any = { id: 1 }
     for (const key of allowedKeys) {
       if (payload[key] !== undefined) row[key] = payload[key]
+    }
+
+    if (row.plex_server_url !== undefined) {
+      const raw = String(row.plex_server_url || '').trim()
+      let v = raw.replace(/\/+$/,'')
+      if (v === '') v = 'https://plex.tv'
+      if (!/^https?:\/\//i.test(v)) v = `https://${v}`
+      row.plex_server_url = v
+    }
+
+    if (row.chat_availability !== undefined) {
+      const v = String(row.chat_availability || '').toLowerCase()
+      row.chat_availability = v === 'off' || v === 'waiting' || v === 'active' ? v : 'active'
+      row.chat_online = row.chat_availability !== 'off'
+    } else if (row.chat_online !== undefined) {
+      row.chat_availability = row.chat_online ? 'active' : 'off'
     }
     
     let dbOk = false

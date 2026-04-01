@@ -248,7 +248,7 @@ export default function CustomerPortal() {
         <p className="text-slate-300">Manage your Plex subscription</p>
         <div className="mt-2 flex gap-4">
           <a href="/customer/service-updates" className="cta-outline shimmer" data-no-prefetch>Service Updates</a>
-          <a href="/customer/recommendations" className="cta-btn shimmer" data-no-prefetch>Recommendations</a>
+          <a href="/customer/recommendations" className="cta-btn shimmer" data-no-prefetch>Requests & Issues</a>
         </div>
         {paymentLock && !canPay && (
           <div className="card-solid p-4 rounded-lg mt-4 border border-cyan-500/30">
@@ -267,7 +267,7 @@ export default function CustomerPortal() {
                   ...c,
                   plan:'yearly',
                   nextDueDate: calculateNextDue('yearly', new Date(c.startDate)).toISOString()
-                }))}>1 Year Hosting</button>
+                }))}>Full Package</button>
                 <button className={`btn w-full ${customer.plan==='movies_only'?'active':''}`} onClick={()=>setCustomer(c=>({
                   ...c,
                   plan:'movies_only',

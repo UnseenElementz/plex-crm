@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react'
 import { Paperclip, X, Upload, FileText, Image } from 'lucide-react'
 import { fileService, FileUploadResult, FileUploadError } from '@/services/fileService'
+import toast from 'react-hot-toast'
 
 interface FileUploadProps {
   conversationId?: string
@@ -14,34 +15,50 @@ interface FileUploadProps {
 export default function FileUpload({ conversationId, ensureConversationId, onFileUploaded, onError }: FileUploadProps) {
   const [isUploading, setIsUploading] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadFailed, setUploadFailed] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
+      const validation = fileService.validateFile(file)
+      if (!validation.valid) {
+        toast.error(validation.error || 'File not allowed')
+        onError(validation.error || 'File not allowed')
+        if (fileInputRef.current) fileInputRef.current.value = ''
+        return
+      }
       setSelectedFile(file)
-      handleUpload(file)
+      setUploadProgress(0)
+      setUploadFailed(false)
     }
   }
 
   const handleUpload = async (file: File) => {
     setIsUploading(true)
+    setUploadProgress(0)
     try {
       let cid = conversationId
       if (!cid && ensureConversationId) {
         try { cid = await ensureConversationId() || undefined } catch {}
       }
       if (!cid) { onError('Chat not initialized'); return }
-      const result = await fileService.uploadFile(file, cid)
+      const result = await fileService.uploadFileWithProgress(file, cid, setUploadProgress)
       
       if ('url' in result) {
         onFileUploaded(result)
         setSelectedFile(null)
+        toast.success('Uploaded')
       } else {
         onError(result.message)
+        setUploadFailed(true)
+        toast.error(result.message)
       }
     } catch (error) {
       onError('Failed to upload file')
+      setUploadFailed(true)
+      toast.error('Upload failed')
     } finally {
       setIsUploading(false)
       if (fileInputRef.current) {
@@ -67,7 +84,7 @@ export default function FileUpload({ conversationId, ensureConversationId, onFil
         type="file"
         onChange={handleFileSelect}
         className="hidden"
-        accept="image/*,.pdf,.txt,.doc,.docx"
+        accept=".jpg,.jpeg,.pdf"
         disabled={isUploading}
       />
       
@@ -101,6 +118,12 @@ export default function FileUpload({ conversationId, ensureConversationId, onFil
               <X size={16} />
             </button>
           </div>
+
+          {selectedFile.type === 'image/jpeg' && (
+            <div className="mb-2">
+              <img src={URL.createObjectURL(selectedFile)} alt="" className="w-28 h-20 object-cover rounded border border-gray-200" />
+            </div>
+          )}
           
           <div className="flex justify-between items-center">
             <span className="text-xs text-gray-500">
@@ -112,9 +135,18 @@ export default function FileUpload({ conversationId, ensureConversationId, onFil
               className="flex items-center space-x-1 px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               <Upload size={12} />
-              <span>Upload</span>
+              <span>{uploadFailed ? 'Retry' : 'Upload'}</span>
             </button>
           </div>
+
+          {isUploading && (
+            <div className="mt-2">
+              <div className="h-2 w-full bg-gray-200 rounded">
+                <div className="h-2 bg-blue-600 rounded" style={{ width: `${uploadProgress}%` }} />
+              </div>
+              <div className="mt-1 text-[11px] text-gray-500">{uploadProgress}%</div>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -1,13 +1,23 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
-import { sendCustomEmail } from '@/lib/email'
+import { renderTemplate, sendCustomEmail } from '@/lib/email'
 
 function svc(){
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY as string
   if (!url || !key) return null
   return createClient(url, key)
+}
+
+function getFirstName(fullName?: string, email?: string, plexUsername?: string) {
+  const fromName = String(fullName || '').trim()
+  if (fromName) return fromName.split(/\s+/)[0] || fromName
+  const fromPlex = String(plexUsername || '').trim()
+  if (fromPlex) return fromPlex.split(/\s+/)[0] || fromPlex
+  const fromEmail = String(email || '').trim()
+  if (fromEmail.includes('@')) return fromEmail.split('@')[0]
+  return fromEmail
 }
 
 export async function POST(request: Request){
@@ -32,6 +42,22 @@ export async function POST(request: Request){
     }
     emails = Array.from(new Set(emails)).filter(Boolean)
     if (!emails.length) return NextResponse.json({ error: 'no recipients' }, { status: 400 })
+
+    let customersByEmail = new Map<string, any>()
+    try {
+      const supabase = svc()
+      if (supabase) {
+        const { data } = await supabase
+          .from('customers')
+          .select('email, full_name, name, notes, streams, plan, subscription_type, next_due_date, next_payment_date')
+          .in('email', emails)
+        for (const row of (data || []) as any[]) {
+          const email = String(row?.email || '').trim().toLowerCase()
+          if (!email) continue
+          customersByEmail.set(email, row)
+        }
+      }
+    } catch {}
 
     let settings: any = null
     try{
@@ -63,7 +89,47 @@ export async function POST(request: Request){
     process.env.SMTP_PASS = String(settings.smtp_pass || '').replace(/\s+/g, '')
     process.env.SMTP_FROM = settings.smtp_from || settings.smtp_user
     try{
-      await sendCustomEmail(emails, subject, message)
+      await sendCustomEmail(
+        emails,
+        (recipient) => {
+          const key = String(recipient || '').trim().toLowerCase()
+          const c = customersByEmail.get(key)
+          const fullName = c?.full_name ?? c?.name ?? ''
+          const notes = String(c?.notes || '')
+          const plexUsername = notes.match(/Plex:\s*(.+)/i)?.[1]?.trim() || ''
+          const firstName = getFirstName(fullName, recipient, plexUsername)
+          const vars: Record<string, unknown> = {
+            first_name: firstName,
+            full_name: String(fullName || '').trim(),
+            email: recipient,
+            plex_username: plexUsername,
+            username: plexUsername || firstName,
+            plan: (c?.plan ?? c?.subscription_type ?? ''),
+            streams: (c?.streams ?? ''),
+            next_due_date: (c?.next_due_date ?? c?.next_payment_date ?? '')
+          }
+          return renderTemplate(subject, vars)
+        },
+        (recipient) => {
+          const key = String(recipient || '').trim().toLowerCase()
+          const c = customersByEmail.get(key)
+          const fullName = c?.full_name ?? c?.name ?? ''
+          const notes = String(c?.notes || '')
+          const plexUsername = notes.match(/Plex:\s*(.+)/i)?.[1]?.trim() || ''
+          const firstName = getFirstName(fullName, recipient, plexUsername)
+          const vars: Record<string, unknown> = {
+            first_name: firstName,
+            full_name: String(fullName || '').trim(),
+            email: recipient,
+            plex_username: plexUsername,
+            username: plexUsername || firstName,
+            plan: (c?.plan ?? c?.subscription_type ?? ''),
+            streams: (c?.streams ?? ''),
+            next_due_date: (c?.next_due_date ?? c?.next_payment_date ?? '')
+          }
+          return renderTemplate(message, vars)
+        }
+      )
       return NextResponse.json({ ok: true, count: emails.length })
     } finally {
       Object.entries(originalEnv).forEach(([k,v])=>{ if (v !== undefined) (process.env as any)[k] = v as string; else delete (process.env as any)[k] })

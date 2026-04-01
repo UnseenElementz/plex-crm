@@ -116,10 +116,6 @@ export async function getAllPlexUsers(token: string): Promise<PlexFriend[]> {
                 email: existing.email || f.email,
                 thumb: existing.thumb || f.thumb
             })
-        } else if (usersMap.size === 0) {
-            // If we found NO shared servers, fallback to friends just in case
-            // usersMap.set(key, f) 
-            // Actually, better to stick to shared_servers only if we want accuracy.
         }
     })
   } catch {}
@@ -154,9 +150,14 @@ export async function getPlexLibraries(serverUrl: string, token: string): Promis
     if (base.includes('plex.tv')) {
       const discovered = await getPreferredServerUri(token)
       if (discovered === 'https://plex.tv') {
-        throw new Error('Could not resolve Plex Media Server URI. Please ensure the server is claimed and Remote Access is enabled, or set a direct local IP in Settings.')
+        const candidates = await getServerUrisFromApiServers(token)
+        if (!candidates.length) {
+          throw new Error('Could not resolve Plex Media Server URI. Please ensure the server is claimed and Remote Access is enabled, or set a direct local IP in Settings.')
+        }
+        base = candidates[0]
+      } else {
+        base = discovered
       }
-      base = discovered
     }
     
     // Try connecting to the resolved base
@@ -168,6 +169,8 @@ export async function getPlexLibraries(serverUrl: string, token: string): Promis
       // If the auto-resolved URI failed, let's try ONE MORE aggressive fallback:
       console.warn(`Preferred URI ${base} failed, trying all connection candidates...`)
       const candidates = await getAllConnectionCandidates(token)
+      const fromServers = await getServerUrisFromApiServers(token)
+      for (const u of fromServers) candidates.push(u)
       for (const uri of candidates) {
         if (uri === base) continue
         try {
@@ -180,6 +183,109 @@ export async function getPlexLibraries(serverUrl: string, token: string): Promis
   } catch(e: any){
     console.error('Plex libraries error:', e)
     throw new Error(e.message || 'Failed to load libraries')
+  }
+}
+
+async function getServerUrisFromApiServers(token: string): Promise<string[]> {
+  try{
+    const res = await fetch('https://plex.tv/api/servers', { headers: plexHeaders(token), cache: 'no-store' })
+    if (!res.ok) return []
+    const text = await res.text()
+    const matches = text.matchAll(/<Server\s+([^>]+)\/>/g)
+    const out: string[] = []
+    for (const m of matches) {
+      const attrs = m[1]
+      const owned = attrs.match(/owned="([^"]+)"/)?.[1] === '1'
+      if (!owned) continue
+      const scheme = attrs.match(/scheme="([^"]+)"/)?.[1] || 'http'
+      const address = attrs.match(/address="([^"]+)"/)?.[1] || attrs.match(/host="([^"]+)"/)?.[1] || ''
+      const port = attrs.match(/port="([^"]+)"/)?.[1] || '32400'
+      const machineIdentifier = attrs.match(/machineIdentifier="([^"]+)"/)?.[1] || ''
+      if (!address) continue
+      const primary = `${scheme}://${address}:${port}`
+      out.push(primary)
+      if (scheme === 'http') out.push(`https://${address}:${port}`)
+      if (scheme === 'https') out.push(`http://${address}:${port}`)
+      if (machineIdentifier) out.push(`https://${machineIdentifier}.plex.direct:${port}`)
+    }
+    return Array.from(new Set(out.map(u => u.replace(/\/+$/,''))))
+  } catch {
+    return []
+  }
+}
+
+export async function getPlexLibrariesForMachine(serverUrl: string, token: string, targetMachineId: string): Promise<{ libraries: PlexLibrary[], machineIdentifier: string }> {
+  try{
+    let base = serverUrl.replace(/\/+$/,'')
+    if (!base.includes('plex.tv')) {
+      try {
+        const res = await fetch(`${base}/library/sections`, { headers: plexHeaders(token) })
+        if (res.ok) return await parseLibraries(res)
+      } catch {}
+    }
+
+    const uri = await getServerUriForMachine(token, targetMachineId)
+    if (uri) {
+      const res = await fetch(`${uri}/library/sections`, { headers: plexHeaders(token) })
+      if (res.ok) return await parseLibraries(res)
+    }
+
+    const candidates = [
+      ...(await getAllConnectionCandidates(token)),
+      ...(await getServerUrisFromApiServers(token))
+    ]
+    for (const u of candidates) {
+      try {
+        const res2 = await fetch(`${u}/library/sections`, { headers: plexHeaders(token) })
+        if (!res2.ok) continue
+        const parsed = await parseLibraries(res2)
+        if (parsed.machineIdentifier && parsed.machineIdentifier === targetMachineId) return parsed
+      } catch {}
+    }
+    return await getPlexLibraries(serverUrl, token)
+  } catch(e: any){
+    throw new Error(e.message || 'Failed to load libraries')
+  }
+}
+
+async function getServerUriForMachine(token: string, machineIdentifier: string): Promise<string | null> {
+  try{
+    const res = await fetch('https://plex.tv/pms/resources?includeHttps=1&includeRelay=1&includeManaged=1', {
+      headers: plexHeaders(token),
+      cache: 'no-store'
+    })
+    if (!res.ok) return null
+    const text = await res.text()
+    const devMatches = text.matchAll(/<Device\s+([^>]+)>[\s\S]*?<\/Device>/g)
+    for (const dm of devMatches) {
+      const dAttrs = dm[1]
+      const provides = dAttrs.match(/provides="([^"]+)"/)?.[1] || ''
+      const owned = dAttrs.match(/owned="([^"]+)"/)?.[1] || '0'
+      const mid = dAttrs.match(/machineIdentifier="([^"]+)"/)?.[1] || ''
+      if (!provides.includes('server') || owned !== '1') continue
+      if (mid !== machineIdentifier) continue
+      const block = dm[0]
+      const connMatches = block.matchAll(/<Connection\s+([^>]+)\/>/g)
+      let best: { uri: string; score: number } | null = null
+      for (const cm of connMatches) {
+        const cAttrs = cm[1]
+        const uri = cAttrs.match(/uri="([^"]+)"/)?.[1] || ''
+        const local = cAttrs.match(/local="([^"]+)"/)?.[1] === '1'
+        const relay = cAttrs.match(/relay="([^"]+)"/)?.[1] === '1'
+        const publicConn = cAttrs.match(/public="([^"]+)"/)?.[1] === '1'
+        let score = 0
+        if (publicConn) score = 3
+        else if (local) score = 2
+        else if (!relay) score = 1
+        if (uri) {
+          if (!best || score > best.score) best = { uri, score }
+        }
+      }
+      if (best) return best.uri.replace(/\/+$/,'')
+    }
+    return null
+  } catch {
+    return null
   }
 }
 
@@ -253,12 +359,32 @@ export async function getOwnedServers(token: string): Promise<PlexServerInfo[]> 
     for (const m of matches) {
       const attrs = m[1]
       const owned = attrs.match(/owned="([^"]+)"/)?.[1] === '1'
-      const id = attrs.match(/id="([^"]+)"/)?.[1] || ''
       const name = attrs.match(/name="([^"]+)"/)?.[1] || ''
       const machineIdentifier = attrs.match(/machineIdentifier="([^"]+)"/)?.[1] || ''
-      if (id) list.push({ id, name, machineIdentifier, owned })
+      const id = attrs.match(/id="([^"]+)"/)?.[1] || machineIdentifier
+      if (owned && id && machineIdentifier) list.push({ id, name, machineIdentifier, owned })
     }
-    return list
+    if (list.length) return list
+
+    const r2 = await fetch('https://plex.tv/pms/resources?includeHttps=1&includeRelay=1&includeManaged=1', {
+      headers: plexHeaders(token),
+      cache: 'no-store'
+    })
+    if (!r2.ok) return []
+    const t2 = await r2.text()
+    const out: PlexServerInfo[] = []
+    const devMatches = t2.matchAll(/<Device\s+([^>]+)>[\s\S]*?<\/Device>/g)
+    for (const dm of devMatches) {
+      const dAttrs = dm[1]
+      const provides = dAttrs.match(/provides="([^"]+)"/)?.[1] || ''
+      const owned = dAttrs.match(/owned="([^"]+)"/)?.[1] === '1'
+      if (!provides.includes('server') || !owned) continue
+      const name = dAttrs.match(/name="([^"]+)"/)?.[1] || ''
+      const machineIdentifier = dAttrs.match(/machineIdentifier="([^"]+)"/)?.[1] || ''
+      const id = dAttrs.match(/clientIdentifier="([^"]+)"/)?.[1] || machineIdentifier
+      if (id && machineIdentifier) out.push({ id, name, machineIdentifier, owned: true })
+    }
+    return out
   } catch(e){
     console.error('Plex servers error:', e)
     return []

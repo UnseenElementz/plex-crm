@@ -156,7 +156,7 @@ export default function CustomerForm({ initial, onSaved, onCancel }: { initial?:
       <input className="input" placeholder="Plex Username" value={c.plex_username || ''} onChange={e=>setC({ ...c, plex_username: e.target.value })} />
       <label className="label">Plan</label>
       <div className="flex gap-3 overflow-x-auto pb-1">
-        <button disabled={loading} className={`btn whitespace-nowrap ${c.plan==='yearly'?'active':''}`} onClick={()=>setC({ ...c, plan: 'yearly', next_due_date: calculateNextDue('yearly', new Date(c.start_date || new Date())).toISOString() })}>1 Year Hosting</button>
+        <button disabled={loading} className={`btn whitespace-nowrap ${c.plan==='yearly'?'active':''}`} onClick={()=>setC({ ...c, plan: 'yearly', next_due_date: calculateNextDue('yearly', new Date(c.start_date || new Date())).toISOString() })}>Full Package</button>
         <button disabled={loading} className={`btn whitespace-nowrap ${c.plan==='movies_only'?'active':''}`} onClick={()=>setC({ ...c, plan: 'movies_only', next_due_date: calculateNextDue('movies_only', new Date(c.start_date || new Date())).toISOString() })}>Movies Only</button>
         <button disabled={loading} className={`btn whitespace-nowrap ${c.plan==='tv_only'?'active':''}`} onClick={()=>setC({ ...c, plan: 'tv_only', next_due_date: calculateNextDue('tv_only', new Date(c.start_date || new Date())).toISOString() })}>TV Shows Only</button>
       </div>

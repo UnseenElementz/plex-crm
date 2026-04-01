@@ -1,10 +1,13 @@
 import { create } from 'zustand'
 import { supabase } from '@/lib/supabase'
 import { Database } from '@/lib/supabase'
+import { AdminAvailability, resolveAvailability } from '@/lib/adminChatAvailability'
 let __msgChannel: any = null
 let __convChannel: any = null
 let __convBusy = false
 let __msgBusy = false
+let __reconnectAttempt = 0
+let __reconnectTimer: any = null
 
 export type Conversation = Database['public']['Tables']['conversations']['Row']
 export type Message = Database['public']['Tables']['messages']['Row']
@@ -20,6 +23,8 @@ export interface ChatState {
   error: string | null
   isConnected: boolean
   hasLoaded: boolean
+  adminAvailability: AdminAvailability
+  stats: { waiting: number; active: number }
   
   // Actions
   setConversations: (conversations: Conversation[]) => void
@@ -29,6 +34,8 @@ export interface ChatState {
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
   setConnected: (connected: boolean) => void
+  setAdminAvailability: (availability: AdminAvailability) => void
+  hydrateAdminAvailability: () => Promise<void>
   
   // API calls
   fetchConversations: () => Promise<void>
@@ -48,6 +55,16 @@ export interface ChatState {
   deleteConversation: (conversationId: string) => Promise<void>
 }
 
+function computeStats(conversations: Conversation[]) {
+  let waiting = 0
+  let active = 0
+  for (const c of conversations || []) {
+    if (c.status === 'waiting') waiting++
+    if (c.status === 'active') active++
+  }
+  return { waiting, active }
+}
+
 export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
   currentConversation: null,
@@ -57,8 +74,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   error: null,
   isConnected: false,
   hasLoaded: false,
+  adminAvailability: 'active',
+  stats: { waiting: 0, active: 0 },
 
-  setConversations: (conversations) => set({ conversations }),
+  setConversations: (conversations) => set({ conversations, stats: computeStats(conversations) }),
   setCurrentConversation: (currentConversation) => set({ currentConversation }),
   setMessages: (messages) => set({ messages }),
   addMessage: (message) => set((state) => ({
@@ -67,6 +86,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setLoading: (isLoading) => set({ isLoading }),
   setError: (error) => set({ error }),
   setConnected: (isConnected) => set({ isConnected }),
+  setAdminAvailability: (adminAvailability) => set({ adminAvailability }),
+  hydrateAdminAvailability: async () => {
+    let local: any = null
+    try {
+      if (typeof window !== 'undefined') {
+        local = window.localStorage.getItem('admin_chat_availability')
+        if (local) set({ adminAvailability: resolveAvailability({ local }) })
+      }
+    } catch {}
+    try {
+      const res = await fetch('/api/admin/settings', { cache: 'no-store' as any })
+      if (!res.ok) return
+      const d = await res.json().catch(()=>null)
+      const avail = resolveAvailability({ local, dbAvailability: d?.chat_availability, dbChatOnline: d?.chat_online })
+      set({ adminAvailability: avail })
+      try { if (typeof window !== 'undefined') window.localStorage.setItem('admin_chat_availability', avail) } catch {}
+    } catch {}
+  },
 
   fetchConversations: async () => {
     const { hasLoaded } = get()
@@ -78,7 +115,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         throw new Error(j?.error || `HTTP ${res.status}`)
       }
       const data = await res.json()
-      set({ conversations: data || [], isLoading: false, hasLoaded: true })
+      set({ conversations: data || [], stats: computeStats(data || []), isLoading: false, hasLoaded: true })
     } catch (error) {
       set({ error: (error as Error).message, isLoading: false })
     }
@@ -95,7 +132,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const prevSig = JSON.stringify(prev.map(c=>({ id: c.id, updated_at: c.updated_at, status: c.status })))
       const nextSig = JSON.stringify((data||[]).map(c=>({ id: c.id, updated_at: c.updated_at, status: c.status })))
       if (prevSig !== nextSig) {
-        set({ conversations: data || [] })
+        set({ conversations: data || [], stats: computeStats(data || []) })
       }
     } catch {}
     finally { __convBusy = false }
@@ -201,7 +238,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const row = await res.json()
       const { conversations } = get()
       const updated = conversations.some(c=>c.id===conversationId) ? conversations.map(c=> c.id===conversationId ? row : c) : [row, ...conversations]
-      set({ conversations: updated })
+      set({ conversations: updated, stats: computeStats(updated) })
     } catch (error) {
       set({ error: (error as Error).message })
     }
@@ -221,7 +258,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const row = await res.json()
       const { conversations } = get()
       const updated = conversations.map(c=> c.id===conversationId ? row : c)
-      set({ conversations: updated })
+      set({ conversations: updated, stats: computeStats(updated) })
     } catch (error) {
       set({ error: (error as Error).message })
     }
@@ -241,7 +278,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const row = await res.json()
       const { conversations } = get()
       const updated = conversations.map(c=> c.id===conversationId ? row : c)
-      set({ conversations: updated, currentConversation: null })
+      set({ conversations: updated, stats: computeStats(updated), currentConversation: null })
     } catch (error) {
       set({ error: (error as Error).message })
     }
@@ -256,7 +293,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
       const { conversations, currentConversation } = get()
       const updated = conversations.filter(c => c.id !== conversationId)
-      set({ conversations: updated, currentConversation: currentConversation && currentConversation.id === conversationId ? null : currentConversation })
+      set({ conversations: updated, stats: computeStats(updated), currentConversation: currentConversation && currentConversation.id === conversationId ? null : currentConversation })
     } catch (error) {
       set({ error: (error as Error).message })
     }
@@ -264,6 +301,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   connectSocket: () => {
     if (__msgChannel) return
+    if (__reconnectTimer) { try { clearTimeout(__reconnectTimer) } catch {} __reconnectTimer = null }
     __msgChannel = supabase?.channel('public:messages')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload: any) => {
         const msg = payload?.new as Message
@@ -272,7 +310,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
           get().addMessage(msg)
         }
       })
-      .subscribe()
+      .subscribe((status: any) => {
+        if (status === 'SUBSCRIBED') {
+          __reconnectAttempt = 0
+          set({ isConnected: true })
+          return
+        }
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          try { get().disconnectSocket() } catch {}
+          const attempt = Math.min(__reconnectAttempt + 1, 8)
+          __reconnectAttempt = attempt
+          const delay = Math.min(30000, 500 * Math.pow(2, attempt))
+          __reconnectTimer = setTimeout(() => {
+            __reconnectTimer = null
+            try { get().connectSocket() } catch {}
+          }, delay)
+        }
+      })
     __convChannel = supabase?.channel('public:conversations')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, (payload: any) => {
         const row = payload?.new as Conversation
@@ -280,17 +334,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (!row) return
         const exists = conversations.some(c => c.id === row.id)
         if (!exists && payload.eventType === 'INSERT') {
-          set({ conversations: [row, ...conversations] })
+          const next = [row, ...conversations]
+          set({ conversations: next, stats: computeStats(next) })
         } else if (exists && payload.eventType === 'UPDATE') {
           const updated = conversations.map(c => c.id === row.id ? row : c)
-          set({ conversations: updated })
+          set({ conversations: updated, stats: computeStats(updated) })
         }
       })
       .subscribe()
-    set({ isConnected: true })
   },
 
   disconnectSocket: () => {
+    if (__reconnectTimer) { try { clearTimeout(__reconnectTimer) } catch {} __reconnectTimer = null }
     try { if (__msgChannel && supabase) supabase.removeChannel(__msgChannel) } catch {}
     try { if (__convChannel && supabase) supabase.removeChannel(__convChannel) } catch {}
     __msgChannel = null

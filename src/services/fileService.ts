@@ -14,29 +14,25 @@ export interface FileUploadError {
 
 class FileService {
   private readonly BUCKET_NAME = 'chat-attachments'
-  private readonly MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
+  private readonly MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
   private readonly ALLOWED_TYPES = [
     'image/jpeg',
-    'image/png',
-    'image/gif',
-    'image/webp',
-    'image/heic',
-    'image/heif',
-    'application/pdf',
-    'text/plain',
-    'application/msword',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    'application/pdf'
   ]
 
   validateFile(file: File): { valid: boolean; error?: string } {
     // Check file size
     if (file.size > this.MAX_FILE_SIZE) {
-      return { valid: false, error: 'File size must be less than 10MB' }
+      return { valid: false, error: 'File size must be 5MB or less' }
     }
 
     // Check file type
-    if (!this.ALLOWED_TYPES.includes(file.type)) {
-      return { valid: false, error: 'File type not allowed' }
+    const type = String(file.type || '').toLowerCase()
+    const name = String(file.name || '').toLowerCase()
+    const isJpg = type === 'image/jpeg' || name.endsWith('.jpg') || name.endsWith('.jpeg')
+    const isPdf = type === 'application/pdf' || name.endsWith('.pdf')
+    if (!(isJpg || isPdf) || !this.ALLOWED_TYPES.includes(isPdf ? 'application/pdf' : 'image/jpeg')) {
+      return { valid: false, error: 'Only .jpg, .jpeg, .pdf are allowed' }
     }
 
     return { valid: true }
@@ -66,6 +62,8 @@ class FileService {
           const j = await res.json()
           return j
         }
+        const j = await res.json().catch(()=>({}))
+        return { message: j?.error || 'Upload failed' }
       } catch {}
       
       // Fallback: attempt direct client-side upload (requires storage insert policy)
@@ -90,6 +88,41 @@ class FileService {
     }
   }
 
+  uploadFileWithProgress(
+    file: File,
+    conversationId: string,
+    onProgress: (pct: number) => void
+  ): Promise<FileUploadResult | FileUploadError> {
+    const validation = this.validateFile(file)
+    if (!validation.valid) return Promise.resolve({ message: validation.error! })
+
+    return new Promise((resolve) => {
+      const form = new FormData()
+      form.append('file', file)
+      form.append('conversationId', conversationId)
+
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', '/api/chat/upload', true)
+      xhr.upload.onprogress = (evt) => {
+        if (!evt.lengthComputable) return
+        const pct = Math.max(0, Math.min(100, Math.round((evt.loaded / evt.total) * 100)))
+        onProgress(pct)
+      }
+      xhr.onerror = () => resolve({ message: 'Upload failed' })
+      xhr.onload = () => {
+        try {
+          const ok = xhr.status >= 200 && xhr.status < 300
+          const json = JSON.parse(xhr.responseText || '{}')
+          if (!ok) return resolve({ message: json?.error || `Upload failed (HTTP ${xhr.status})` })
+          return resolve(json)
+        } catch {
+          return resolve({ message: 'Upload failed' })
+        }
+      }
+      xhr.send(form)
+    })
+  }
+
   async deleteFile(fileUrl: string): Promise<boolean> {
     try {
       // Extract file path from URL
@@ -111,10 +144,6 @@ class FileService {
     if (fileType.startsWith('image/')) {
       return '🖼️'
     } else if (fileType === 'application/pdf') {
-      return '📄'
-    } else if (fileType.includes('word')) {
-      return '📝'
-    } else if (fileType === 'text/plain') {
       return '📄'
     } else {
       return '📎'

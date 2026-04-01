@@ -140,7 +140,7 @@ export default function Header(){
                     : 'text-slate-400 hover:text-cyan-400 hover:bg-slate-800/30'
                 }`}
               >
-                Recommendations
+                Requests & Issues
               </Link>
             )}
             {userRole === 'customer' && (

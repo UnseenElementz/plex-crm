@@ -163,7 +163,24 @@ export async function sendChargebackBanEmail(to: string) {
   await transporter.sendMail({ from: process.env.SMTP_FROM || user, to, subject, text: body })
 }
 
-export async function sendCustomEmail(to: string[], subject: string, body: string) {
+export function renderTemplate(template: string, vars: Record<string, unknown>) {
+  const normalized: Record<string, string> = {}
+  for (const [k, v] of Object.entries(vars || {})) {
+    if (!k) continue
+    if (v === null || v === undefined) continue
+    normalized[k.toLowerCase()] = String(v)
+  }
+  return String(template || '').replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_m, keyRaw) => {
+    const key = String(keyRaw || '').toLowerCase()
+    return normalized[key] ?? ''
+  })
+}
+
+export async function sendCustomEmail(
+  to: string[],
+  subject: string | ((recipient: string) => string),
+  body: string | ((recipient: string) => string)
+) {
   const host = process.env.SMTP_HOST
   const port = Number(process.env.SMTP_PORT || 465)
   const user = process.env.SMTP_USER
@@ -178,7 +195,7 @@ export async function sendCustomEmail(to: string[], subject: string, body: strin
   for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
     const batch = recipients.slice(i, i + BATCH_SIZE)
     await Promise.all(batch.map(addr => 
-      transporter.sendMail({ from, to: addr, subject, text: body }).catch((e: unknown) => console.error(`Failed to send to ${addr}:`, e))
+      transporter.sendMail({ from, to: addr, subject: typeof subject === 'function' ? subject(addr) : subject, text: typeof body === 'function' ? body(addr) : body }).catch((e: unknown) => console.error(`Failed to send to ${addr}:`, e))
     ))
   }
 }
