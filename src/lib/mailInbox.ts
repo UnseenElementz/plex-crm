@@ -99,8 +99,13 @@ export async function fetchInboxMessages({
 
     const lock = await client.getMailboxLock(config.mailbox || 'INBOX')
     try {
+      const allUids = await client.search({ all: true })
+      if (!Array.isArray(allUids)) return []
+      const recentUids = allUids.slice(-Math.max(limit * 6, 80))
+      if (!recentUids.length) return []
+
       const messages: InboxMessage[] = []
-      for await (const message of client.fetch('1:*', { uid: true, envelope: true, source: true, internalDate: true }, { uid: false })) {
+      for await (const message of client.fetch(recentUids, { uid: true, envelope: true, source: true, internalDate: true }, { uid: true })) {
         if (!message.source) continue
         const parsed = await simpleParser(message.source)
         const from = parsed.from?.value?.[0]
