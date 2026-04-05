@@ -91,7 +91,7 @@ export async function fetchInboxMessages({
     .split(',')
     .map((part) => part.trim())
     .filter(Boolean)
-  const activeKeywords = keywords.length ? keywords : DEFAULT_KEYWORDS
+  const activeKeywords = Array.from(new Set([...DEFAULT_KEYWORDS, ...keywords]))
 
   try {
     await client.connect()
@@ -101,11 +101,12 @@ export async function fetchInboxMessages({
     try {
       const allUids = await client.search({ all: true })
       if (!Array.isArray(allUids)) return []
-      const recentUids = allUids.slice(-Math.max(limit * 6, 80))
+      const recentUids = allUids.slice(-Math.max(limit * 4, 60))
       if (!recentUids.length) return []
+      const recentUidRange = recentUids.join(',')
 
       const messages: InboxMessage[] = []
-      for await (const message of client.fetch(recentUids, { uid: true, envelope: true, source: true, internalDate: true }, { uid: true })) {
+      for await (const message of client.fetch(recentUidRange, { uid: true, envelope: true, source: true, internalDate: true })) {
         if (!message.source) continue
         const parsed = await simpleParser(message.source)
         const from = parsed.from?.value?.[0]
