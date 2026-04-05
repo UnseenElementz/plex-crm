@@ -318,6 +318,14 @@
     animation: floatSlow 10s ease-in-out infinite;
   }
 
+  .drift-slower {
+    animation: driftSlow 16s ease-in-out infinite;
+  }
+
+  .twinkle-soft {
+    animation: twinkleSoft 4.8s ease-in-out infinite;
+  }
+
   .modal-backdrop {
     background: rgba(2, 6, 23, 0.78);
     backdrop-filter: blur(16px);
@@ -354,5 +362,33 @@
 
   50% {
     transform: translateY(-12px);
+  }
+}
+
+@keyframes driftSlow {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  35% {
+    transform: translate3d(10px, -12px, 0) scale(1.04);
+  }
+
+  70% {
+    transform: translate3d(-8px, 8px, 0) scale(0.98);
+  }
+}
+
+@keyframes twinkleSoft {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.9);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
   }
 }
