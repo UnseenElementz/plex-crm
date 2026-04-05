@@ -20,7 +20,7 @@ export default function Dashboard(){
   const [customers, setCustomers] = useState<any[]>(demo)
   const [pendingDelete, setPendingDelete] = useState<any | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [filter, setFilter] = useState<'all' | 'monthly' | 'yearly' | 'overdue' | 'due-soon'>('all')
+  const [filter, setFilter] = useState<'all' | 'stream-1' | 'stream-2' | 'stream-3plus' | 'overdue' | 'due-soon'>('all')
   const [showRevenueBreakdown, setShowRevenueBreakdown] = useState(false)
   const [pricingConfig, setPricingConfig] = useState<any>(null)
 
@@ -92,14 +92,19 @@ export default function Dashboard(){
 
   const filteredCustomers = useMemo(() => {
     switch (filter) {
-      case 'monthly':
-        return customers.filter(c => c.plan === 'monthly')
-      case 'yearly':
-        return customers.filter(c => c.plan === 'yearly')
+      case 'stream-1':
+        return customers.filter(c => Number(c.streams) === 1)
+      case 'stream-2':
+        return customers.filter(c => Number(c.streams) === 2)
+      case 'stream-3plus':
+        return customers.filter(c => Number(c.streams) >= 3)
       case 'overdue':
         return customers.filter(c => getStatus(new Date(c.next_due_date || c.nextDueDate)) === 'Overdue')
       case 'due-soon':
-        return customers.filter(c => getStatus(new Date(c.next_due_date || c.nextDueDate)) === 'Due Soon')
+        return customers.filter(c => {
+          const status = getStatus(new Date(c.next_due_date || c.nextDueDate))
+          return status === 'Due Soon' || status === 'Due Today'
+        })
       default:
         return customers
     }
@@ -107,16 +112,21 @@ export default function Dashboard(){
 
   const metrics = useMemo(()=>{
     const totalCustomers = customers.length
-    const monthly = customers.filter(d=>d.plan==='monthly').length
-    const yearly = customers.filter(d=>d.plan==='yearly').length
-    const totalStreams = customers.reduce((acc,d)=>acc+d.streams,0)
-    const revenue = customers.reduce((acc,d)=>acc+calculatePrice(d.plan,d.streams,pricingConfig),0)
-    const dueSoon = customers.filter(d=>getStatus(new Date(d.next_due_date || d.nextDueDate))==='Due Soon').length
+    const oneStream = customers.filter(d => Number(d.streams || 0) === 1).length
+    const twoStreams = customers.filter(d => Number(d.streams || 0) === 2).length
+    const threePlusStreams = customers.filter(d => Number(d.streams || 0) >= 3).length
+    const totalStreams = customers.reduce((acc,d)=>acc + Number(d.streams || 0),0)
+    const revenue = customers.reduce((acc,d)=>acc + calculatePrice(d.plan, Number(d.streams || 1), pricingConfig),0)
+    const dueSoon = customers.filter(d=>{
+      const status = getStatus(new Date(d.next_due_date || d.nextDueDate))
+      return status === 'Due Soon' || status === 'Due Today'
+    }).length
+    const dueToday = customers.filter(d=>getStatus(new Date(d.next_due_date || d.nextDueDate))==='Due Today').length
     const overdue = customers.filter(d=>getStatus(new Date(d.next_due_date || d.nextDueDate))==='Overdue').length
     
     // Calculate detailed breakdown
-    const monthlyRevenue = customers.filter(c => c.plan === 'monthly').reduce((acc, c) => acc + calculatePrice(c.plan, c.streams, pricingConfig), 0)
-    const yearlyRevenue = customers.filter(c => c.plan === 'yearly').reduce((acc, c) => acc + calculatePrice(c.plan, c.streams, pricingConfig), 0)
+    const monthlyRevenue = customers.filter(c => c.plan === 'monthly').reduce((acc, c) => acc + calculatePrice(c.plan, Number(c.streams || 1), pricingConfig), 0)
+    const yearlyRevenue = customers.filter(c => c.plan === 'yearly').reduce((acc, c) => acc + calculatePrice(c.plan, Number(c.streams || 1), pricingConfig), 0)
     const transactionFees = customers.reduce((acc, c) => acc + (c.plan === 'monthly' ? 0.30 : 0.30 * 12), 0) // Assuming £0.30 per transaction
     const netRevenue = revenue - transactionFees
     const maintenanceCost = (pricingConfig?.monthly_maintenance ?? 140)
@@ -124,11 +134,13 @@ export default function Dashboard(){
     
     return { 
       totalCustomers, 
-      monthly, 
-      yearly, 
+      oneStream,
+      twoStreams,
+      threePlusStreams,
       totalStreams, 
       revenue, 
       dueSoon, 
+      dueToday,
       overdue,
       monthlyRevenue,
       yearlyRevenue,
@@ -188,20 +200,34 @@ export default function Dashboard(){
       </div>
       <div className="grid md:grid-cols-3 gap-4">
         <Metric 
-          title="Monthly" 
-          value={metrics.monthly} 
-          onClick={() => setFilter(filter === 'monthly' ? 'all' : 'monthly')}
-          active={filter === 'monthly'}
+          title="1 stream users" 
+          value={metrics.oneStream} 
+          onClick={() => setFilter(filter === 'stream-1' ? 'all' : 'stream-1')}
+          active={filter === 'stream-1'}
         />
         <Metric 
-          title="Yearly" 
-          value={metrics.yearly} 
-          onClick={() => setFilter(filter === 'yearly' ? 'all' : 'yearly')}
-          active={filter === 'yearly'}
+          title="2 stream users" 
+          value={metrics.twoStreams} 
+          onClick={() => setFilter(filter === 'stream-2' ? 'all' : 'stream-2')}
+          active={filter === 'stream-2'}
         />
         <Metric 
-          title="Due soon / Overdue" 
-          value={`${metrics.dueSoon} / ${metrics.overdue}`} 
+          title="3+ stream users" 
+          value={metrics.threePlusStreams} 
+          onClick={() => setFilter(filter === 'stream-3plus' ? 'all' : 'stream-3plus')}
+          active={filter === 'stream-3plus'}
+        />
+      </div>
+      <div className="grid md:grid-cols-2 gap-4">
+        <Metric 
+          title="Due soon" 
+          value={`${metrics.dueSoon}${metrics.dueToday ? ` (${metrics.dueToday} today)` : ''}`} 
+          onClick={() => setFilter(filter === 'due-soon' ? 'all' : 'due-soon')}
+          active={filter === 'due-soon'}
+        />
+        <Metric 
+          title="Overdue" 
+          value={metrics.overdue} 
           onClick={() => setFilter(filter === 'overdue' ? 'all' : 'overdue')}
           active={filter === 'overdue'}
         />
