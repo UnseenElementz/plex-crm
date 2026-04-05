@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabaseClient'
 import { createClient } from '@supabase/supabase-js'
 import { CustomerUpdateSchema, formatZodError } from '@/lib/validation'
+import { cookies } from 'next/headers'
 
 function mem(){
   const g = globalThis as any
@@ -9,14 +10,50 @@ function mem(){
   return g.__customers as any[]
 }
 
-export async function GET(_: Request, { params }: { params: { id: string } }){
+function createAuthClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string
+  if (!url || !anon) return null
+  return createClient(url, anon, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  })
+}
+
+async function getRequester(request: Request) {
+  if (cookies().get('admin_session')?.value === '1') {
+    return { isAdmin: true, email: null as string | null }
+  }
+
+  const authHeader = String(request.headers.get('authorization') || '')
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : ''
+  if (!token) return { isAdmin: false, email: null as string | null }
+
+  const authClient = createAuthClient()
+  if (!authClient) return { isAdmin: false, email: null as string | null }
+
+  const { data, error } = await authClient.auth.getUser(token)
+  if (error || !data.user?.email) return { isAdmin: false, email: null as string | null }
+  return { isAdmin: false, email: String(data.user.email).trim().toLowerCase() }
+}
+
+export async function GET(request: Request, { params }: { params: { id: string } }){
+  const requester = await getRequester(request)
+  if (!requester.isAdmin && !requester.email) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
   if (!supabase){
     const item = mem().find(c=>c.id===params.id)
+    if (!requester.isAdmin && String(item?.email || '').trim().toLowerCase() !== requester.email) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
     return NextResponse.json(item || null)
   }
   const { data, error } = await supabase.from('customers').select('*').eq('id', params.id).limit(1)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   const row = data?.[0]
+  if (!requester.isAdmin && String(row?.email || '').trim().toLowerCase() !== requester.email) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
   const mapped = row ? (()=>{
     const plan = (row.plan ?? row.subscription_type)
     const rawNext = row.next_due_date ?? row.next_payment_date
@@ -42,6 +79,10 @@ export async function GET(_: Request, { params }: { params: { id: string } }){
 }
 
 export async function PATCH(request: Request, { params }: { params: { id: string } }){
+  const requester = await getRequester(request)
+  if (!requester.isAdmin && !requester.email) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
   const body = await request.json()
   const normalize = (v: any)=>{
     if (v === null || v === undefined) return v
@@ -62,9 +103,19 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   const parsed = CustomerUpdateSchema.safeParse(input)
   if (!parsed.success) return NextResponse.json({ error: formatZodError(parsed.error) }, { status: 400 })
   const payload = parsed.data
+  if (!requester.isAdmin) {
+    const restrictedKeys = ['email', 'plan', 'streams', 'start_date', 'next_due_date', 'subscription_status', 'plex_username', 'timezone', 'downloads']
+    const attemptedRestricted = restrictedKeys.some((key) => Object.prototype.hasOwnProperty.call(body || {}, key))
+    if (attemptedRestricted) {
+      return NextResponse.json({ error: 'Only profile notes and full name can be updated here.' }, { status: 403 })
+    }
+  }
   if (!supabase){
     const list = mem()
     const idx = list.findIndex(c=>c.id===params.id)
+    if (!requester.isAdmin && String(list[idx]?.email || '').trim().toLowerCase() !== requester.email) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
     if (idx>=0){
       if (payload.email && list.some((x,i)=> i!==idx && x.email===payload.email)) return NextResponse.json({ error: 'Duplicate email' }, { status: 409 })
       list[idx] = { ...list[idx], ...payload }
@@ -75,6 +126,12 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY as string
   const svc = (url && key) ? createClient(url, key) : null
   const client = svc ?? supabase
+  if (client && !requester.isAdmin) {
+    const { data: ownerRow } = await client.from('customers').select('email').eq('id', params.id).single()
+    if (String(ownerRow?.email || '').trim().toLowerCase() !== requester.email) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+  }
   if (payload.email){
     if (!client){
       const list = mem()
@@ -169,6 +226,9 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 }
 
 export async function DELETE(_: Request, { params }: { params: { id: string } }){
+  if (cookies().get('admin_session')?.value !== '1') {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY as string
   const svc = (url && key) ? createClient(url, key) : null

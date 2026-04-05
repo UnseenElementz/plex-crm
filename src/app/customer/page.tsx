@@ -226,19 +226,19 @@ export default function CustomerPortal() {
   const handleSaveChanges = async () => {
     setSaving(true)
     try {
+      const s = getSupabase()
+      const token = (await s?.auth.getSession())?.data.session?.access_token
       const payload = {
         full_name: customer.fullName,
-        email: customer.email,
-        plan: customer.plan,
-        streams: customer.streams,
-        downloads: customer.downloads,
         notes: customer.notes,
-        next_due_date: customer.nextDueDate,
       }
 
       const res = await fetch(`/api/customers/${customer.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify(payload),
       })
 
@@ -443,7 +443,7 @@ export default function CustomerPortal() {
               </div>
               <div>
                 <label className="label">Email</label>
-                <input className="input" value={customer.email} onChange={(e) => setCustomer((current) => ({ ...current, email: e.target.value }))} />
+                <input className="input opacity-80" value={customer.email} readOnly />
               </div>
               <div>
                 <label className="label">Notes</label>
