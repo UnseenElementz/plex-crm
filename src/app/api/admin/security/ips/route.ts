@@ -1,27 +1,22 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
+import { getSecurityOverview } from '@/lib/moderation'
 
-function svc(){
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY as string
-  if (!url || !key) return null
-  return createClient(url, key)
-}
-
-export async function GET(){
-  try{
-    const s = svc()
-    let settings: any = null
-    try{ if (s){ const { data } = await s.from('admin_settings').select('*').single(); settings = data || null } } catch{}
-    if (!settings){
-      const raw = cookies().get('admin_settings')?.value
-      settings = raw ? JSON.parse(decodeURIComponent(raw)) : {}
+export async function GET() {
+  try {
+    if (cookies().get('admin_session')?.value !== '1') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    const ip_logs = (settings as any)?.ip_logs || {}
-    const blocked_ips = (settings as any)?.blocked_ips || []
-    return NextResponse.json({ ip_logs, blocked_ips })
-  } catch(e:any){ return NextResponse.json({ error: e?.message || 'failed' }, { status: 500 }) }
+
+    const overview = await getSecurityOverview()
+    return NextResponse.json({
+      ip_logs: overview.ipLogs,
+      blocked_ips: overview.blockedIps,
+      banned_customers: overview.bannedCustomers,
+    })
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || 'failed' }, { status: 500 })
+  }
 }
 
 export const runtime = 'nodejs'

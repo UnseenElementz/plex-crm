@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import paypal from '@paypal/checkout-server-sdk'
 import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
-import { calculateNextDue } from '@/lib/pricing'
+import { applySuccessfulPayment, parsePayPalCustomId } from '@/lib/payments'
+import { type Plan } from '@/lib/pricing'
 const sanitize = (v?: string) => (v || '').trim().replace(/^['"]|['"]$/g, '')
 
 function client() {
@@ -22,7 +23,13 @@ function client() {
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const { orderId, customerEmail } = body || {}
+    const {
+      orderId,
+      customerEmail,
+      plan: requestedPlan,
+      streams: requestedStreams,
+      downloads: requestedDownloads,
+    } = body || {}
     
     if (!orderId || typeof orderId !== 'string') {
       return NextResponse.json({ error: 'Valid orderId required' }, { status: 400 })
@@ -120,33 +127,34 @@ export async function POST(request: Request) {
       throw new Error('Invalid PayPal response')
     }
     
+    const orderPurchaseUnit = res.result?.purchase_units?.[0] || {}
+    const parsedCustomId = parsePayPalCustomId(orderPurchaseUnit?.custom_id)
+    const resolvedEmail = String(parsedCustomId?.email || customerEmail || '').trim().toLowerCase()
+    const resolvedPlan = (parsedCustomId?.plan || requestedPlan || 'yearly') as Plan
+    const resolvedStreams = Math.max(1, Number(parsedCustomId?.streams || requestedStreams || 1))
+    const resolvedDownloads = Boolean(
+      parsedCustomId ? parsedCustomId.downloads : requestedDownloads
+    )
+    const amount = Number(
+      (orderPurchaseUnit?.payments?.captures?.[0]?.amount?.value) ||
+      (orderPurchaseUnit?.amount?.value) ||
+      0
+    )
+
     // Persist payment and update next due date if we have customerEmail
     try {
-      if (customerEmail) {
+      if (resolvedEmail) {
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string
         const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY as string
         if (supabaseUrl && supabaseServiceKey) {
           const s = createClient(supabaseUrl, supabaseServiceKey)
-          const { data: customer } = await s
-            .from('customers')
-            .select('*')
-            .eq('email', customerEmail)
-            .single()
-          if (customer) {
-            const amount = Number(
-              (res.result?.purchase_units?.[0]?.payments?.captures?.[0]?.amount?.value) ||
-              (res.result?.purchase_units?.[0]?.amount?.value) || 0
-            )
-            await s.from('payments').insert({
-              customer_id: customer.id,
-              amount,
-              status: 'completed',
-              payment_method: 'PayPal'
-            })
-            const now = new Date()
-            const nextDue = calculateNextDue(customer.subscription_type || 'monthly', now)
-            await s.from('customers').update({ start_date: now.toISOString(), next_payment_date: nextDue.toISOString(), subscription_status: 'active' }).eq('id', customer.id)
-          }
+          await applySuccessfulPayment({
+            customerEmail: resolvedEmail,
+            plan: resolvedPlan,
+            streams: resolvedStreams,
+            downloads: resolvedDownloads,
+            amount,
+          })
         }
       }
     } catch {}
@@ -154,6 +162,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ 
       id: res.result.id,
       status: res.result.status,
+      customerEmail: resolvedEmail || null,
+      plan: resolvedPlan,
+      streams: resolvedStreams,
+      downloads: resolvedDownloads,
       details: res.result
     })
     

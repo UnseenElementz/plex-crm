@@ -615,3 +615,29 @@ export async function getPlexSessions(serverUrl: string, token: string): Promise
     return []
   }
 }
+
+export async function terminatePlexSessions(serverUrl: string, token: string, sessionKeys: string[], reason: string) {
+  const keys = Array.from(new Set((sessionKeys || []).map((value) => String(value || '').trim()).filter(Boolean)))
+  if (!keys.length) return { stopped: 0, failed: [] as string[] }
+
+  let base = serverUrl.replace(/\/+$/, '')
+  if (base.includes('plex.tv')) {
+    base = await getPreferredServerUri(token)
+  }
+
+  const failed: string[] = []
+  let stopped = 0
+
+  for (const sessionKey of keys) {
+    const endpoint = `${base}/status/sessions/terminate?sessionId=${encodeURIComponent(sessionKey)}&reason=${encodeURIComponent(reason)}`
+    try {
+      const res = await fetch(endpoint, { method: 'GET', headers: plexHeaders(token), cache: 'no-store' })
+      if (res.ok) stopped += 1
+      else failed.push(sessionKey)
+    } catch {
+      failed.push(sessionKey)
+    }
+  }
+
+  return { stopped, failed }
+}

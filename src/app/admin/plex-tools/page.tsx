@@ -60,6 +60,7 @@ type SessionRow = {
   active_streams: number
   over_limit: boolean
   ip_blocked?: boolean
+  warning_count?: number
 }
 
 type SessionHistoryRow = {
@@ -108,6 +109,7 @@ function PlexToolsInner() {
   const [sessionsError, setSessionsError] = useState('')
   const [sessionHistory, setSessionHistory] = useState<SessionHistoryRow[]>([])
   const [blockingIp, setBlockingIp] = useState('')
+  const [moderatingKey, setModeratingKey] = useState('')
 
   async function loadSessions() {
     setSessionsLoading(true)
@@ -154,6 +156,62 @@ function PlexToolsInner() {
       toast.error(e?.message || 'Failed to block IP')
     } finally {
       setBlockingIp('')
+    }
+  }
+
+  async function moderateSession(action: 'warn' | 'ban', session: SessionRow) {
+    const targetKey = `${action}:${session.sessionKey}`
+    const targetLabel = session.customer_name || session.customer_email || session.user || 'this customer'
+    const shouldContinue = action === 'warn'
+      ? confirm(`Send a warning to ${targetLabel}, log the strike, and stop their active streams?`)
+      : confirm(`Ban ${targetLabel}, stop their active streams, and block their portal access?`)
+    if (!shouldContinue) return
+
+    const relatedSessions = sessions.filter((item) => {
+      if (session.customer_email && item.customer_email) {
+        return item.customer_email === session.customer_email
+      }
+      return item.user === session.user
+    })
+
+    setModeratingKey(targetKey)
+    try {
+      const res = await fetch('/api/admin/moderation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          customerEmail: session.customer_email,
+          user: session.user,
+          ip: session.ip,
+          sessionKeys: relatedSessions.map((item) => item.sessionKey),
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(data?.error || `Failed to ${action} customer`)
+        return
+      }
+
+      if (action === 'ban' && session.customer_email) {
+        await fetch('/api/admin/plex-tools/shares/remove-by-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: session.customer_email }),
+        }).catch(() => null)
+      }
+
+      if (action === 'warn') {
+        toast.success(`Warning sent (${data?.warning_label || 'logged'})`)
+      } else {
+        toast.success('Customer banned and access removed')
+      }
+
+      await Promise.all([loadSessions(), load()])
+    } catch (e: any) {
+      toast.error(e?.message || `Failed to ${action} customer`)
+    } finally {
+      setModeratingKey('')
     }
   }
 
@@ -498,8 +556,8 @@ function PlexToolsInner() {
               <div className="col-span-2">Device</div>
               <div className="col-span-1">State</div>
               <div className="col-span-1">Use</div>
-              <div className="col-span-2">IP</div>
-              <div className="col-span-1">Action</div>
+              <div className="col-span-1">IP</div>
+              <div className="col-span-2">Action</div>
             </div>
             <div className="max-h-72 overflow-y-auto">
               {sessionsLoading && <div className="p-4 text-xs text-slate-500">Loading live activity...</div>}
@@ -507,7 +565,10 @@ function PlexToolsInner() {
               {sessions.map((s) => (
                 <div key={s.sessionKey} className="grid grid-cols-12 gap-2 px-3 py-2 text-xs border-b border-slate-900/60">
                   <div className="col-span-2 truncate text-slate-200" title={s.customer_email || s.user}>
-                    {s.customer_name || s.customer_email || s.user || '-'}
+                    <div className="truncate">{s.customer_name || s.customer_email || s.user || '-'}</div>
+                    <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                      Warn {Math.min(Number(s.warning_count || 0), 3)}/3
+                    </div>
                   </div>
                   <div className="col-span-3 truncate text-slate-200" title={s.title}>
                     {s.title}
@@ -519,17 +580,31 @@ function PlexToolsInner() {
                   <div className={`col-span-1 ${s.over_limit ? 'text-rose-300' : 'text-emerald-300'}`}>
                     {s.active_streams}/{s.allowed_streams}
                   </div>
-                  <div className="col-span-2 truncate text-slate-300" title={`${s.ip}${s.ip_blocked ? ' (blocked)' : ''}`}>
+                  <div className="col-span-1 truncate text-slate-300" title={`${s.ip}${s.ip_blocked ? ' (blocked)' : ''}`}>
                     {s.ip || '-'}
                     {s.ip_blocked ? <span className="ml-2 text-[10px] uppercase tracking-[0.2em] text-rose-300">blocked</span> : null}
                   </div>
-                  <div className="col-span-1 flex justify-end">
+                  <div className="col-span-2 flex justify-end gap-1">
+                    <button
+                      className="btn-xs-outline border-amber-500/30 px-2 py-1 text-amber-200 hover:bg-amber-500/10"
+                      onClick={() => moderateSession('warn', s)}
+                      disabled={moderatingKey === `warn:${s.sessionKey}`}
+                    >
+                      {moderatingKey === `warn:${s.sessionKey}` ? '...' : `Warn ${Math.min(Number(s.warning_count || 0) + 1, 3)}/3`}
+                    </button>
+                    <button
+                      className="btn-xs-outline border-rose-500/30 px-2 py-1 text-rose-200 hover:bg-rose-500/10"
+                      onClick={() => moderateSession('ban', s)}
+                      disabled={moderatingKey === `ban:${s.sessionKey}`}
+                    >
+                      {moderatingKey === `ban:${s.sessionKey}` ? '...' : 'Ban'}
+                    </button>
                     <button
                       className="btn-xs-outline px-2 py-1"
                       onClick={() => blockIp(s.ip)}
                       disabled={!s.ip || Boolean(s.ip_blocked) || blockingIp === s.ip}
                     >
-                      {s.ip_blocked ? 'Set' : blockingIp === s.ip ? '...' : 'Ban'}
+                      {s.ip_blocked ? 'IP Set' : blockingIp === s.ip ? '...' : 'IP'}
                     </button>
                   </div>
                 </div>

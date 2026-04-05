@@ -1,5 +1,36 @@
 import nodemailer from 'nodemailer'
 
+type EmailConfig = {
+  host: string
+  port?: number | string
+  user: string
+  pass: string
+  from?: string
+}
+
+async function sendWithConfig(config: EmailConfig, to: string, subject: string, body: string) {
+  const host = String(config.host || '').trim()
+  const port = Number(config.port || 465)
+  const user = String(config.user || '').trim()
+  const pass = String(config.pass || '').trim()
+  if (!host || !user || !pass) throw new Error('SMTP config missing')
+  const transporter = nodemailer.createTransport({ host, port, secure: port === 465, auth: { user, pass } })
+  await transporter.sendMail({ from: config.from || user, to, subject, text: body })
+}
+
+export async function sendPlainTextEmail(to: string, subject: string, body: string, config?: Partial<EmailConfig>) {
+  if (config?.host && config?.user && config?.pass) {
+    await sendWithConfig(config as EmailConfig, to, subject, body)
+    return
+  }
+  const host = process.env.SMTP_HOST
+  const port = Number(process.env.SMTP_PORT || 465)
+  const user = process.env.SMTP_USER
+  const pass = process.env.SMTP_PASS
+  if (!host || !user || !pass) throw new Error('SMTP config missing')
+  await sendWithConfig({ host, port, user, pass, from: process.env.SMTP_FROM || user }, to, subject, body)
+}
+
 export function renewalEmailTemplate30Days() {
   return {
     subject: 'Friendly Reminder – Plex Subscription Renewal',
@@ -89,13 +120,7 @@ Streamz R Us`
 
 export async function sendRenewalEmail(to: string, template?: { subject: string; body: string }) {
   const { subject, body } = template || renewalEmailTemplate7Days()
-  const host = process.env.SMTP_HOST
-  const port = Number(process.env.SMTP_PORT || 465)
-  const user = process.env.SMTP_USER
-  const pass = process.env.SMTP_PASS
-  if (!host || !user || !pass) throw new Error('SMTP config missing')
-  const transporter = nodemailer.createTransport({ host, port, secure: port === 465, auth: { user, pass } })
-  await transporter.sendMail({ from: process.env.SMTP_FROM || user, to, subject, text: body })
+  await sendPlainTextEmail(to, subject, body)
 }
 
 export function transcodeWarningTemplate() {
@@ -127,13 +152,7 @@ Streamz R Us Support`
 
 export async function sendTranscodeWarning(to: string) {
   const { subject, body } = transcodeWarningTemplate()
-  const host = process.env.SMTP_HOST
-  const port = Number(process.env.SMTP_PORT || 465)
-  const user = process.env.SMTP_USER
-  const pass = process.env.SMTP_PASS
-  if (!host || !user || !pass) throw new Error('SMTP config missing')
-  const transporter = nodemailer.createTransport({ host, port, secure: port === 465, auth: { user, pass } })
-  await transporter.sendMail({ from: process.env.SMTP_FROM || user, to, subject, text: body })
+  await sendPlainTextEmail(to, subject, body)
 }
 
 export function chargebackBanTemplate() {
@@ -154,13 +173,58 @@ Tank | Developer`
 
 export async function sendChargebackBanEmail(to: string) {
   const { subject, body } = chargebackBanTemplate()
-  const host = process.env.SMTP_HOST
-  const port = Number(process.env.SMTP_PORT || 465)
-  const user = process.env.SMTP_USER
-  const pass = process.env.SMTP_PASS
-  if (!host || !user || !pass) throw new Error('SMTP config missing')
-  const transporter = nodemailer.createTransport({ host, port, secure: port === 465, auth: { user, pass } })
-  await transporter.sendMail({ from: process.env.SMTP_FROM || user, to, subject, text: body })
+  await sendPlainTextEmail(to, subject, body)
+}
+
+export function overStreamingWarningTemplate(input: {
+  warningNumber: number
+  maxWarnings?: number
+  companyName?: string
+}) {
+  const warningNumber = Math.max(1, Number(input.warningNumber || 1))
+  const maxWarnings = Math.max(warningNumber, Number(input.maxWarnings || 3))
+  const companyName = String(input.companyName || 'STREAMZ R US').trim() || 'STREAMZ R US'
+
+  return {
+    subject: `Over-Streaming Warning ${warningNumber}/${maxWarnings}`,
+    body: `Hello,
+
+This is warning ${warningNumber} of ${maxWarnings} for streaming beyond the limits of your current package.
+
+Your active streams have now been stopped. Please make sure your usage stays within the package you are paying for.
+
+If you need additional screens, please purchase them through your account portal.
+
+Continued over-streaming may lead to a full ban from the service.
+
+Thank you,
+
+${companyName}`,
+  }
+}
+
+export function serviceBanTemplate(input?: {
+  appealEmail?: string
+  companyName?: string
+}) {
+  const appealEmail = String(input?.appealEmail || 'streamzrus1@gmail.com').trim() || 'streamzrus1@gmail.com'
+  const companyName = String(input?.companyName || 'STREAMZ R US').trim() || 'STREAMZ R US'
+
+  return {
+    subject: 'Service Ban Notice',
+    body: `Hello,
+
+Your access to this service has been banned for failing to follow our terms of service.
+
+Warnings have already been sent multiple times and this decision is now final.
+
+If you wish to appeal this decision, please email:
+${appealEmail}
+
+Thank you,
+
+${companyName}`,
+  }
 }
 
 export function renderTemplate(template: string, vars: Record<string, unknown>) {

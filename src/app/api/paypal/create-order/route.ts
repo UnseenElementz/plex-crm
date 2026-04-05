@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import paypal from '@paypal/checkout-server-sdk'
 import { calculatePrice, type Plan } from '@/lib/pricing'
 import { createClient } from '@supabase/supabase-js'
+import { buildHostingReference, buildPayPalCustomId } from '@/lib/payments'
 export const runtime = 'nodejs'
 const sanitize = (v?: string) => (v || '').trim().replace(/^['"]|['"]$/g, '')
 
@@ -36,10 +37,23 @@ async function readPricingConfig(){
   }
 }
 
+function resolveBaseUrl(request: Request) {
+  const canonicalHost = sanitize(process.env.NEXT_PUBLIC_CANONICAL_HOST)
+  if (canonicalHost) return canonicalHost.startsWith('http') ? canonicalHost : `https://${canonicalHost}`
+
+  const origin = sanitize(request.headers.get('origin') || '')
+  if (origin) return origin
+
+  const host = sanitize(request.headers.get('x-forwarded-host') || request.headers.get('host') || '')
+  const proto = sanitize(request.headers.get('x-forwarded-proto') || 'https')
+  if (host) return `${proto}://${host}`
+  return ''
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    let { amount, currency = 'GBP', plan, streams, downloads } = body || {}
+    let { amount, currency = 'GBP', plan, streams, downloads, customerEmail } = body || {}
     if (plan && typeof plan === 'string') {
       const p = plan as Plan
       const s = typeof streams === 'number' ? streams : 1
@@ -55,24 +69,46 @@ export async function POST(request: Request) {
       const c = client()
       const order = new paypal.orders.OrdersCreateRequest()
       order.prefer('return=representation')
-      const purchaseUnit: any = { amount: { currency_code: currency, value: String(Number(amount).toFixed(2)) } }
-      const host = (process.env.NEXT_PUBLIC_CANONICAL_HOST || '').replace(/^https?:\/\//,'')
-      const returnUrl = host ? `https://${host}/customer` : undefined
-      const cancelUrl = host ? `https://${host}/customer` : undefined
+      const description = buildHostingReference((plan as Plan) || 'yearly', Math.max(1, Number(streams || 1)), Boolean(downloads))
+      const purchaseUnit: any = {
+        description,
+        custom_id: customerEmail ? buildPayPalCustomId({
+          email: String(customerEmail || '').trim().toLowerCase(),
+          plan: (plan as Plan) || 'yearly',
+          streams: Math.max(1, Number(streams || 1)),
+          downloads: Boolean(downloads),
+        }) : undefined,
+        amount: { currency_code: currency, value: String(Number(amount).toFixed(2)) }
+      }
+      const baseUrl = resolveBaseUrl(request)
+      const returnUrl = baseUrl ? `${baseUrl}/customer?paypal=success` : undefined
+      const cancelUrl = baseUrl ? `${baseUrl}/customer?paypal=cancelled` : undefined
       order.requestBody({ intent: 'CAPTURE', purchase_units: [purchaseUnit], application_context: { return_url: returnUrl, cancel_url: cancelUrl, user_action: 'PAY_NOW' } })
       const res = await c.execute(order)
       if (!res.result || !res.result.id) throw new Error('Invalid PayPal response')
-      return NextResponse.json({ id: res.result.id, status: res.result.status })
+      const approveUrl = Array.isArray((res.result as any).links)
+        ? (res.result as any).links.find((link: any) => link?.rel === 'approve')?.href || ''
+        : ''
+      return NextResponse.json({ id: res.result.id, status: res.result.status, approveUrl })
     } catch (sdkErr: any) {
       const clientId = sanitize(process.env.PAYPAL_CLIENT_ID as string)
       const clientSecret = sanitize(process.env.PAYPAL_CLIENT_SECRET as string)
       if (!clientId || !clientSecret) throw sdkErr
       const envBase = process.env.PAYPAL_ENV === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com'
       const altBase = process.env.PAYPAL_ENV === 'live' ? 'https://api-m.sandbox.paypal.com' : 'https://api-m.paypal.com'
-      const host = (process.env.NEXT_PUBLIC_CANONICAL_HOST || '').replace(/^https?:\/\//,'')
-      const return_url = host ? `https://${host}/customer` : undefined
-      const cancel_url = host ? `https://${host}/customer` : undefined
-      const purchase_units: any[] = [{ amount: { currency_code: currency, value: String(Number(amount).toFixed(2)) } }]
+      const baseUrl = resolveBaseUrl(request)
+      const return_url = baseUrl ? `${baseUrl}/customer?paypal=success` : undefined
+      const cancel_url = baseUrl ? `${baseUrl}/customer?paypal=cancelled` : undefined
+      const purchase_units: any[] = [{
+        description: buildHostingReference((plan as Plan) || 'yearly', Math.max(1, Number(streams || 1)), Boolean(downloads)),
+        custom_id: customerEmail ? buildPayPalCustomId({
+          email: String(customerEmail || '').trim().toLowerCase(),
+          plan: (plan as Plan) || 'yearly',
+          streams: Math.max(1, Number(streams || 1)),
+          downloads: Boolean(downloads),
+        }) : undefined,
+        amount: { currency_code: currency, value: String(Number(amount).toFixed(2)) }
+      }]
 
       async function createWith(base: string){
         const tokenRes = await fetch(base + '/v1/oauth2/token', {
@@ -101,9 +137,19 @@ export async function POST(request: Request) {
       }
 
       const primary = await createWith(envBase)
-      if (primary) return NextResponse.json({ id: primary.id, status: primary.status || 'CREATED', used: envBase })
+      if (primary) {
+        const approveUrl = Array.isArray(primary?.links)
+          ? primary.links.find((link: any) => link?.rel === 'approve')?.href || ''
+          : ''
+        return NextResponse.json({ id: primary.id, status: primary.status || 'CREATED', approveUrl, used: envBase })
+      }
       const secondary = await createWith(altBase)
-      if (secondary) return NextResponse.json({ id: secondary.id, status: secondary.status || 'CREATED', used: altBase })
+      if (secondary) {
+        const approveUrl = Array.isArray(secondary?.links)
+          ? secondary.links.find((link: any) => link?.rel === 'approve')?.href || ''
+          : ''
+        return NextResponse.json({ id: secondary.id, status: secondary.status || 'CREATED', approveUrl, used: altBase })
+      }
 
       return NextResponse.json({ error: 'PayPal auth failed', envBase, altBase }, { status: 500 })
     }

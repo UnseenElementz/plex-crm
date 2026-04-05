@@ -4,6 +4,10 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { getSupabase } from '@/lib/supabaseClient'
 
+function isBanned(notes: unknown) {
+  return /Access:\s*Banned/i.test(String(notes || ''))
+}
+
 export default function CustomerRegisterPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -71,6 +75,11 @@ export default function CustomerRegisterPage() {
         .maybeSingle()
 
       if (existingCustomer) {
+        if (isBanned((existingCustomer as any).notes)) {
+          await s.auth.signOut().catch(() => {})
+          router.push('/customer/banned')
+          return
+        }
         const currentNotes = String((existingCustomer as any).notes || '')
         const cleanedNotes = currentNotes.replace(/Plex:\s*[^\n]+\n?/gi, '').trim()
         const nextNotes = [cleanedNotes || undefined, trimmedPlex ? `Plex: ${trimmedPlex}` : undefined].filter(Boolean).join('\n')

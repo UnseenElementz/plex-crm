@@ -2,7 +2,10 @@
 import { useEffect, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { getSupabase } from '@/lib/supabaseClient'
-import { getStatus } from '@/lib/pricing'
+
+function isBanned(notes: unknown) {
+  return /Access:\s*Banned/i.test(String(notes || ''))
+}
 
 export default function CustomerLayout({ children }: { children: React.ReactNode }){
   const router = useRouter()
@@ -12,7 +15,10 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
   useEffect(()=>{
     (async()=>{
       try{
-        const skip = pathname?.startsWith('/customer/login') || pathname?.startsWith('/customer/register')
+        const skip =
+          pathname?.startsWith('/customer/login') ||
+          pathname?.startsWith('/customer/register') ||
+          pathname?.startsWith('/customer/banned')
         if (skip) { setChecking(false); return }
         if (typeof window !== 'undefined' && sessionStorage.getItem('customerDemo') === 'true'){
           setChecking(false); return
@@ -27,7 +33,7 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
         try{
           const fullName = String(user?.user_metadata?.fullName || user?.user_metadata?.full_name || '').trim()
           await s.from('profiles').upsert({ user_id: user?.id, email, role: 'customer', full_name: fullName || email.split('@')[0] }, { onConflict: 'email' })
-          const { data: existingCustomer } = await s.from('customers').select('id').eq('email', email).maybeSingle()
+          const { data: existingCustomer } = await s.from('customers').select('id,notes').eq('email', email).maybeSingle()
           if (!existingCustomer){
             await s.from('customers').insert({
               name: fullName || email,
@@ -37,6 +43,10 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
               subscription_status: 'inactive',
               notes: ''
             })
+          } else if (isBanned(existingCustomer.notes)) {
+            await s.auth.signOut().catch(() => {})
+            router.replace('/customer/banned')
+            return
           }
         } catch {}
         setChecking(false)

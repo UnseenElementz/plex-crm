@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createClient } from '@supabase/supabase-js'
 import { getPlexSessions } from '@/lib/plex'
+import { getSecurityOverview, parsePlexUsername, countWarnings } from '@/lib/moderation'
 
 function svc() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
@@ -38,18 +39,21 @@ export async function GET() {
 
     const [sessions, customers] = await Promise.all([
       getPlexSessions(url, token),
-      s.from('customers').select('email,name,streams'),
+      s.from('customers').select('email,name,streams,notes,subscription_status'),
     ])
 
     const customerMap = new Map<string, { email: string; name: string; streams: number }>()
     for (const row of customers.data || []) {
       const email = String((row as any).email || '').trim().toLowerCase()
       if (!email) continue
-      customerMap.set(email, {
+      const entry = {
         email,
         name: String((row as any).name || '').trim(),
         streams: Number((row as any).streams || 1) || 1,
-      })
+      }
+      customerMap.set(email, entry)
+      const plexUsername = parsePlexUsername((row as any).notes).toLowerCase()
+      if (plexUsername) customerMap.set(plexUsername, entry)
     }
 
     const grouped = new Map<string, number>()
@@ -58,7 +62,10 @@ export async function GET() {
       grouped.set(key, (grouped.get(key) || 0) + 1)
     }
 
-    const blockedIps = Array.isArray(settings?.blocked_ips) ? settings.blocked_ips : []
+    const securityOverview = await getSecurityOverview()
+    const blockedIps: string[] = Array.isArray(securityOverview.blockedIps)
+      ? securityOverview.blockedIps.map((value) => String(value))
+      : []
     const items = sessions.map((session) => {
       const key = String(session.user || '').trim().toLowerCase()
       const customer = customerMap.get(key)
@@ -149,11 +156,23 @@ export async function GET() {
       over_limit: Boolean(row.details?.over_limit),
     }))
 
+    const warningCounts = new Map<string, number>()
+    await Promise.all(
+      Array.from(new Set(items.map((item) => String(item.customer_email || '').trim().toLowerCase()).filter((value) => value.includes('@')))).map(async (email) => {
+        warningCounts.set(email, await countWarnings(email))
+      })
+    )
+
+    const finalItems = items.map((item) => ({
+      ...item,
+      warning_count: warningCounts.get(String(item.customer_email || '').trim().toLowerCase()) || 0,
+    }))
+
     return NextResponse.json({
-      items,
+      items: finalItems,
       history,
-      total: items.length,
-      flagged: items.filter((item) => item.over_limit).length,
+      total: finalItems.length,
+      flagged: finalItems.filter((item) => item.over_limit).length,
     })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Failed to load Plex sessions' }, { status: 500 })

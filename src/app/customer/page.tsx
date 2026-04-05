@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import dynamic from 'next/dynamic'
 import { format } from 'date-fns'
+import { useSearchParams } from 'next/navigation'
 import { calculateNextDue, calculatePrice, getTransactionFee, Plan } from '@/lib/pricing'
 import { getSupabase } from '@/lib/supabaseClient'
 
@@ -28,12 +29,15 @@ const planCards: Array<{ id: Plan; title: string; subtitle: string }> = [
 ]
 
 export default function CustomerPortal() {
+  const searchParams = useSearchParams()
   const [saving, setSaving] = useState(false)
   const [authState, setAuthState] = useState<'checking' | 'unauth' | 'ready'>('checking')
   const [hasSubscription, setHasSubscription] = useState(false)
   const [paymentLock, setPaymentLock] = useState(false)
   const [pricingConfig, setPricingConfig] = useState<any>(null)
   const [updateModal, setUpdateModal] = useState<{ id?: string; title: string; content: string } | null>(null)
+  const [billingMessage, setBillingMessage] = useState('')
+  const [capturingPayment, setCapturingPayment] = useState(false)
   const [customer, setCustomer] = useState<Customer>({
     id: 'demo',
     fullName: 'Demo User',
@@ -87,7 +91,11 @@ export default function CustomerPortal() {
 
       try {
         const userEmail = data.user.email as string
-        const { data: customerData, error } = await s.from('customers').select('*').eq('email', userEmail).single()
+        const loadCustomer = async () => {
+          return s.from('customers').select('*').eq('email', userEmail).single()
+        }
+
+        const { data: customerData, error } = await loadCustomer()
 
         if (!error && customerData) {
           setCustomer({
@@ -104,7 +112,11 @@ export default function CustomerPortal() {
           setHasSubscription(true)
           setAuthState('ready')
           try {
-            await fetch('/api/security/ip-log', { method: 'POST' })
+            await fetch('/api/security/ip-log', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: userEmail }),
+            })
           } catch {}
           return
         }
@@ -129,6 +141,71 @@ export default function CustomerPortal() {
       }
     })()
   }, [])
+
+  useEffect(() => {
+    const token = String(searchParams?.get('token') || '').trim()
+    const paypalState = String(searchParams?.get('paypal') || '').trim()
+    if (paypalState === 'cancelled') {
+      setBillingMessage('PayPal checkout was cancelled.')
+      return
+    }
+    if (!token || paypalState !== 'success' || authState !== 'ready' || capturingPayment || !customer.email) return
+
+    ;(async () => {
+      setCapturingPayment(true)
+      setBillingMessage('')
+      try {
+        const res = await fetch('/api/paypal/capture-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            orderId: token,
+            customerEmail: customer.email,
+            plan: customer.plan,
+            streams: customer.streams,
+            downloads: customer.downloads,
+          }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setBillingMessage(data?.error || 'Payment capture failed.')
+          return
+        }
+
+        const s = getSupabase()
+        if (s) {
+          const { data: refreshed } = await s.from('customers').select('*').eq('email', customer.email).single()
+          if (refreshed) {
+            setCustomer({
+              id: refreshed.id,
+              fullName: refreshed.name,
+              email: refreshed.email,
+              plan: refreshed.subscription_type || customer.plan,
+              streams: Math.min(5, refreshed.streams || customer.streams || 1),
+              startDate: refreshed.start_date || customer.startDate,
+              nextDueDate: refreshed.next_payment_date || customer.nextDueDate,
+              notes: refreshed.notes || '',
+              downloads: (refreshed.notes || '').includes('Downloads: Yes'),
+            })
+            setHasSubscription(true)
+          }
+        }
+
+        setBillingMessage('Payment received and your account has been updated.')
+        if (typeof window !== 'undefined') {
+          const next = new URL(window.location.href)
+          next.searchParams.delete('token')
+          next.searchParams.delete('PayerID')
+          next.searchParams.delete('paypal')
+          window.history.replaceState({}, '', next.toString())
+        }
+      } catch (e: any) {
+        setBillingMessage(e?.message || 'Payment capture failed.')
+      } finally {
+        setCapturingPayment(false)
+      }
+    })()
+  }, [authState, capturingPayment, customer.downloads, customer.email, customer.nextDueDate, customer.plan, customer.startDate, customer.streams, searchParams])
 
   const price = useMemo(() => calculatePrice(customer.plan, customer.streams, pricingConfig, customer.downloads), [customer, pricingConfig])
   const status = useMemo(() => {
@@ -328,6 +405,15 @@ export default function CustomerPortal() {
             </div>
 
             <div className="mt-5 space-y-3">
+              {billingMessage ? (
+                <div className={`rounded-[24px] border px-4 py-3 text-sm ${
+                  billingMessage.toLowerCase().includes('failed') || billingMessage.toLowerCase().includes('cancelled')
+                    ? 'border-rose-500/20 bg-rose-500/10 text-rose-100'
+                    : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-100'
+                }`}>
+                  {billingMessage}
+                </div>
+              ) : null}
               {canPay ? (
                 <PayPalButton
                   amount={price}

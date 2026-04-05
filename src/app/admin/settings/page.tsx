@@ -851,6 +851,31 @@ export default function AdminSettingsPage() {
           </div>
         </div>
 
+        <div className="glass p-6 rounded-2xl mb-6">
+          <h2 className="text-xl font-semibold mb-4">Access Control</h2>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="rounded-[24px] border border-white/8 bg-white/[0.03] p-4">
+              <div className="text-sm font-semibold text-white">Banned customer screen</div>
+              <div className="mt-2 text-sm text-slate-400">
+                This is the page banned customers see when portal access has been removed.
+              </div>
+              <a href="/customer/banned" className="btn-outline mt-4 inline-flex" target="_blank" rel="noreferrer">
+                Preview banned page
+              </a>
+            </div>
+            <div className="rounded-[24px] border border-white/8 bg-white/[0.03] p-4">
+              <div className="text-sm font-semibold text-white">Moderation controls</div>
+              <div className="mt-2 text-sm text-slate-400">
+                Warnings, bans, and unbans now flow through the security and Plex tools pages so customer access changes can be reviewed and reversed properly.
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <a href="/admin/security" className="btn-outline">Open Security</a>
+                <a href="/admin/plex-tools" className="btn-outline">Open Plex Tools</a>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {message && (
           <div className={`p-4 rounded-lg mb-4 ${message.includes('Error') ? 'bg-rose-500/20 text-rose-300' : 'bg-emerald-500/20 text-emerald-300'}`}>
             {message}
