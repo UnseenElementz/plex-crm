@@ -104,11 +104,13 @@ export default function Home() {
             </div>
 
             <div>
-              <h1 className="max-w-4xl text-3xl font-semibold tracking-[-0.065em] text-white sm:text-4xl lg:text-[4.2rem] lg:leading-[0.9]">
-                <span className="gradient-text block">{companyName}</span>
-                <span className="mt-2 block">Premium video hosting, support, and account control done properly.</span>
+              <div className="gradient-text text-sm font-medium uppercase tracking-[0.3em] text-cyan-300/90 sm:text-[0.95rem]">
+                {companyName}
+              </div>
+              <h1 className="mt-3 max-w-3xl text-[2.45rem] font-semibold leading-[0.96] tracking-[-0.055em] text-white sm:text-[3rem] lg:text-[3.45rem] xl:text-[3.7rem]">
+                Premium video hosting, support, and account control done properly.
               </h1>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300 sm:text-[15px]">
+              <p className="mt-3 max-w-lg text-sm leading-6 text-slate-300 sm:text-[15px]">
                 Streamz R Us has been delivering premium hosted media access for 8 years with clean support, stable service, and a polished customer experience.
               </p>
             </div>
