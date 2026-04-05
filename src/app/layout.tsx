@@ -14,19 +14,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   const ToasterClient = dynamic(() => import('@/components/ToasterClient'), { ssr: false })
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="min-h-screen text-slate-100 relative overflow-x-hidden">
-        <div className="fixed inset-0 z-0">
-          <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-black"></div>
-          <div className="absolute inset-0 bg-gradient-to-tr from-cyan-900/20 via-blue-900/10 to-purple-900/20 animate-pulse"></div>
-          <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-cyan-900/40 via-transparent to-transparent opacity-30"></div>
-        </div>
-        
-        <div className="fixed inset-0 z-0 overflow-hidden">
-          <div className="absolute -top-40 -right-40 w-80 h-80 bg-cyan-500/10 rounded-full blur-3xl animate-pulse"></div>
-          <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-blue-500/10 rounded-full blur-3xl animate-pulse delay-1000"></div>
-          <div className="absolute top-1/2 left-1/2 w-60 h-60 bg-purple-500/10 rounded-full blur-3xl animate-pulse delay-2000"></div>
-        </div>
-        
+      <body className="app-shell min-h-screen overflow-x-hidden text-slate-100">
         <div className="relative z-10">
           <Header />
           <main className="animate-fade-in">

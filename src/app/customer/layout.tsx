@@ -20,9 +20,25 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
         const s = getSupabase()
         if (!s){ router.replace('/customer/login'); return }
         const { data } = await s.auth.getUser()
-        const email = data.user?.email || null
+        const user = data.user
+        const email = user?.email || null
         if (!email){ router.replace('/customer/login'); return }
-        // Route access requires login only; actions on recommendations are gated in APIs
+        // Self-heal missing profile/customer links so portal data stays tied to Supabase.
+        try{
+          const fullName = String(user?.user_metadata?.fullName || user?.user_metadata?.full_name || '').trim()
+          await s.from('profiles').upsert({ user_id: user?.id, email, role: 'customer', full_name: fullName || email.split('@')[0] }, { onConflict: 'email' })
+          const { data: existingCustomer } = await s.from('customers').select('id').eq('email', email).maybeSingle()
+          if (!existingCustomer){
+            await s.from('customers').insert({
+              name: fullName || email,
+              email,
+              subscription_type: 'yearly',
+              streams: 1,
+              subscription_status: 'inactive',
+              notes: ''
+            })
+          }
+        } catch {}
         setChecking(false)
       }catch{ router.replace('/customer/login') }
     })()

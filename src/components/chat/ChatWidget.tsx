@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
-import { MessageCircle, X, Send, Paperclip, Smile } from 'lucide-react'
-import { useChatStore } from '@/stores/chatStore'
+import { useEffect, useRef, useState } from 'react'
+import { MessageCircle, Send, X } from 'lucide-react'
 import { format } from 'date-fns'
 import { getSupabase } from '@/lib/supabaseClient'
-import FileUpload from './FileUpload'
+import { useChatStore } from '@/stores/chatStore'
 import FileAttachment from './FileAttachment'
+import FileUpload from './FileUpload'
 import { fileService } from '@/services/fileService'
 
 interface ChatWidgetProps {
@@ -17,312 +17,251 @@ interface ChatWidgetProps {
 
 export default function ChatWidget({
   position = 'bottom-right',
-  primaryColor = '#0ea5e9',
-  welcomeMessage = 'Hello! How can we help you today?'
+  primaryColor = '#67e8f9',
+  welcomeMessage = 'Hello! How can we help you today?',
 }: ChatWidgetProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [message, setMessage] = useState('')
-  const [customerId, setCustomerId] = useState<string>('')
-  const [conversationId, setConversationId] = useState<string>('')
+  const [conversationId, setConversationId] = useState('')
   const [isMobile, setIsMobile] = useState(false)
   const [isAuthorized, setIsAuthorized] = useState(false)
   const [identity, setIdentity] = useState<{ email?: string; full_name?: string } | null>(null)
   const [chatOnline, setChatOnline] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  
+
   const {
     messages,
-    currentConversation,
     isLoading,
     error,
     fetchMessages,
     refreshMessages,
     sendMessage,
     createConversation,
-    addMessage,
     setCurrentConversation,
     connectSocket,
-    disconnectSocket
+    disconnectSocket,
   } = useChatStore()
 
   useEffect(() => {
-    // Check if mobile device
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768)
-    }
-    
+    const checkMobile = () => setIsMobile(window.innerWidth < 768)
     checkMobile()
     window.addEventListener('resize', checkMobile)
-    
-    // Require Supabase-authenticated customer
+
     const s = getSupabase()
     if (!s) {
       setIsAuthorized(false)
-    } else {
-      s.auth.getUser().then(async ({ data }) => {
-        const email = data?.user?.email || undefined
-        if (!email) { setIsAuthorized(false); return }
-        setIsAuthorized(true)
-        // Try to get profile full_name
-        try {
-          const { data: prof } = await s.from('profiles').select('full_name').eq('email', email).limit(1)
-          const full_name = prof?.[0]?.full_name || undefined
-          setIdentity({ email, full_name })
-        } catch {
-          setIdentity({ email })
-        }
-        // Customer ID for local session
-        let storedCustomerId = localStorage.getItem('chat_customer_id')
-        if (!storedCustomerId) {
-          storedCustomerId = crypto.randomUUID()
-          localStorage.setItem('chat_customer_id', storedCustomerId)
-        }
-        setCustomerId(storedCustomerId)
-      })
+      return () => window.removeEventListener('resize', checkMobile)
     }
-    
+
+    s.auth.getUser().then(async ({ data }) => {
+      const email = data?.user?.email || undefined
+      if (!email) {
+        setIsAuthorized(false)
+        return
+      }
+
+      setIsAuthorized(true)
+      try {
+        const { data: prof } = await s.from('profiles').select('full_name').eq('email', email).limit(1)
+        setIdentity({ email, full_name: prof?.[0]?.full_name || undefined })
+      } catch {
+        setIdentity({ email })
+      }
+    })
+
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
-
-  // Do not auto-create conversations on open; create on first message.
 
   useEffect(() => {
     if (!isOpen || !conversationId) return
     const interval = setInterval(() => {
-      try { refreshMessages(conversationId) } catch {}
+      void refreshMessages(conversationId)
     }, 1500)
     return () => clearInterval(interval)
-  }, [isOpen, conversationId])
+  }, [conversationId, isOpen, refreshMessages])
 
   useEffect(() => {
-    if (isOpen) {
-      connectSocket()
-    } else {
-      disconnectSocket()
-    }
-  }, [isOpen])
+    if (isOpen) connectSocket()
+    else disconnectSocket()
+  }, [connectSocket, disconnectSocket, isOpen])
 
   useEffect(() => {
-    scrollToBottom()
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  useEffect(()=>{
-    (async()=>{
-      try{
+  useEffect(() => {
+    ;(async () => {
+      try {
         const res = await fetch('/api/admin/settings')
-        if (res.ok){
-          const data = await res.json()
-          const avail = String(data?.chat_availability ?? (data?.chat_online === false ? 'off' : 'active')).toLowerCase()
-          setChatOnline(avail !== 'off')
-        }
-      } catch{}
+        if (!res.ok) return
+        const data = await res.json()
+        const avail = String(data?.chat_availability ?? (data?.chat_online === false ? 'off' : 'active')).toLowerCase()
+        setChatOnline(avail !== 'off')
+      } catch {}
     })()
   }, [])
 
-  const initializeConversation = async () => {
-    try {
-      const conversation = await createConversation(undefined, identity || undefined)
-      if (conversation) {
-        setConversationId(conversation.id)
-        setCurrentConversation(conversation)
-        await fetchMessages(conversation.id)
-        return conversation.id
-      }
-    } catch (error) {
-      console.error('Failed to initialize conversation:', error)
-    }
-    return null
-  }
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  const ensureConversation = async () => {
+    if (conversationId) return conversationId
+    const conversation = await createConversation(undefined, identity || undefined)
+    if (!conversation) return null
+    setConversationId(conversation.id)
+    setCurrentConversation(conversation)
+    await fetchMessages(conversation.id)
+    return conversation.id
   }
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!message.trim()) return
-    if (!chatOnline) return
-    if (!conversationId) {
-      await initializeConversation()
-    }
-    if (!conversationId) return
+    const trimmed = message.trim()
+    if (!trimmed || !chatOnline) return
 
-    try {
-      await sendMessage(conversationId, message, 'customer')
-      setMessage('')
-    } catch (error) {
-      console.error('Failed to send message:', error)
-    }
+    const id = await ensureConversation()
+    if (!id) return
+
+    await sendMessage(id, trimmed, 'customer')
+    setMessage('')
   }
 
-  const handleFileUpload = async (result: any) => {
-    // Send a message with the file URL
+  const handleFileUpload = async (result: { fileName: string; fileSize: number; url: string }) => {
+    const id = await ensureConversation()
+    if (!id) return
     const fileMessage = `[File: ${result.fileName} (${fileService.formatFileSize(result.fileSize)})](${result.url})`
-    if (!conversationId) await initializeConversation()
-    if (conversationId) await sendMessage(conversationId, fileMessage, 'customer')
-  }
-
-  const handleFileError = (error: string) => {
-    console.error('File upload error:', error)
+    await sendMessage(id, fileMessage, 'customer')
   }
 
   const parseFileAttachment = (content: string) => {
-    // Simple regex to parse file attachments in format: [File: filename (size)](url)
     const fileRegex = /\[File: ([^\]]+) \(([^\)]+)\)\]\(([^\)]+)\)/g
     const matches = fileRegex.exec(content)
-    
-    if (matches) {
-      const fileName = matches[1]
-      const fileSize = matches[2]
-      const url = matches[3]
-      const lower = fileName.toLowerCase()
-      const isImg = ['.jpg','.jpeg','.png','.gif','.webp','.bmp'].some(ext=> lower.endsWith(ext))
-      const fileType = isImg ? 'image/' + (lower.split('.').pop() || 'jpeg') : 'application/octet-stream'
-      return {
-        fileName,
-        fileSize,
-        url,
-        fileType
-      }
-    }
-    
-    return null
+    if (!matches) return null
+    const fileName = matches[1]
+    const fileSize = matches[2]
+    const url = matches[3]
+    const lower = fileName.toLowerCase()
+    const isImg = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'].some((ext) => lower.endsWith(ext))
+    const fileType = isImg ? `image/${lower.split('.').pop() || 'jpeg'}` : 'application/octet-stream'
+    return { fileName, fileSize, url, fileType }
   }
 
   const positionClasses = {
-    'bottom-right': 'bottom-4 right-4',
-    'bottom-left': 'bottom-4 left-4',
-    'top-right': 'top-4 right-4',
-    'top-left': 'top-4 left-4'
+    'bottom-right': 'bottom-5 right-5',
+    'bottom-left': 'bottom-5 left-5',
+    'top-right': 'top-5 right-5',
+    'top-left': 'top-5 left-5',
   }
 
   return (
     <>
-      {/* Chat Button */}
       {!isOpen && isAuthorized && (
         <button
           onClick={() => setIsOpen(true)}
-          className={`fixed ${positionClasses[position]} z-50 rounded-full p-4 shadow-glow transition-all duration-200 hover:scale-105 bg-cyan-600 hover:bg-cyan-700 text-white`}
+          className={`fixed ${positionClasses[position]} z-50 rounded-full border border-cyan-300/30 p-4 text-slate-950 shadow-[0_18px_40px_rgba(34,211,238,0.35)]`}
+          style={{ background: `linear-gradient(135deg, ${primaryColor}, #60a5fa)` }}
+          aria-label="Open live chat"
         >
           <MessageCircle size={24} />
         </button>
       )}
 
-      {/* Chat Window */}
       {isOpen && isAuthorized && (
-        <div className={`fixed ${positionClasses[position]} z-50 ${
-          isMobile ? 'w-full h-full top-0 left-0' : 'w-80 h-96'
-        } glass rounded-lg shadow-2xl flex flex-col border border-cyan-500/20`}>
-          {/* Header */}
-          <div className="p-4 rounded-t-lg flex justify-between items-center bg-slate-900/40">
-            <div>
-              <h3 className="font-semibold text-slate-200">Live Chat</h3>
-              {chatOnline ? (
-                <p className="text-xs text-slate-400">We&apos;re here to help</p>
-              ) : (
-                <p className="text-xs text-amber-300">We are currently offline. Please leave a message with your email and we will get back to you.</p>
-              )}
+        <div
+          className={`fixed ${positionClasses[position]} z-50 flex flex-col overflow-hidden border border-cyan-400/20 bg-slate-950/95 shadow-[0_30px_90px_rgba(8,145,178,0.35)] backdrop-blur-2xl ${
+            isMobile ? 'left-0 top-0 h-full w-full rounded-none' : 'h-[38rem] w-[25rem] rounded-[28px]'
+          }`}
+        >
+          <div className="border-b border-white/8 bg-[linear-gradient(135deg,rgba(34,211,238,0.14),rgba(15,23,42,0.72))] p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.22em] text-cyan-300">Support online</div>
+                <h3 className="mt-1 text-lg font-semibold text-slate-50">Live Chat</h3>
+                <p className="mt-1 text-sm text-slate-400">
+                  {chatOnline ? welcomeMessage : 'We are offline right now. Leave your message and email and we will reply.'}
+                </p>
+              </div>
+              <button onClick={() => setIsOpen(false)} className="rounded-2xl border border-white/10 p-2 text-slate-300 hover:text-white">
+                <X size={18} />
+              </button>
             </div>
-            <button
-              onClick={() => setIsOpen(false)}
-              className="rounded p-1 transition-colors text-slate-300 hover:text-cyan-300"
-            >
-              <X size={20} />
-            </button>
           </div>
 
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {messages.map((msg) => {
-              const fileAttachment = parseFileAttachment(msg.content)
-              const displayContent = fileAttachment ? 
-                msg.content.replace(/\[File: [^\]]+ \([^\)]+\)\]\([^\)]+\)/g, '') : 
-                msg.content
+          <div className="flex-1 overflow-y-auto p-4">
+            {messages.length === 0 ? (
+              <div className="panel p-4">
+                <div className="text-sm font-medium text-slate-100">Start a conversation</div>
+                <p className="mt-1 text-sm text-slate-400">
+                  Ask about your plan, payments, service issues, or anything else and we will pick it up quickly.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {messages.map((msg) => {
+                  const fileAttachment = parseFileAttachment(msg.content)
+                  const displayContent = fileAttachment ? msg.content.replace(/\[File: [^\]]+ \([^\)]+\)\]\([^\)]+\)/g, '').trim() : msg.content
 
-              return (
-                <div
-                  key={msg.id}
-                  className={`flex ${msg.sender_type === 'customer' ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                  className={`max-w-xs px-3 py-2 rounded-lg ${
-                      msg.sender_type === 'customer'
-                        ? 'bg-cyan-600 text-white'
-                        : 'bg-slate-800 text-slate-200'
-                    } shadow-glow`}
-                  >
-                    {displayContent && (
-                      <p className="text-sm">{displayContent}</p>
-                    )}
-                    
-                    {fileAttachment && (
-                      <div className="mt-2">
-                        <FileAttachment
-                          url={fileAttachment.url}
-                          fileName={fileAttachment.fileName}
-                          fileSize={fileAttachment.fileSize}
-                          fileType={fileAttachment.fileType}
-                        />
+                  return (
+                    <div key={msg.id} className={`flex ${msg.sender_type === 'customer' ? 'justify-end' : 'justify-start'}`}>
+                      <div
+                        className={`max-w-[85%] rounded-[24px] px-4 py-3 ${
+                          msg.sender_type === 'customer'
+                            ? 'bg-[linear-gradient(135deg,#67e8f9,#38bdf8)] text-slate-950'
+                            : 'border border-white/10 bg-white/5 text-slate-100'
+                        }`}
+                      >
+                        {displayContent ? <p className="text-sm leading-6">{displayContent}</p> : null}
+                        {fileAttachment ? (
+                          <div className="mt-2">
+                            <FileAttachment
+                              url={fileAttachment.url}
+                              fileName={fileAttachment.fileName}
+                              fileSize={fileAttachment.fileSize}
+                              fileType={fileAttachment.fileType}
+                            />
+                          </div>
+                        ) : null}
+                        <p className={`mt-2 text-[11px] ${msg.sender_type === 'customer' ? 'text-slate-800/70' : 'text-slate-500'}`}>
+                          {format(new Date(msg.timestamp), 'dd/MM/yyyy HH:mm')}
+                        </p>
                       </div>
-                    )}
-                    
-                    <p className={`text-xs mt-1 ${
-                      msg.sender_type === 'customer' ? 'text-cyan-100' : 'text-slate-400'
-                    }`}>
-                      {format(new Date(msg.timestamp), 'dd/MM/yyyy')}
-                    </p>
-                  </div>
-                </div>
-              )
-            })}
-            {isLoading && (
-              <div className="flex justify-start">
-                <div className="px-3 py-2 rounded-lg bg-slate-800 text-slate-200">
-                  <p className="text-sm">Typing...</p>
-                </div>
+                    </div>
+                  )
+                })}
               </div>
             )}
+            {isLoading ? (
+              <div className="mt-3 inline-flex rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-200">
+                Updating conversation...
+              </div>
+            ) : null}
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input */}
-          <form onSubmit={handleSendMessage} className="p-4 border-t border-slate-800 bg-slate-900/40">
-            <div className="flex space-x-2">
+          <form onSubmit={handleSendMessage} className="border-t border-white/8 bg-slate-950/90 p-4">
+            <div className="flex gap-2">
               <input
                 type="text"
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && message.trim()) { e.preventDefault(); handleSendMessage(e as any) } }}
-                placeholder={chatOnline ? 'Type your message...' : 'We are offline — leave your message and email'}
-                className="flex-1 input"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    void handleSendMessage(e as unknown as React.FormEvent)
+                  }
+                }}
+                placeholder={chatOnline ? 'Type your message...' : 'Leave a message and your email'}
+                className="input flex-1"
               />
               <FileUpload
                 conversationId={conversationId || undefined}
-                ensureConversationId={async()=>{
-                  if (!conversationId) {
-                    const id = await initializeConversation()
-                    return id
-                  }
-                  return conversationId
-                }}
+                ensureConversationId={ensureConversation}
                 onFileUploaded={handleFileUpload}
-                onError={handleFileError}
+                onError={(uploadError) => console.error('File upload error:', uploadError)}
               />
-              <button
-                type="submit"
-                disabled={!message.trim() || isLoading}
-                className="btn disabled:opacity-50"
-              >
-                <Send size={18} />
+              <button type="submit" disabled={!message.trim() || isLoading || !chatOnline} className="btn px-4 py-3 disabled:opacity-50">
+                <Send size={16} />
               </button>
             </div>
+            {error ? <div className="mt-3 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">{error}</div> : null}
           </form>
-
-          {error && (
-            <div className="px-4 py-2 bg-rose-500/20 text-rose-300 text-sm">
-              {error}
-            </div>
-          )}
         </div>
       )}
     </>

@@ -36,7 +36,8 @@ export default function CustomerServiceUpdatesPage() {
         <div className="mb-4">
           <a href="/customer" className="btn-outline" data-no-prefetch>Back</a>
         </div>
-        <h2 className="text-2xl font-semibold mb-4">Service Updates</h2>
+        <h2 className="text-2xl font-semibold mb-2">Service Updates</h2>
+        <p className="mb-4 text-sm text-slate-400">Latest service notices and previous update history in one place.</p>
         {loading && (<div className="text-slate-400">Loading updates...</div>)}
         {!loading && error && (<div className="text-rose-400">{error}</div>)}
         {!loading && !error && (

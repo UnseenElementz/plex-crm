@@ -33,12 +33,19 @@ export async function GET(request: Request){
 
   const notes = String((data as any).notes || '')
   const plexUsername = notes.match(/Plex:\s*([^\n]+)/i)?.[1]?.trim() || ''
+  const { data: settings } = await supabase.from('admin_settings').select('ip_logs,blocked_ips').eq('id', 1).maybeSingle()
+  const ipLogs = settings?.ip_logs || {}
+  const blockedIps = Array.isArray(settings?.blocked_ips) ? settings?.blocked_ips : []
+  const customerIps = Array.isArray(ipLogs[email]) ? ipLogs[email] : []
   return NextResponse.json({
     plex_username: plexUsername,
     full_name: (data as any).name || '',
     status: (data as any).subscription_status || 'inactive',
     subscription_type: (data as any).subscription_type || '',
     streams: (data as any).streams || 1,
-    next_payment_date: (data as any).next_payment_date || null
+    next_payment_date: (data as any).next_payment_date || null,
+    notes,
+    ip_history: customerIps,
+    blocked_ips: blockedIps
   })
 }

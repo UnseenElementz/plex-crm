@@ -543,3 +543,75 @@ export async function getPlexSharedSections(token: string, email: string, userna
     return []
   }
 }
+
+export interface PlexSessionRow {
+  sessionKey: string
+  title: string
+  type: string
+  user: string
+  player: string
+  product: string
+  state: string
+  ip: string
+  startedAt: string | null
+  transcodeDecision: string
+  videoDecision: string
+  audioDecision: string
+}
+
+export async function getPlexSessions(serverUrl: string, token: string): Promise<PlexSessionRow[]> {
+  try {
+    let base = serverUrl.replace(/\/+$/, '')
+    if (base.includes('plex.tv')) {
+      base = await getPreferredServerUri(token)
+    }
+    const res = await fetch(`${base}/status/sessions`, { headers: plexHeaders(token), cache: 'no-store' })
+    if (!res.ok) throw new Error(`Sessions fetch failed: ${res.status}`)
+    const text = await res.text()
+    const blocks = text.split('</Video>')
+    const rows: PlexSessionRow[] = []
+
+    for (const block of blocks) {
+      if (!block.includes('<Video')) continue
+      const attrs = block.match(/<Video\s+([^>]+)>/)?.[1] || ''
+      const userAttrs = block.match(/<User\s+([^>]+)\/>/)?.[1] || ''
+      const playerAttrs = block.match(/<Player\s+([^>]+)\/>/)?.[1] || ''
+      const sessionAttrs = block.match(/<Session\s+([^>]+)\/>/)?.[1] || ''
+      const transcodeAttrs = block.match(/<TranscodeSession\s+([^>]+)\/>/)?.[1] || ''
+
+      const title = attrs.match(/grandparentTitle="([^"]+)"/)?.[1] || attrs.match(/title="([^"]+)"/)?.[1] || 'Unknown'
+      const mediaTitle = attrs.match(/title="([^"]+)"/)?.[1] || ''
+      const type = attrs.match(/type="([^"]+)"/)?.[1] || 'video'
+      const user = userAttrs.match(/title="([^"]+)"/)?.[1] || userAttrs.match(/username="([^"]+)"/)?.[1] || ''
+      const player = playerAttrs.match(/title="([^"]+)"/)?.[1] || playerAttrs.match(/device="([^"]+)"/)?.[1] || ''
+      const product = playerAttrs.match(/product="([^"]+)"/)?.[1] || ''
+      const state = playerAttrs.match(/state="([^"]+)"/)?.[1] || ''
+      const ip = playerAttrs.match(/address="([^"]+)"/)?.[1] || ''
+      const startedAtRaw = sessionAttrs.match(/startedAt="([^"]+)"/)?.[1] || ''
+      const transcodeDecision = transcodeAttrs ? 'transcode' : 'direct'
+      const videoDecision = transcodeAttrs.match(/videoDecision="([^"]+)"/)?.[1] || (transcodeAttrs ? 'transcode' : 'direct play')
+      const audioDecision = transcodeAttrs.match(/audioDecision="([^"]+)"/)?.[1] || (transcodeAttrs ? 'transcode' : 'direct play')
+      const sessionKey = sessionAttrs.match(/id="([^"]+)"/)?.[1] || attrs.match(/ratingKey="([^"]+)"/)?.[1] || `${user}-${title}-${ip}`
+
+      rows.push({
+        sessionKey,
+        title: mediaTitle ? `${title}${mediaTitle !== title ? ` / ${mediaTitle}` : ''}` : title,
+        type,
+        user,
+        player,
+        product,
+        state,
+        ip,
+        startedAt: startedAtRaw ? new Date(Number(startedAtRaw) * 1000).toISOString() : null,
+        transcodeDecision,
+        videoDecision,
+        audioDecision,
+      })
+    }
+
+    return rows
+  } catch (e) {
+    console.error('Plex sessions error:', e)
+    return []
+  }
+}

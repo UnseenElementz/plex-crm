@@ -44,7 +44,7 @@ export async function GET(){
     if (!finalSettings && error) return NextResponse.json({ error: error.message }, { status: 404 })
     
     const safe: any = {}
-    const allow = ['company_name','yearly_price','stream_yearly_price','movies_only_price','tv_only_price','downloads_price','payment_lock','chat_online','chat_availability','chat_idle_timeout_minutes','canonical_host','hero_image_url','bg_music_url','bg_music_volume','bg_music_enabled','plex_token','plex_server_url']
+    const allow = ['company_name','yearly_price','stream_yearly_price','movies_only_price','tv_only_price','downloads_price','payment_lock','chat_online','chat_availability','chat_idle_timeout_minutes','canonical_host','hero_image_url','bg_music_url','bg_music_volume','bg_music_enabled','plex_token','plex_server_url','imap_host','imap_port','imap_user','imap_secure','imap_mailbox','service_email_keywords']
     for (const k of allow){ if (finalSettings && finalSettings[k] !== undefined) safe[k] = finalSettings[k] }
     
     const res = NextResponse.json(isAdmin ? (finalSettings || {}) : safe, { 
@@ -81,7 +81,8 @@ export async function PUT(request: Request){
       'yearly_price', 'stream_yearly_price', 'movies_only_price', 'tv_only_price',
       'downloads_price', 'payment_lock', 'chat_online', 'chat_availability', 'chat_idle_timeout_minutes', 'hero_image_url',
       'admin_user', 'admin_pass', 'plex_token', 'plex_server_url',
-      'bg_music_url', 'bg_music_volume', 'bg_music_enabled'
+      'bg_music_url', 'bg_music_volume', 'bg_music_enabled',
+      'imap_host', 'imap_port', 'imap_user', 'imap_pass', 'imap_secure', 'imap_mailbox', 'service_email_keywords'
     ]
     
     const row: any = { id: 1 }

@@ -1,5 +1,6 @@
 "use client"
 import { useEffect, useState } from 'react'
+import { format } from 'date-fns'
 import { getSupabase } from '@/lib/supabaseClient'
 
 export default function AdminSettingsPage() {
@@ -27,7 +28,14 @@ export default function AdminSettingsPage() {
     bg_music_volume: '0.1',
     bg_music_enabled: true,
     plex_token: '',
-    plex_server_url: 'https://plex.tv'
+    plex_server_url: 'https://plex.tv',
+    imap_host: '',
+    imap_port: '993',
+    imap_user: '',
+    imap_pass: '',
+    imap_secure: true,
+    imap_mailbox: 'INBOX',
+    service_email_keywords: 'plex,stream,service,payment,renewal,buffer,login,support,subscription'
   })
   const [loading, setLoading] = useState(true) // Start as true to wait for loadSettings
   const [saveLoading, setSaveLoading] = useState(false)
@@ -42,6 +50,8 @@ export default function AdminSettingsPage() {
   const [newContent, setNewContent] = useState('')
   const [publishing, setPublishing] = useState(false)
   const [updateMsg, setUpdateMsg] = useState('')
+  const [dbMode, setDbMode] = useState<'checking' | 'database' | 'local'>('checking')
+  const [dbDetail, setDbDetail] = useState('')
 
   useEffect(() => {
     checkAuth()
@@ -157,7 +167,11 @@ export default function AdminSettingsPage() {
       const res = await fetch(`/api/admin/settings?t=${Date.now()}`, { cache: 'no-store' })
       if (res.ok) {
         const data = await res.json()
-        setSupabaseStatus('connected')
+        const rawDbStatus = res.headers.get('X-DB-Status') || 'unknown'
+        const isDatabaseMode = rawDbStatus === 'found' || rawDbStatus === 'empty'
+        setSupabaseStatus(isDatabaseMode ? 'connected' : 'error')
+        setDbMode(isDatabaseMode ? 'database' : 'local')
+        setDbDetail(rawDbStatus)
         
         setSettings({
           smtp_host: data.smtp_host ?? '',
@@ -183,12 +197,21 @@ export default function AdminSettingsPage() {
           bg_music_volume: data.bg_music_volume?.toString() ?? '0.1',
           bg_music_enabled: data.bg_music_enabled !== undefined ? Boolean(data.bg_music_enabled) : true,
           plex_token: data.plex_token ?? '',
-          plex_server_url: data.plex_server_url ?? 'https://plex.tv'
+          plex_server_url: data.plex_server_url ?? 'https://plex.tv',
+          imap_host: data.imap_host ?? '',
+          imap_port: data.imap_port?.toString() ?? '993',
+          imap_user: data.imap_user ?? '',
+          imap_pass: data.imap_pass ?? '',
+          imap_secure: data.imap_secure !== undefined ? Boolean(data.imap_secure) : true,
+          imap_mailbox: data.imap_mailbox ?? 'INBOX',
+          service_email_keywords: data.service_email_keywords ?? 'plex,stream,service,payment,renewal,buffer,login,support,subscription'
         })
       }
     } catch (e) {
       console.error('Failed to load settings:', e)
       setSupabaseStatus('error')
+      setDbMode('local')
+      setDbDetail('request-failed')
     } finally {
       setLoading(false)
     }
@@ -256,7 +279,14 @@ export default function AdminSettingsPage() {
         bg_music_volume: parseFloat(settings.bg_music_volume) || 0.1,
         bg_music_enabled: Boolean(settings.bg_music_enabled),
         plex_token: settings.plex_token,
-        plex_server_url: settings.plex_server_url
+        plex_server_url: settings.plex_server_url,
+        imap_host: settings.imap_host,
+        imap_port: settings.imap_port,
+        imap_user: settings.imap_user,
+        imap_pass: settings.imap_pass,
+        imap_secure: Boolean(settings.imap_secure),
+        imap_mailbox: settings.imap_mailbox,
+        service_email_keywords: settings.service_email_keywords
       }
       const res = await fetch('/api/admin/settings', { method:'PUT', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(settingsData) })
       const body = await res.json().catch(()=>({}))
@@ -265,16 +295,16 @@ export default function AdminSettingsPage() {
         if (res.status === 401) {
           setMessage('Unauthorized: admin session missing. Please log in again, then try Save.')
         } else {
-          setMessage(body?.error || 'Failed to save to database. Saved locally.')
+          setMessage(body?.error || 'Failed to save settings.')
         }
       } else if (body.dbOk === false) {
-        setMessage('⚠️ Saved to browser, but Database write failed: ' + (body.dbError || 'Check Supabase SQL.'))
+        setSupabaseStatus('error')
+        setDbMode('local')
+        setMessage('Saved in local fallback mode. Database write failed: ' + (body.dbError || 'Check Supabase env and table setup.'))
       } else {
-        if (body.dbError && body.dbError.startsWith('PARTIAL_SUCCESS')) {
-            setMessage('✅ Image link saved, but prices could not be saved yet. ' + body.dbError)
-        } else {
-            setMessage('Settings saved successfully! (Note: Saved to both Database and Browser Cache)')
-        }
+        setSupabaseStatus('connected')
+        setDbMode('database')
+        setMessage('Settings saved successfully.')
         
         if (body.settings) {
             // Update state with confirmed data from server
@@ -303,7 +333,14 @@ export default function AdminSettingsPage() {
                 bg_music_volume: s.bg_music_volume?.toString() ?? '0.1',
                 bg_music_enabled: s.bg_music_enabled !== undefined ? Boolean(s.bg_music_enabled) : true,
                 plex_token: s.plex_token ?? '',
-                plex_server_url: s.plex_server_url ?? 'https://plex.tv'
+                plex_server_url: s.plex_server_url ?? 'https://plex.tv',
+                imap_host: s.imap_host ?? '',
+                imap_port: s.imap_port?.toString() ?? '993',
+                imap_user: s.imap_user ?? '',
+                imap_pass: s.imap_pass ?? '',
+                imap_secure: s.imap_secure !== undefined ? Boolean(s.imap_secure) : true,
+                imap_mailbox: s.imap_mailbox ?? 'INBOX',
+                service_email_keywords: s.service_email_keywords ?? 'plex,stream,service,payment,renewal,buffer,login,support,subscription'
             })
         }
 
@@ -366,10 +403,10 @@ export default function AdminSettingsPage() {
               supabaseStatus === 'error' ? 'bg-rose-500' : 'bg-yellow-500 animate-pulse'
             }`}></div>
             <span className="text-sm text-slate-400">
-              {supabaseStatus === 'connected' ? 'Connected' : 
-               supabaseStatus === 'error' ? 'Not Configured' : 'Checking...'}
+              {supabaseStatus === 'connected' ? 'Database Connected' : 
+               supabaseStatus === 'error' ? 'Local Fallback Mode' : 'Checking...'}
             </span>
-            <a href="/admin" className="btn-xs-outline ml-3">← Back to Chat</a>
+            <a href="/admin" className="btn-xs-outline ml-3">Back to Chat</a>
           </div>
         </div>
         
@@ -391,7 +428,7 @@ export default function AdminSettingsPage() {
                     <div className="flex items-center justify-between mb-2">
                       <div className="font-semibold text-slate-200">{u.title}</div>
                       <div className="flex items-center gap-3">
-                        <div className="text-xs text-slate-500">{require('date-fns').format(new Date(u.created_at), 'dd MMM yyyy')}</div>
+                        <div className="text-xs text-slate-500">{format(new Date(u.created_at), 'dd MMM yyyy HH:mm')}</div>
                         {(u as any).id && (
                           <button 
                             className="text-xs text-rose-400 hover:text-rose-300 transition-colors"
@@ -477,6 +514,48 @@ export default function AdminSettingsPage() {
         </div>
 
         <div className="glass p-6 rounded-2xl mb-6">
+          <h2 className="text-xl font-semibold mb-4">Inbound Email Inbox (IMAP / Gmail)</h2>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <label className="label">IMAP Host</label>
+              <input className="input" placeholder="imap.gmail.com" value={settings.imap_host} onChange={e => setSettings({ ...settings, imap_host: e.target.value })} />
+            </div>
+            <div>
+              <label className="label">IMAP Port</label>
+              <input className="input" placeholder="993" value={settings.imap_port} onChange={e => setSettings({ ...settings, imap_port: e.target.value })} />
+            </div>
+            <div>
+              <label className="label">IMAP Username</label>
+              <input className="input" placeholder="your-email@gmail.com" value={settings.imap_user} onChange={e => setSettings({ ...settings, imap_user: e.target.value })} />
+            </div>
+            <div>
+              <label className="label">IMAP Password / App Password</label>
+              <input className="input" type="password" placeholder="Gmail app password" value={settings.imap_pass} onChange={e => setSettings({ ...settings, imap_pass: e.target.value })} />
+            </div>
+            <div>
+              <label className="label">Mailbox</label>
+              <input className="input" placeholder="INBOX" value={settings.imap_mailbox} onChange={e => setSettings({ ...settings, imap_mailbox: e.target.value })} />
+            </div>
+            <div className="flex items-end">
+              <label className="inline-flex items-center gap-2">
+                <input type="checkbox" checked={settings.imap_secure} onChange={e => setSettings({ ...settings, imap_secure: e.target.checked })} />
+                <span className="text-xs text-slate-400">Use secure IMAP</span>
+              </label>
+            </div>
+            <div className="md:col-span-2">
+              <label className="label">Service Keywords</label>
+              <input
+                className="input"
+                placeholder="plex,stream,service,payment,renewal,buffer,login,support"
+                value={settings.service_email_keywords}
+                onChange={e => setSettings({ ...settings, service_email_keywords: e.target.value })}
+              />
+              <div className="text-xs text-slate-500 mt-1">Only customer replies containing one of these keywords will show in the website inbox.</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="glass p-6 rounded-2xl mb-6">
           <h2 className="text-xl font-semibold mb-4">Plex Configuration</h2>
           <div className="grid md:grid-cols-2 gap-4">
             <div>
@@ -543,7 +622,7 @@ export default function AdminSettingsPage() {
                 onKeyPress={handleKeyPress}
               />
               <div className="text-[10px] text-slate-500 mt-1 uppercase tracking-widest font-bold">
-                Database: {settings.company_name || 'NOT SET'}
+                Use a clean trading name shown across the site.
               </div>
             </div>
             <div>
@@ -586,7 +665,7 @@ export default function AdminSettingsPage() {
               </div>
             </div>
             <div>
-              <label className="label">Monthly Maintenance Cost (£)</label>
+              <label className="label">Monthly Maintenance Cost (GBP)</label>
               <input 
                 className="input" 
                 type="number"
@@ -632,7 +711,7 @@ export default function AdminSettingsPage() {
           <h2 className="text-xl font-semibold mb-4">Pricing Configuration</h2>
           <div className="grid md:grid-cols-2 gap-4">
             <div>
-              <label className="label">Yearly Base Price (£)</label>
+              <label className="label">Yearly Base Price (GBP)</label>
               <input 
                 className="input" 
                 type="number"
@@ -643,7 +722,7 @@ export default function AdminSettingsPage() {
               />
             </div>
             <div>
-              <label className="label">Additional Stream (Yearly) (£)</label>
+              <label className="label">Additional Stream (Yearly) (GBP)</label>
               <input 
                 className="input" 
                 type="number"
@@ -654,7 +733,7 @@ export default function AdminSettingsPage() {
               />
             </div>
             <div>
-              <label className="label">Movies Only Price (£)</label>
+              <label className="label">Movies Only Price (GBP)</label>
               <input 
                 className="input" 
                 type="number"
@@ -665,7 +744,7 @@ export default function AdminSettingsPage() {
               />
             </div>
             <div>
-              <label className="label">TV Shows Only Price (£)</label>
+              <label className="label">TV Shows Only Price (GBP)</label>
               <input 
                 className="input" 
                 type="number"
@@ -676,7 +755,7 @@ export default function AdminSettingsPage() {
               />
             </div>
             <div>
-              <label className="label">Downloads Addon Price (£)</label>
+              <label className="label">Downloads Addon Price (GBP)</label>
               <input 
                 className="input" 
                 type="number"
@@ -695,20 +774,29 @@ export default function AdminSettingsPage() {
           <h2 className="text-xl font-semibold mb-4">Configuration Status</h2>
           {supabaseStatus === 'error' && (
             <div className="bg-amber-500/20 border border-amber-500/30 rounded-lg p-4 mb-4">
-              <h3 className="font-semibold text-amber-300 mb-2">Supabase Not Configured</h3>
+              <h3 className="font-semibold text-amber-300 mb-2">Database Not Connected</h3>
               <p className="text-amber-200 text-sm mb-3">
-                To enable settings persistence and full functionality, you need to configure Supabase:
+                The admin is running in local fallback mode. Settings and updates can still work in-browser, but customer auth, synced CRM data, and full Plex tooling need Supabase env vars.
               </p>
               <ol className="text-amber-200 text-sm space-y-1 list-decimal list-inside">
                 <li>Go to your Supabase project dashboard</li>
-                <li>Click on &quot;Settings&quot; → &quot;API&quot; in the sidebar</li>
+                <li>Open Settings then API</li>
                 <li>Copy your Project URL and add it to <code className="bg-slate-800 px-1 rounded">NEXT_PUBLIC_SUPABASE_URL</code> in your .env.local file</li>
                 <li>Copy your anon/public key and add it to <code className="bg-slate-800 px-1 rounded">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> in your .env.local file</li>
+                <li>Copy your service role key into <code className="bg-slate-800 px-1 rounded">SUPABASE_SERVICE_ROLE_KEY</code></li>
                 <li>Restart your development server</li>
               </ol>
             </div>
           )}
           <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <div className="text-sm text-slate-400 mb-2">Settings Storage</div>
+              <div className={`flex items-center gap-2 ${dbMode === 'database' ? 'text-emerald-400' : 'text-amber-300'}`}>
+                <div className={`w-2 h-2 rounded-full ${dbMode === 'database' ? 'bg-emerald-500' : 'bg-amber-400'}`}></div>
+                {dbMode === 'database' ? 'Database mode' : dbMode === 'local' ? 'Local fallback mode' : 'Checking'}
+              </div>
+              {dbDetail ? <div className="mt-1 text-xs text-slate-500">Status: {dbDetail}</div> : null}
+            </div>
             <div>
               <div className="text-sm text-slate-400 mb-2">Plex Integration</div>
               <div className={`flex items-center gap-2 ${
@@ -737,6 +825,21 @@ export default function AdminSettingsPage() {
                   : 'Not Configured'}
               </div>
             </div>
+            <div>
+              <div className="text-sm text-slate-400 mb-2">Inbound Inbox</div>
+              <div className={`flex items-center gap-2 ${
+                settings.imap_host && settings.imap_user && settings.imap_pass
+                  ? 'text-emerald-400'
+                  : 'text-rose-400'
+              }`}>
+                <div className={`w-2 h-2 rounded-full ${
+                  settings.imap_host && settings.imap_user && settings.imap_pass
+                    ? 'bg-emerald-500'
+                    : 'bg-rose-500'
+                }`}></div>
+                {settings.imap_host && settings.imap_user && settings.imap_pass ? 'Configured' : 'Not Configured'}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -757,3 +860,4 @@ export default function AdminSettingsPage() {
     </main>
   )
 }
+

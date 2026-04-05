@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { getStatus } from '@/lib/pricing'
+import { polishWritingDraft } from '@/lib/writingAssistant'
 
 type Customer = { id: string; full_name: string; email: string; status: string; next_due_date: string; plan?: string; streams?: number }
 type PlexLinkRow = {
@@ -18,6 +19,20 @@ type PlexPreview = {
   totals: { total: number; linked: number; mismatched: number; not_in_crm: number; missing_plex_email: number }
   rows: PlexLinkRow[]
   emails: string[]
+}
+type InboxMessage = {
+  id: string
+  uid: number
+  fromEmail: string
+  fromName: string
+  subject: string
+  date: string | null
+  text: string
+  html: string
+  preview: string
+  matchedCustomerEmail: string | null
+  matchedCustomerName: string | null
+  serviceScore: number
 }
 
 export default function AdminEmailPage(){
@@ -36,9 +51,14 @@ export default function AdminEmailPage(){
   const [plexFilter, setPlexFilter] = useState<'all'|'mismatch'|'not_in_crm'>('all')
   const [includeNotInCrm, setIncludeNotInCrm] = useState(false)
   const [confirmingSync, setConfirmingSync] = useState(false)
+  const [inbox, setInbox] = useState<InboxMessage[]>([])
+  const [inboxLoading, setInboxLoading] = useState(false)
+  const [inboxError, setInboxError] = useState('')
+  const [selectedInboxId, setSelectedInboxId] = useState<string | null>(null)
 
   useEffect(()=>{ 
     loadCustomers()
+    loadInbox()
   },[])
 
   async function loadCustomers() {
@@ -51,6 +71,28 @@ export default function AdminEmailPage(){
       } 
     } catch{} 
     finally { setLoading(false) }
+  }
+
+  async function loadInbox() {
+    try {
+      setInboxLoading(true)
+      setInboxError('')
+      const res = await fetch('/api/admin/email/inbox?serviceOnly=true&limit=40')
+      const data = await res.json().catch(()=>({}))
+      if (!res.ok) {
+        setInboxError(data?.error || 'Failed to load inbox')
+        setInbox([])
+        return
+      }
+      const rows = Array.isArray(data?.messages) ? data.messages : []
+      setInbox(rows)
+      setSelectedInboxId((current) => current && rows.some((row: InboxMessage) => row.id === current) ? current : rows[0]?.id || null)
+    } catch (e: any) {
+      setInboxError(e?.message || 'Failed to load inbox')
+      setInbox([])
+    } finally {
+      setInboxLoading(false)
+    }
   }
 
   async function syncPlex() {
@@ -220,12 +262,20 @@ export default function AdminEmailPage(){
   }
 
   const selectedCount = Object.keys(selected).length
+  const selectedInbox = useMemo(() => inbox.find(m => m.id === selectedInboxId) || null, [inbox, selectedInboxId])
 
   return (
     <main className="p-6 max-w-[95vw] mx-auto">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-3xl font-bold gradient-text">Email Center</h2>
         <div className="flex gap-3">
+          <button 
+            onClick={loadInbox} 
+            disabled={inboxLoading}
+            className="btn-ghost text-xs border border-slate-700 hover:bg-slate-800"
+          >
+            {inboxLoading ? 'Refreshing inbox...' : 'Refresh Inbox'}
+          </button>
           <button 
             onClick={syncPlex} 
             disabled={syncing}
@@ -336,6 +386,7 @@ export default function AdminEmailPage(){
                   placeholder="Important Update..." 
                   value={subject} 
                   onChange={e=> setSubject(e.target.value)} 
+                  spellCheck
                 />
               </div>
               
@@ -346,6 +397,7 @@ export default function AdminEmailPage(){
                   placeholder="Write your message here..." 
                   value={body} 
                   onChange={e=> setBody(e.target.value)} 
+                  spellCheck
                 />
               </div>
 
@@ -357,15 +409,118 @@ export default function AdminEmailPage(){
                     </span>
                   )}
                 </div>
-                <button 
-                  className="btn px-8" 
-                  onClick={send} 
-                  disabled={sending || !subject || !body || selectedCount === 0}
-                >
-                  {sending ? 'Sending...' : 'Send Email'}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    className="btn-outline px-5"
+                    onClick={() => {
+                      setSubject((current) => polishWritingDraft(current))
+                      setBody((current) => polishWritingDraft(current))
+                    }}
+                    disabled={!subject && !body}
+                  >
+                    Polish Draft
+                  </button>
+                  <button 
+                    className="btn px-8" 
+                    onClick={send} 
+                    disabled={sending || !subject || !body || selectedCount === 0}
+                  >
+                    {sending ? 'Sending...' : 'Send Email'}
+                  </button>
+                </div>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-12 gap-6 mt-6">
+        <div className="lg:col-span-5">
+          <div className="glass rounded-2xl overflow-hidden">
+            <div className="p-4 border-b border-slate-700/50 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-200">Customer Reply Inbox</h3>
+                <p className="text-xs text-slate-400">Matched to CRM emails and filtered by service-related keywords.</p>
+              </div>
+              <div className="text-xs text-cyan-300">{inbox.length} found</div>
+            </div>
+            <div className="max-h-[34rem] overflow-y-auto">
+              {inboxLoading && <div className="p-4 text-sm text-slate-400">Loading inbox...</div>}
+              {!inboxLoading && inboxError && <div className="p-4 text-sm text-rose-400">{inboxError}</div>}
+              {!inboxLoading && !inboxError && inbox.length === 0 && (
+                <div className="p-4 text-sm text-slate-500">No matched service replies found.</div>
+              )}
+              {inbox.map(mail => (
+                <button
+                  key={mail.id}
+                  onClick={() => setSelectedInboxId(mail.id)}
+                  className={`w-full text-left p-4 border-b border-slate-800/60 transition-colors ${
+                    selectedInboxId === mail.id ? 'bg-cyan-500/10' : 'hover:bg-slate-800/30'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="font-medium text-slate-200 truncate">{mail.matchedCustomerName || mail.fromName || mail.fromEmail}</div>
+                    <div className="text-[10px] text-slate-500 whitespace-nowrap">score {mail.serviceScore}</div>
+                  </div>
+                  <div className="text-xs text-slate-400 truncate mt-1">{mail.subject || '(No subject)'}</div>
+                  <div className="text-[11px] text-slate-500 truncate mt-1">
+                    {mail.fromEmail}
+                    {mail.date ? ` • ${new Date(mail.date).toLocaleString('en-GB')}` : ''}
+                  </div>
+                  <div className="text-xs text-slate-500 line-clamp-2 mt-2">{mail.preview}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="lg:col-span-7">
+          <div className="glass rounded-2xl h-full min-h-[24rem] flex flex-col">
+            <div className="p-4 border-b border-slate-700/50">
+              <h3 className="text-lg font-semibold text-slate-200">Reply Preview</h3>
+              <p className="text-xs text-slate-400">Only emails from known customers with likely service-related content are shown here.</p>
+            </div>
+            {!selectedInbox ? (
+              <div className="p-6 text-sm text-slate-500">Select a customer email reply to view it.</div>
+            ) : (
+              <div className="p-6 space-y-4 overflow-y-auto">
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div className="glass p-4 rounded-xl">
+                    <div className="text-xs text-slate-500 uppercase tracking-wider">Customer</div>
+                    <div className="text-slate-200 font-medium mt-1">{selectedInbox.matchedCustomerName || 'Unknown customer'}</div>
+                    <div className="text-sm text-slate-400 mt-1">{selectedInbox.matchedCustomerEmail || selectedInbox.fromEmail}</div>
+                  </div>
+                  <div className="glass p-4 rounded-xl">
+                    <div className="text-xs text-slate-500 uppercase tracking-wider">Email Match</div>
+                    <div className="text-slate-200 font-medium mt-1">{selectedInbox.fromEmail}</div>
+                    <div className="text-sm text-cyan-300 mt-1">Service score: {selectedInbox.serviceScore}</div>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500 uppercase tracking-wider">Subject</div>
+                  <div className="text-slate-100 text-lg mt-1">{selectedInbox.subject || '(No subject)'}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500 uppercase tracking-wider">Message</div>
+                  <div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-300 bg-slate-900/40 rounded-xl p-4 border border-slate-800">
+                    {selectedInbox.text || selectedInbox.preview || 'No plain text body found.'}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  {selectedInbox.matchedCustomerEmail && (
+                    <button
+                      className="btn-xs"
+                      onClick={() => setSelected(s => ({ ...s, [selectedInbox.matchedCustomerEmail as string]: true }))}
+                    >
+                      Select customer in composer
+                    </button>
+                  )}
+                  <button className="btn-xs-outline" onClick={() => { setSubject(selectedInbox.subject ? `Re: ${selectedInbox.subject}` : 'Re: Your message'); setBody(`Hi ${selectedInbox.matchedCustomerName || ''},\n\n`); }}>
+                    Start reply draft
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
