@@ -56,24 +56,6 @@ export default function CustomerPortal() {
         }
       } catch {}
 
-      if (typeof window !== 'undefined' && sessionStorage.getItem('customerDemo') === 'true') {
-        const raw = localStorage.getItem('customerProfile')
-        if (raw) {
-          const p = JSON.parse(raw)
-          setCustomer((c) => ({
-            ...c,
-            fullName: p.fullName || c.fullName,
-            email: p.email || c.email,
-            plan: p.plan || c.plan,
-            streams: Math.min(5, p.streams || c.streams),
-            startDate: new Date().toISOString(),
-            nextDueDate: p.nextDueDate || calculateNextDue(p.plan || 'monthly', new Date()).toISOString(),
-          }))
-        }
-        setAuthState('ready')
-        return
-      }
-
       const s = getSupabase()
       if (!s) {
         setAuthState('unauth')
