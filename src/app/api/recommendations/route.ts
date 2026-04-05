@@ -58,6 +58,11 @@ function normalizeSort(raw: string | null) {
   return { field, ascending }
 }
 
+async function recommendationsHaveUpdatedAt(s: NonNullable<ReturnType<typeof createServiceClient>>) {
+  const { error } = await s.from('recommendations').select('updated_at').limit(0)
+  return !error
+}
+
 function formatLatestComment(comment: any) {
   if (!comment?.content) return ''
   return String(comment.content).replace(/\s+/g, ' ').trim().slice(0, 180)
@@ -74,6 +79,7 @@ export async function GET(req: Request){
     const status = String(searchParams.get('status') || '').trim()
     const kind = String(searchParams.get('kind') || '').trim()
     const { field, ascending } = normalizeSort(searchParams.get('sort'))
+    const supportsUpdatedAt = await recommendationsHaveUpdatedAt(s)
 
     let query = s.from('recommendations').select('*')
 
@@ -86,7 +92,8 @@ export async function GET(req: Request){
     if (status) query = query.eq('status', status)
     if (kind) query = query.eq('kind', kind)
 
-    const { data, error } = await query.order(field, { ascending })
+    const sortField = field === 'updated_at' && !supportsUpdatedAt ? 'created_at' : field
+    const { data, error } = await query.order(sortField, { ascending })
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
     const rows = data || []
@@ -179,6 +186,7 @@ export async function POST(req: Request){
 
     const plexUsername = String((cust as any).notes || '').match(/Plex:\s*([^\n]+)/i)?.[1]?.trim() || ''
     const now = new Date().toISOString()
+    const supportsUpdatedAt = await recommendationsHaveUpdatedAt(s)
     const payload: any = {
       id: crypto.randomUUID(),
       url,
@@ -198,8 +206,8 @@ export async function POST(req: Request){
       kind,
       status: 'pending',
       created_at: now,
-      updated_at: now,
     }
+    if (supportsUpdatedAt) payload.updated_at = now
 
     const { data, error } = await s.from('recommendations').insert([payload]).select('*').single()
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })

@@ -123,6 +123,11 @@ async function enrichItems(s: ReturnType<typeof createServiceClient>, rows: any[
   })
 }
 
+async function recommendationsHaveUpdatedAt(s: NonNullable<ReturnType<typeof createServiceClient>>) {
+  const { error } = await s.from('recommendations').select('updated_at').limit(0)
+  return !error
+}
+
 export async function GET() {
   const isAdmin = cookies().get('admin_session')?.value === '1'
   if (!isAdmin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -130,10 +135,12 @@ export async function GET() {
   const s = createServiceClient()
   if (!s) return NextResponse.json({ error: 'Service unavailable' }, { status: 503 })
 
+  const supportsUpdatedAt = await recommendationsHaveUpdatedAt(s)
+  const sortField = supportsUpdatedAt ? 'updated_at' : 'created_at'
   const { data, error } = await s
     .from('recommendations')
     .select('*')
-    .order('updated_at', { ascending: false })
+    .order(sortField, { ascending: false })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   const items = await enrichItems(s, data || [])
@@ -163,9 +170,12 @@ export async function PUT(req: Request) {
 
     const nextStatus = cleanStatus || existing.status || 'pending'
     const now = new Date().toISOString()
+    const supportsUpdatedAt = await recommendationsHaveUpdatedAt(s)
+    const updatePayload: any = { status: nextStatus }
+    if (supportsUpdatedAt) updatePayload.updated_at = now
     const { data: rec, error: updateErr } = await s
       .from('recommendations')
-      .update({ status: nextStatus, updated_at: now })
+      .update(updatePayload)
       .eq('id', cleanId)
       .select('*')
       .single()
