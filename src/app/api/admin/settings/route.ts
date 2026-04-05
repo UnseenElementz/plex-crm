@@ -14,6 +14,37 @@ function svc(){
   })
 }
 
+function envString(key: string) {
+  return String(process.env[key] || '').trim()
+}
+
+function envBool(key: string, fallback = false) {
+  const value = envString(key)
+  if (!value) return fallback
+  return value.toLowerCase() === 'true'
+}
+
+function getEnvInboxSettings() {
+  const host = envString('INBOUND_IMAP_HOST')
+  const port = envString('INBOUND_IMAP_PORT') || '993'
+  const user = envString('INBOUND_IMAP_USER')
+  const pass = envString('INBOUND_IMAP_PASS')
+  const secure = envBool('INBOUND_IMAP_SECURE', true)
+  const mailbox = envString('INBOUND_IMAP_MAILBOX') || 'INBOX'
+  const keywords = envString('INBOUND_IMAP_SERVICE_KEYWORDS')
+  const configured = Boolean(host && user && pass)
+
+  return {
+    configured,
+    host,
+    port,
+    user,
+    secure,
+    mailbox,
+    keywords,
+  }
+}
+
 export async function GET(){
   const supabase = svc()
   let dbStatus = 'init'
@@ -30,12 +61,33 @@ export async function GET(){
     error = r.error || null
     dbStatus = error ? 'error' : (data ? 'found' : 'empty')
     if (error) console.error('Supabase DB Error:', error)
+    const envInbox = getEnvInboxSettings()
+
+    if (envInbox.configured) {
+      data = {
+        ...(data || {}),
+        imap_host: data?.imap_host ?? envInbox.host,
+        imap_port: data?.imap_port ?? envInbox.port,
+        imap_user: data?.imap_user ?? envInbox.user,
+        imap_secure: data?.imap_secure ?? envInbox.secure,
+        imap_mailbox: data?.imap_mailbox ?? envInbox.mailbox,
+        service_email_keywords: data?.service_email_keywords ?? envInbox.keywords,
+        imap_source: 'env',
+        imap_configured: true,
+      }
+      if (cookies().get('admin_session')?.value === '1') {
+        data.imap_pass = '__ENV_CONFIGURED__'
+      }
+    } else if (data) {
+      data.imap_source = 'database'
+      data.imap_configured = Boolean(data.imap_host && data.imap_user && data.imap_pass)
+    }
 
     const isAdmin = cookies().get('admin_session')?.value === '1'
     if (!data && error) return NextResponse.json({ error: error.message }, { status: 404, headers: { 'X-DB-Status': dbStatus } })
     
     const safe: any = {}
-    const allow = ['company_name','yearly_price','stream_yearly_price','movies_only_price','tv_only_price','downloads_price','payment_lock','chat_online','chat_availability','chat_idle_timeout_minutes','canonical_host','hero_image_url','bg_music_url','bg_music_volume','bg_music_enabled','plex_token','plex_server_url','imap_host','imap_port','imap_user','imap_secure','imap_mailbox','service_email_keywords']
+    const allow = ['company_name','yearly_price','stream_yearly_price','movies_only_price','tv_only_price','downloads_price','payment_lock','chat_online','chat_availability','chat_idle_timeout_minutes','canonical_host','hero_image_url','bg_music_url','bg_music_volume','bg_music_enabled','plex_token','plex_server_url','imap_host','imap_port','imap_user','imap_secure','imap_mailbox','service_email_keywords','imap_source','imap_configured']
     for (const k of allow){ if (data && data[k] !== undefined) safe[k] = data[k] }
     
     return NextResponse.json(isAdmin ? (data || {}) : safe, { 
@@ -72,6 +124,7 @@ export async function PUT(request: Request){
     for (const key of allowedKeys) {
       if (payload[key] !== undefined) row[key] = payload[key]
     }
+    const envInbox = getEnvInboxSettings()
 
     if (row.plex_server_url !== undefined) {
       const raw = String(row.plex_server_url || '').trim()
@@ -93,7 +146,21 @@ export async function PUT(request: Request){
     let dbError = null
 
     // Ensure only one row exists and it is ID 1
-    const { data: existing } = await supabase.from('admin_settings').select('id').eq('id', 1).maybeSingle()
+    const { data: existing } = await supabase.from('admin_settings').select('*').eq('id', 1).maybeSingle()
+    const supportsInboxColumns = existing
+      ? ['imap_host', 'imap_port', 'imap_user', 'imap_pass', 'imap_secure', 'imap_mailbox', 'service_email_keywords'].every((key) => Object.prototype.hasOwnProperty.call(existing, key))
+      : false
+    if (!supportsInboxColumns) {
+      delete row.imap_host
+      delete row.imap_port
+      delete row.imap_user
+      delete row.imap_pass
+      delete row.imap_secure
+      delete row.imap_mailbox
+      delete row.service_email_keywords
+    } else if (envInbox.configured && row.imap_pass === '__ENV_CONFIGURED__') {
+      delete row.imap_pass
+    }
     
     if (!existing) {
         await supabase.from('admin_settings').delete().neq('id', 1)
@@ -124,6 +191,20 @@ export async function PUT(request: Request){
     if (finalError) console.error('Final fetch error:', finalError)
     if (finalData) {
         Object.assign(row, finalData)
+    }
+    if (envInbox.configured) {
+      row.imap_host = row.imap_host ?? envInbox.host
+      row.imap_port = row.imap_port ?? envInbox.port
+      row.imap_user = row.imap_user ?? envInbox.user
+      row.imap_pass = '__ENV_CONFIGURED__'
+      row.imap_secure = row.imap_secure ?? envInbox.secure
+      row.imap_mailbox = row.imap_mailbox ?? envInbox.mailbox
+      row.service_email_keywords = row.service_email_keywords ?? envInbox.keywords
+      row.imap_source = 'env'
+      row.imap_configured = true
+    } else {
+      row.imap_source = supportsInboxColumns ? 'database' : 'unavailable'
+      row.imap_configured = Boolean(row.imap_host && row.imap_user && row.imap_pass)
     }
 
     return NextResponse.json({ ok: true, dbOk, dbError, settings: row }, { 

@@ -15,6 +15,22 @@ function parseBool(value: unknown, fallback = false) {
   return String(value).toLowerCase() === 'true'
 }
 
+function envString(key: string) {
+  return String(process.env[key] || '').trim()
+}
+
+function getEnvInboxConfig() {
+  return {
+    host: envString('INBOUND_IMAP_HOST'),
+    port: Number(envString('INBOUND_IMAP_PORT') || 993),
+    secure: parseBool(envString('INBOUND_IMAP_SECURE'), true),
+    user: envString('INBOUND_IMAP_USER'),
+    pass: envString('INBOUND_IMAP_PASS'),
+    mailbox: envString('INBOUND_IMAP_MAILBOX') || 'INBOX',
+    service_keywords: envString('INBOUND_IMAP_SERVICE_KEYWORDS'),
+  }
+}
+
 export async function GET(request: Request) {
   try {
     if (cookies().get('admin_session')?.value !== '1') {
@@ -38,14 +54,15 @@ export async function GET(request: Request) {
       settings = raw ? JSON.parse(decodeURIComponent(raw)) : null
     }
 
+    const envConfig = getEnvInboxConfig()
     const config: MailboxConfig = {
-      host: String(settings?.imap_host || '').trim(),
-      port: Number(settings?.imap_port || 993),
-      secure: parseBool(settings?.imap_secure, true),
-      user: String(settings?.imap_user || '').trim(),
-      pass: String(settings?.imap_pass || '').trim(),
-      mailbox: String(settings?.imap_mailbox || 'INBOX').trim() || 'INBOX',
-      service_keywords: String(settings?.service_email_keywords || '').trim(),
+      host: String(settings?.imap_host || envConfig.host || '').trim(),
+      port: Number(settings?.imap_port || envConfig.port || 993),
+      secure: settings?.imap_secure !== undefined ? parseBool(settings?.imap_secure, true) : envConfig.secure,
+      user: String(settings?.imap_user || envConfig.user || '').trim(),
+      pass: String(settings?.imap_pass || envConfig.pass || '').trim(),
+      mailbox: String(settings?.imap_mailbox || envConfig.mailbox || 'INBOX').trim() || 'INBOX',
+      service_keywords: String(settings?.service_email_keywords || envConfig.service_keywords || '').trim(),
     }
 
     if (!config.host || !config.user || !config.pass) {

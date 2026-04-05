@@ -37,6 +37,8 @@ export default function AdminSettingsPage() {
     imap_mailbox: 'INBOX',
     service_email_keywords: 'plex,stream,service,payment,renewal,buffer,login,support,subscription'
   })
+  const [imapConfigured, setImapConfigured] = useState(false)
+  const [imapSource, setImapSource] = useState<'database' | 'env' | 'unavailable'>('unavailable')
   const [loading, setLoading] = useState(true) // Start as true to wait for loadSettings
   const [saveLoading, setSaveLoading] = useState(false)
   const [testMsg, setTestMsg] = useState('')
@@ -172,6 +174,8 @@ export default function AdminSettingsPage() {
         setSupabaseStatus(isDatabaseMode ? 'connected' : 'error')
         setDbMode(isDatabaseMode ? 'database' : 'local')
         setDbDetail(rawDbStatus)
+        setImapConfigured(Boolean(data.imap_configured ?? (data.imap_host && data.imap_user && data.imap_pass)))
+        setImapSource((data.imap_source as 'database' | 'env' | 'unavailable') || 'database')
         
         setSettings({
           smtp_host: data.smtp_host ?? '',
@@ -201,7 +205,7 @@ export default function AdminSettingsPage() {
           imap_host: data.imap_host ?? '',
           imap_port: data.imap_port?.toString() ?? '993',
           imap_user: data.imap_user ?? '',
-          imap_pass: data.imap_pass ?? '',
+          imap_pass: data.imap_source === 'env' ? '' : (data.imap_pass ?? ''),
           imap_secure: data.imap_secure !== undefined ? Boolean(data.imap_secure) : true,
           imap_mailbox: data.imap_mailbox ?? 'INBOX',
           service_email_keywords: data.service_email_keywords ?? 'plex,stream,service,payment,renewal,buffer,login,support,subscription'
@@ -337,11 +341,13 @@ export default function AdminSettingsPage() {
                 imap_host: s.imap_host ?? '',
                 imap_port: s.imap_port?.toString() ?? '993',
                 imap_user: s.imap_user ?? '',
-                imap_pass: s.imap_pass ?? '',
+                imap_pass: s.imap_source === 'env' ? '' : (s.imap_pass ?? ''),
                 imap_secure: s.imap_secure !== undefined ? Boolean(s.imap_secure) : true,
                 imap_mailbox: s.imap_mailbox ?? 'INBOX',
                 service_email_keywords: s.service_email_keywords ?? 'plex,stream,service,payment,renewal,buffer,login,support,subscription'
             })
+            setImapConfigured(Boolean(s.imap_configured ?? (s.imap_host && s.imap_user && s.imap_pass)))
+            setImapSource((s.imap_source as 'database' | 'env' | 'unavailable') || 'database')
         }
 
         try{ await fetch('/api/admin/auth/upsert', { method:'POST' }) } catch{}
@@ -518,27 +524,27 @@ export default function AdminSettingsPage() {
           <div className="grid md:grid-cols-2 gap-4">
             <div>
               <label className="label">IMAP Host</label>
-              <input className="input" placeholder="imap.gmail.com" value={settings.imap_host} onChange={e => setSettings({ ...settings, imap_host: e.target.value })} />
+              <input className="input" placeholder="imap.gmail.com" value={settings.imap_host} readOnly={imapSource === 'env'} onChange={e => setSettings({ ...settings, imap_host: e.target.value })} />
             </div>
             <div>
               <label className="label">IMAP Port</label>
-              <input className="input" placeholder="993" value={settings.imap_port} onChange={e => setSettings({ ...settings, imap_port: e.target.value })} />
+              <input className="input" placeholder="993" value={settings.imap_port} readOnly={imapSource === 'env'} onChange={e => setSettings({ ...settings, imap_port: e.target.value })} />
             </div>
             <div>
               <label className="label">IMAP Username</label>
-              <input className="input" placeholder="your-email@gmail.com" value={settings.imap_user} onChange={e => setSettings({ ...settings, imap_user: e.target.value })} />
+              <input className="input" placeholder="your-email@gmail.com" value={settings.imap_user} readOnly={imapSource === 'env'} onChange={e => setSettings({ ...settings, imap_user: e.target.value })} />
             </div>
             <div>
               <label className="label">IMAP Password / App Password</label>
-              <input className="input" type="password" placeholder="Gmail app password" value={settings.imap_pass} onChange={e => setSettings({ ...settings, imap_pass: e.target.value })} />
+              <input className="input" type="password" placeholder={imapSource === 'env' ? 'Stored securely in server env' : 'Gmail app password'} value={settings.imap_pass} readOnly={imapSource === 'env'} onChange={e => setSettings({ ...settings, imap_pass: e.target.value })} />
             </div>
             <div>
               <label className="label">Mailbox</label>
-              <input className="input" placeholder="INBOX" value={settings.imap_mailbox} onChange={e => setSettings({ ...settings, imap_mailbox: e.target.value })} />
+              <input className="input" placeholder="INBOX" value={settings.imap_mailbox} readOnly={imapSource === 'env'} onChange={e => setSettings({ ...settings, imap_mailbox: e.target.value })} />
             </div>
             <div className="flex items-end">
               <label className="inline-flex items-center gap-2">
-                <input type="checkbox" checked={settings.imap_secure} onChange={e => setSettings({ ...settings, imap_secure: e.target.checked })} />
+                <input type="checkbox" checked={settings.imap_secure} disabled={imapSource === 'env'} onChange={e => setSettings({ ...settings, imap_secure: e.target.checked })} />
                 <span className="text-xs text-slate-400">Use secure IMAP</span>
               </label>
             </div>
@@ -548,9 +554,11 @@ export default function AdminSettingsPage() {
                 className="input"
                 placeholder="plex,stream,service,payment,renewal,buffer,login,support"
                 value={settings.service_email_keywords}
+                readOnly={imapSource === 'env'}
                 onChange={e => setSettings({ ...settings, service_email_keywords: e.target.value })}
               />
               <div className="text-xs text-slate-500 mt-1">Only customer replies containing one of these keywords will show in the website inbox.</div>
+              {imapSource === 'env' ? <div className="text-xs text-cyan-300 mt-2">This inbox is secured in server environment variables, so the app password is not stored in the database.</div> : null}
             </div>
           </div>
         </div>
@@ -828,16 +836,16 @@ export default function AdminSettingsPage() {
             <div>
               <div className="text-sm text-slate-400 mb-2">Inbound Inbox</div>
               <div className={`flex items-center gap-2 ${
-                settings.imap_host && settings.imap_user && settings.imap_pass
+                imapConfigured
                   ? 'text-emerald-400'
                   : 'text-rose-400'
               }`}>
                 <div className={`w-2 h-2 rounded-full ${
-                  settings.imap_host && settings.imap_user && settings.imap_pass
+                  imapConfigured
                     ? 'bg-emerald-500'
                     : 'bg-rose-500'
                 }`}></div>
-                {settings.imap_host && settings.imap_user && settings.imap_pass ? 'Configured' : 'Not Configured'}
+                {imapConfigured ? (imapSource === 'env' ? 'Configured securely via server env' : 'Configured') : 'Not Configured'}
               </div>
             </div>
           </div>
