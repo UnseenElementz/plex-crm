@@ -5,8 +5,8 @@ import dynamic from 'next/dynamic'
 import Script from 'next/script'
 
 export const metadata = {
-  title: 'Plex CRM',
-  description: 'CRM management for Plex subscriptions'
+  title: 'Streamz R Us',
+  description: 'Private media hosting, support, and customer account management.'
 }
 
 export default function RootLayout({ children }: { children: ReactNode }) {

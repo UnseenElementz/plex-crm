@@ -1,21 +1,12 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
-import { cookies } from 'next/headers'
 import { getStatus } from '@/lib/pricing'
 import { sendCustomEmail } from '@/lib/email'
-
-function svc(){
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY as string
-  if (!url || !key) return null
-  return createClient(url, key)
-}
+import { createServiceClient, getRequester } from '@/lib/serverSupabase'
 
 function ensureActiveCustomer(nextDue: any, subscriptionStatus: any): boolean {
   if (String(subscriptionStatus || '').toLowerCase() === 'inactive') return false
   if (!nextDue) return false
   const statusLabel = getStatus(new Date(nextDue))
-  // Accept both 'Active' and 'Due Soon' for access
   return statusLabel === 'Active' || statusLabel === 'Due Soon' || statusLabel === 'Due Today'
 }
 
@@ -26,41 +17,124 @@ function anonymizeEmail(email: string) {
   return `${user.substring(0, 2)}***@${domain}`
 }
 
+function normalizeTitle(input: string, fallback: string) {
+  const clean = String(input || '').trim()
+  return clean || fallback
+}
+
+function buildDescription(input: {
+  kind: 'request' | 'issue'
+  previewDescription: string
+  customerName: string
+  email: string
+  details: string
+  season: string
+  episode: string
+  plexUsername: string
+}) {
+  const sections: string[] = []
+  if (input.previewDescription) sections.push(input.previewDescription)
+
+  const meta: string[] = []
+  meta.push(`Submitted by: ${input.customerName || input.email}`)
+  meta.push(`Contact: ${input.email}`)
+  if (input.plexUsername) meta.push(`Username: ${input.plexUsername}`)
+  if (input.kind === 'issue' && input.season) meta.push(`Season: ${input.season}`)
+  if (input.kind === 'issue' && input.episode) meta.push(`Episode: ${input.episode}`)
+  sections.push(meta.join('\n'))
+
+  if (input.details) {
+    sections.push(input.details)
+  }
+
+  return sections.filter(Boolean).join('\n\n')
+}
+
+function normalizeSort(raw: string | null) {
+  const [fieldRaw, orderRaw] = String(raw || 'updated_at.desc').split('.')
+  const allowed = new Set(['created_at', 'updated_at', 'title', 'status'])
+  const field = allowed.has(fieldRaw) ? fieldRaw : 'updated_at'
+  const ascending = orderRaw === 'asc'
+  return { field, ascending }
+}
+
+function formatLatestComment(comment: any) {
+  if (!comment?.content) return ''
+  return String(comment.content).replace(/\s+/g, ' ').trim().slice(0, 180)
+}
+
 export async function GET(req: Request){
   try{
-    const s = svc()
-    if (!s) return NextResponse.json({ items: [] })
+    const s = createServiceClient()
+    if (!s) return NextResponse.json({ error: 'Service unavailable' }, { status: 503 })
 
+    const requester = await getRequester(req)
     const { searchParams } = new URL(req.url)
-    const filterEmail = searchParams.get('email')
-    const status = searchParams.get('status')
-    const kind = searchParams.get('kind')
-    const sort = searchParams.get('sort') || 'created_at.desc'
+    const filterEmail = String(searchParams.get('email') || '').trim().toLowerCase()
+    const status = String(searchParams.get('status') || '').trim()
+    const kind = String(searchParams.get('kind') || '').trim()
+    const { field, ascending } = normalizeSort(searchParams.get('sort'))
 
     let query = s.from('recommendations').select('*')
 
     if (filterEmail) {
+      if (!requester.isAdmin && requester.email !== filterEmail) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      }
       query = query.eq('submitter_email', filterEmail)
     }
-    if (status) {
-      query = query.eq('status', status)
-    }
-    if (kind) {
-      query = query.eq('kind', kind)
-    }
+    if (status) query = query.eq('status', status)
+    if (kind) query = query.eq('kind', kind)
 
-    const [field, order] = sort.split('.')
-    query = query.order(field, { ascending: order === 'asc' })
-
-    const { data, error } = await query
-
+    const { data, error } = await query.order(field, { ascending })
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    // Anonymize emails for shared visibility
-    const items = (data || []).map(item => ({
-      ...item,
-      submitter_email: anonymizeEmail(item.submitter_email)
-    }))
+    const rows = data || []
+    const ids = rows.map((item: any) => item.id).filter(Boolean)
+    const [commentsRes, likesRes] = await Promise.all([
+      ids.length
+        ? s
+            .from('recommendation_comments')
+            .select('id,recommendation_id,created_at,content,author_email')
+            .in('recommendation_id', ids)
+            .order('created_at', { ascending: true })
+        : Promise.resolve({ data: [], error: null } as any),
+      ids.length
+        ? s.from('recommendation_likes').select('id,recommendation_id,user_email').in('recommendation_id', ids)
+        : Promise.resolve({ data: [], error: null } as any),
+    ])
+
+    const commentMap = new Map<string, any[]>()
+    for (const comment of commentsRes.data || []) {
+      const key = String((comment as any).recommendation_id || '')
+      if (!commentMap.has(key)) commentMap.set(key, [])
+      commentMap.get(key)?.push(comment)
+    }
+
+    const likeMap = new Map<string, string[]>()
+    for (const like of likesRes.data || []) {
+      const key = String((like as any).recommendation_id || '')
+      if (!likeMap.has(key)) likeMap.set(key, [])
+      likeMap.get(key)?.push(String((like as any).user_email || '').trim().toLowerCase())
+    }
+
+    const items = rows.map((item: any) => {
+      const comments = commentMap.get(String(item.id)) || []
+      const likes = likeMap.get(String(item.id)) || []
+      const latestComment = comments[comments.length - 1]
+      const exactEmailVisible = requester.isAdmin || requester.email === String(item.submitter_email || '').trim().toLowerCase()
+
+      return {
+        ...item,
+        submitter_email: exactEmailVisible ? item.submitter_email : anonymizeEmail(item.submitter_email),
+        comments_count: comments.length,
+        likes_count: likes.length,
+        liked_by_me: requester.email ? likes.includes(requester.email) : false,
+        latest_comment_preview: formatLatestComment(latestComment),
+        latest_comment_at: latestComment?.created_at || null,
+        updated_at: item.updated_at || item.created_at,
+      }
+    })
 
     return NextResponse.json({ items })
   }catch(e:any){ return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 }) }
@@ -68,32 +142,26 @@ export async function GET(req: Request){
 
 export async function POST(req: Request){
   try{
+    const requester = await getRequester(req)
+    const authEmail = requester.email
+    if (!authEmail) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
     const b = await req.json().catch(()=>({}))
     const kind = String(b?.kind || 'request')
     if (kind !== 'request' && kind !== 'issue') return NextResponse.json({ error: 'invalid kind' }, { status: 400 })
 
     const url = String(b?.url || '').trim()
-    const title = String(b?.title || '').trim()
+    const title = normalizeTitle(String(b?.title || ''), kind === 'issue' ? 'Media issue report' : 'New media request')
     const description = String(b?.description || '').trim()
     const image = String(b?.image || '').trim()
-    const submitterEmail = String(b?.email || '').trim()
-    const token = String(b?.token || '').trim()
     const details = String(b?.details || '').trim()
     const season = String(b?.season || '').trim()
     const episode = String(b?.episode || '').trim()
 
     if (!url || !title) return NextResponse.json({ error: 'url and title required' }, { status: 400 })
-    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const s = svc()
+    const s = createServiceClient()
     if (!s) return NextResponse.json({ error: 'service unavailable' }, { status: 503 })
-
-    const { data: authData, error: authErr } = await s.auth.getUser(token)
-    const authEmail = authData?.user?.email || ''
-    if (authErr || !authEmail) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    if (submitterEmail && submitterEmail.toLowerCase() !== authEmail.toLowerCase()) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
 
     const { data: cust, error: custErr } = await s
       .from('customers')
@@ -101,63 +169,47 @@ export async function POST(req: Request){
       .eq('email', authEmail)
       .limit(1)
       .maybeSingle()
+
     if (custErr) return NextResponse.json({ error: custErr.message }, { status: 500 })
     if (!cust) return NextResponse.json({ error: 'Customer not found' }, { status: 403 })
-    const nextDue = (cust as any).next_payment_date
+
+    const nextDue = (cust as any).next_payment_date || (cust as any).next_due_date
     const isActive = ensureActiveCustomer(nextDue, (cust as any).subscription_status)
     if (!isActive) return NextResponse.json({ error: 'Active subscription required' }, { status: 403 })
 
     const plexUsername = String((cust as any).notes || '').match(/Plex:\s*([^\n]+)/i)?.[1]?.trim() || ''
-
-    const lines: string[] = []
-    lines.push(`Type: ${kind === 'issue' ? 'Issue Report' : 'Request'}`)
-    lines.push(`Customer: ${(cust as any).name || ''} <${authEmail}>`)
-    if (plexUsername) lines.push(`Plex: ${plexUsername}`)
-    if (kind === 'issue') {
-      if (season) lines.push(`Season: ${season}`)
-      if (episode) lines.push(`Episode: ${episode}`)
-    }
-    if (details) {
-      lines.push('')
-      lines.push(details)
-    }
-
+    const now = new Date().toISOString()
     const payload: any = {
       id: crypto.randomUUID(),
       url,
-      title: title, // Store clean title
-      description: [description, '', ...lines].filter(Boolean).join('\n'),
+      title,
+      description: buildDescription({
+        kind,
+        previewDescription: description,
+        customerName: String((cust as any).name || '').trim(),
+        email: authEmail,
+        details,
+        season,
+        episode,
+        plexUsername,
+      }),
       image,
       submitter_email: authEmail,
-      created_at: new Date().toISOString()
-    }
-    
-    // Check if columns exist before adding them to avoid errors
-    try {
-      const { data: cols } = await s.rpc('get_column_names', { tname: 'recommendations' })
-      if (cols && Array.isArray(cols)) {
-        if (cols.includes('kind')) payload.kind = kind
-        if (cols.includes('status')) payload.status = 'pending'
-      } else {
-        // Fallback for when RPC doesn't exist: try to detect via a simple query
-        const { error: colErr } = await s.from('recommendations').select('kind').limit(0)
-        if (!colErr) {
-          payload.kind = kind
-          payload.status = 'pending'
-        }
-      }
-    } catch {
-      // If check fails, we proceed without those columns (old schema)
+      kind,
+      status: 'pending',
+      created_at: now,
+      updated_at: now,
     }
 
     const { data, error } = await s.from('recommendations').insert([payload]).select('*').single()
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
     let settings: any = null
-    try{
-      const { data: sRow } = await s.from('admin_settings').select('*').single()
-      settings = sRow || null
-    }catch{}
+    try {
+      const { data: settingsRow } = await s.from('admin_settings').select('*').eq('id', 1).maybeSingle()
+      settings = settingsRow || null
+    } catch {}
+
     if (!settings || !settings.smtp_host || !settings.smtp_user || !settings.smtp_pass){
       return NextResponse.json({ ok: true, item: data, warned: 'SMTP not configured' })
     }
@@ -169,6 +221,7 @@ export async function POST(req: Request){
       SMTP_PASS: process.env.SMTP_PASS,
       SMTP_FROM: process.env.SMTP_FROM
     }
+
     process.env.SMTP_HOST = settings.smtp_host
     process.env.SMTP_PORT = settings.smtp_port || '587'
     process.env.SMTP_USER = settings.smtp_user
@@ -176,12 +229,27 @@ export async function POST(req: Request){
     process.env.SMTP_FROM = settings.smtp_from || settings.smtp_user
 
     const notifyTo = settings.smtp_from || settings.smtp_user
-    const subj = kind === 'issue'
-      ? `New Media Issue Report: ${title}`
-      : `New Request: ${title}`
-    const text = `${subj}\n\nLink: ${url}\n\n${lines.join('\n')}\n`
+    const companyName = String(settings.company_name || 'STREAMZ R US').trim() || 'STREAMZ R US'
+    const kindLabel = kind === 'issue' ? 'issue report' : 'request'
+    const subject = `${companyName}: New ${kindLabel}`
+    const text = [
+      `A customer has sent a new ${kindLabel}.`,
+      '',
+      `Title: ${title}`,
+      `Customer: ${String((cust as any).name || '').trim() || authEmail}`,
+      `Email: ${authEmail}`,
+      `Link: ${url}`,
+      season ? `Season: ${season}` : '',
+      episode ? `Episode: ${episode}` : '',
+      plexUsername ? `Username: ${plexUsername}` : '',
+      '',
+      details || description || 'No extra notes added.',
+    ]
+      .filter(Boolean)
+      .join('\n')
+
     try{
-      await sendCustomEmail([notifyTo], subj, text)
+      await sendCustomEmail([notifyTo], subject, text)
     } finally {
       Object.entries(originalEnv).forEach(([k,v])=>{ if (v !== undefined) (process.env as any)[k] = v as string; else delete (process.env as any)[k] })
     }

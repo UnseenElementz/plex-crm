@@ -11,10 +11,20 @@ export default function ResetPasswordPage(){
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [isValidSession, setIsValidSession] = useState(false)
+  const [companyName, setCompanyName] = useState('Streamz R Us')
   const router = useRouter()
 
   useEffect(() => {
     checkSession()
+    ;(async () => {
+      try {
+        const res = await fetch('/api/admin/settings')
+        if (res.ok) {
+          const data = await res.json()
+          if (data.company_name) setCompanyName(data.company_name)
+        }
+      } catch {}
+    })()
   }, [])
 
   async function checkSession() {
@@ -117,7 +127,7 @@ export default function ResetPasswordPage(){
       <div className="glass p-6 rounded-2xl w-full max-w-md">
         <div className="text-center mb-6">
           <Link href="/" className="text-2xl font-bold gradient-text mb-2 block">
-            Streamz R Us
+            {companyName}
           </Link>
           <h2 className="text-xl font-semibold text-slate-200">Set New Password</h2>
           <p className="text-slate-400 text-sm mt-2">

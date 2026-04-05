@@ -231,11 +231,11 @@ export default function AdminSettingsPage() {
       })
       const data = await res.json()
       if (res.ok) {
-        setTestMsg('✅ ' + data.message)
+        setTestMsg('Connected: ' + data.message)
       } else {
-        setTestMsg('❌ ' + (data.error || 'Failed'))
+        setTestMsg('Connection failed: ' + (data.error || 'Failed'))
       }
-    } catch (e) { setTestMsg('❌ Network error') }
+    } catch (e) { setTestMsg('Connection failed: Network error') }
     finally { setTesting(false); setTimeout(()=> setTestMsg(''), 5000) }
   }
 
@@ -304,7 +304,7 @@ export default function AdminSettingsPage() {
       } else if (body.dbOk === false) {
         setSupabaseStatus('error')
         setDbMode('local')
-        setMessage('Saved in local fallback mode. Database write failed: ' + (body.dbError || 'Check Supabase env and table setup.'))
+        setMessage('Database write failed: ' + (body.dbError || 'Check Supabase env and table setup.'))
       } else {
         setSupabaseStatus('connected')
         setDbMode('database')
@@ -410,7 +410,7 @@ export default function AdminSettingsPage() {
             }`}></div>
             <span className="text-sm text-slate-400">
               {supabaseStatus === 'connected' ? 'Database Connected' : 
-               supabaseStatus === 'error' ? 'Local Fallback Mode' : 'Checking...'}
+               supabaseStatus === 'error' ? 'Database Issue' : 'Checking...'}
             </span>
             <a href="/admin" className="btn-xs-outline ml-3">Back to Chat</a>
           </div>
@@ -784,7 +784,7 @@ export default function AdminSettingsPage() {
             <div className="bg-amber-500/20 border border-amber-500/30 rounded-lg p-4 mb-4">
               <h3 className="font-semibold text-amber-300 mb-2">Database Not Connected</h3>
               <p className="text-amber-200 text-sm mb-3">
-                The admin is running in local fallback mode. Settings and updates can still work in-browser, but customer auth, synced CRM data, and full Plex tooling need Supabase env vars.
+                The app cannot reach the database right now. Customer auth, synced CRM data, and full Plex tooling all depend on a working Supabase connection.
               </p>
               <ol className="text-amber-200 text-sm space-y-1 list-decimal list-inside">
                 <li>Go to your Supabase project dashboard</li>
@@ -801,7 +801,7 @@ export default function AdminSettingsPage() {
               <div className="text-sm text-slate-400 mb-2">Settings Storage</div>
               <div className={`flex items-center gap-2 ${dbMode === 'database' ? 'text-emerald-400' : 'text-amber-300'}`}>
                 <div className={`w-2 h-2 rounded-full ${dbMode === 'database' ? 'bg-emerald-500' : 'bg-amber-400'}`}></div>
-                {dbMode === 'database' ? 'Database mode' : dbMode === 'local' ? 'Local fallback mode' : 'Checking'}
+                {dbMode === 'database' ? 'Database mode' : dbMode === 'local' ? 'Connection issue' : 'Checking'}
               </div>
               {dbDetail ? <div className="mt-1 text-xs text-slate-500">Status: {dbDetail}</div> : null}
             </div>

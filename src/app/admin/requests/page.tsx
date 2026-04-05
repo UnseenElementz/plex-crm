@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { Check, Trash2, ExternalLink, MessageSquare, AlertCircle, Clock } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { CheckCircle2, ExternalLink, Loader2, MessageSquare, RefreshCw, Send, Trash2 } from 'lucide-react'
 
-interface Recommendation {
+type Recommendation = {
   id: string
   url: string
   title: string
@@ -13,207 +13,368 @@ interface Recommendation {
   kind: 'request' | 'issue'
   status: 'pending' | 'in-progress' | 'done'
   created_at: string
+  updated_at?: string
+  comments_count?: number
+  likes_count?: number
+  latest_comment_preview?: string
+}
+
+type ThreadComment = {
+  id: string
+  content: string
+  created_at: string
+  role?: 'admin' | 'customer' | 'system'
+  author_label?: string
+}
+
+const statusTone: Record<string, string> = {
+  pending: 'border-slate-500/20 bg-slate-500/10 text-slate-300',
+  'in-progress': 'border-cyan-400/20 bg-cyan-400/10 text-cyan-200',
+  done: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200',
 }
 
 export default function AdminRequestsPage() {
   const [items, setItems] = useState<Recommendation[]>([])
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [syncing, setSyncing] = useState(false)
   const [filter, setFilter] = useState<'all' | 'request' | 'issue'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'in-progress' | 'done'>('all')
+  const [threads, setThreads] = useState<Record<string, ThreadComment[]>>({})
+  const [threadLoading, setThreadLoading] = useState(false)
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
 
-  useEffect(() => {
-    fetchItems()
-  }, [])
+  const selected = useMemo(() => items.find((item) => item.id === selectedId) || items[0] || null, [items, selectedId])
+  const stats = useMemo(() => ({
+    open: items.filter((item) => item.status !== 'done').length,
+    working: items.filter((item) => item.status === 'in-progress').length,
+    complete: items.filter((item) => item.status === 'done').length,
+  }), [items])
 
-  const fetchItems = async () => {
+  async function fetchItems(silent = false) {
+    if (!silent) setLoading(true)
+    else setSyncing(true)
+
     try {
-      const res = await fetch('/api/admin/recommendations')
-      const data = await res.json()
-      if (data.items) setItems(data.items)
+      const res = await fetch('/api/admin/recommendations', { cache: 'no-store' })
+      const data = await res.json().catch(() => ({ items: [] }))
+      if (res.ok) {
+        const nextItems: Recommendation[] = Array.isArray(data.items) ? data.items : []
+        setItems(nextItems)
+        setSelectedId((current) => current && nextItems.some((item) => item.id === current) ? current : nextItems[0]?.id || null)
+      }
     } catch (e) {
       console.error('Failed to fetch requests:', e)
     } finally {
       setLoading(false)
+      setSyncing(false)
     }
   }
 
-  const handleStatusChange = async (id: string, status: 'pending' | 'in-progress' | 'done') => {
+  async function fetchThread(id: string, silent = false) {
+    if (!id) return
+    if (!silent) setThreadLoading(true)
+    try {
+      const res = await fetch(`/api/recommendations/comments?rid=${encodeURIComponent(id)}`, { cache: 'no-store' })
+      const data = await res.json().catch(() => ({ items: [] }))
+      if (res.ok) setThreads((prev) => ({ ...prev, [id]: Array.isArray(data.items) ? data.items : [] }))
+    } catch (e) {
+      console.error('Failed to fetch thread:', e)
+    } finally {
+      setThreadLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void fetchItems()
+  }, [])
+
+  useEffect(() => {
+    if (selected?.id) {
+      void fetchThread(selected.id)
+    }
+  }, [selected?.id])
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      void fetchItems(true)
+      if (selectedId) void fetchThread(selectedId, true)
+    }, 15000)
+    return () => window.clearInterval(interval)
+  }, [selectedId])
+
+  async function updateStatus(status: Recommendation['status']) {
+    if (!selected) return
+    setBusy(true)
+    setMessage('')
     try {
       const res = await fetch('/api/admin/recommendations', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, status })
+        body: JSON.stringify({ id: selected.id, status, note: note.trim() }),
       })
-      if (res.ok) {
-        setItems(prev => prev.map(item => item.id === id ? { ...item, status } : item))
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setMessage(data?.error || 'Failed to update item.')
+        return
       }
-    } catch (e) {
-      console.error('Failed to update status:', e)
+      setItems((prev) => prev.map((item) => item.id === selected.id ? { ...item, ...data.item } : item))
+      setThreads((prev) => ({ ...prev, [selected.id]: prev[selected.id] || [] }))
+      setNote('')
+      setMessage('Request desk updated successfully.')
+      await fetchThread(selected.id)
+    } catch (e: any) {
+      setMessage(e?.message || 'Failed to update item.')
+    } finally {
+      setBusy(false)
     }
   }
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this?')) return
+  async function deleteItem(id: string) {
+    if (!confirm('Delete this request permanently?')) return
+    setBusy(true)
+    setMessage('')
     try {
-      const res = await fetch(`/api/admin/recommendations?id=${id}`, {
-        method: 'DELETE'
-      })
-      if (res.ok) {
-        setItems(prev => prev.filter(item => item.id !== id))
+      const res = await fetch(`/api/admin/recommendations?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setMessage(data?.error || 'Failed to delete item.')
+        return
       }
-    } catch (e) {
-      console.error('Failed to delete item:', e)
+      const nextItems = items.filter((item) => item.id !== id)
+      setItems(nextItems)
+      setSelectedId(nextItems[0]?.id || null)
+      setMessage('Request deleted.')
+    } catch (e: any) {
+      setMessage(e?.message || 'Failed to delete item.')
+    } finally {
+      setBusy(false)
     }
   }
 
-  const filteredItems = items.filter(item => {
-    if (filter === 'all') return true
-    return item.kind === filter
+  const visibleItems = items.filter((item) => {
+    if (filter !== 'all' && item.kind !== filter) return false
+    if (statusFilter !== 'all' && item.status !== statusFilter) return false
+    return true
   })
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
-      </div>
-    )
-  }
-
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+    <main className="page-section py-8">
+      <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white mb-2">Customer Requests & Issues</h1>
-          <p className="text-slate-400">Manage media requests and reported issues from customers.</p>
+          <div className="eyebrow">Request Desk</div>
+          <h1 className="mt-3 text-3xl font-semibold text-white">Customer requests and issue reports</h1>
+          <p className="mt-2 max-w-3xl text-sm text-slate-400">
+            A live queue with replies, status changes, and customer feedback in the same workflow.
+          </p>
         </div>
-        
-        <div className="flex bg-slate-800 p-1 rounded-lg border border-slate-700">
-          <button 
-            onClick={() => setFilter('all')}
-            className={`px-4 py-1.5 rounded-md text-sm transition ${filter === 'all' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
-          >
-            All
-          </button>
-          <button 
-            onClick={() => setFilter('request')}
-            className={`px-4 py-1.5 rounded-md text-sm transition ${filter === 'request' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
-          >
-            Requests
-          </button>
-          <button 
-            onClick={() => setFilter('issue')}
-            className={`px-4 py-1.5 rounded-md text-sm transition ${filter === 'issue' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
-          >
-            Issues
+
+        <div className="flex flex-wrap items-center gap-2">
+          <select className="input min-w-[140px]" value={filter} onChange={(e) => setFilter(e.target.value as any)}>
+            <option value="all">All types</option>
+            <option value="request">Requests</option>
+            <option value="issue">Issues</option>
+          </select>
+          <select className="input min-w-[150px]" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)}>
+            <option value="all">All statuses</option>
+            <option value="pending">Queued</option>
+            <option value="in-progress">In progress</option>
+            <option value="done">Complete</option>
+          </select>
+          <button className="btn-outline px-4 py-3" onClick={() => void fetchItems(true)}>
+            <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />
+            Refresh
           </button>
         </div>
       </div>
 
-      <div className="grid gap-6">
-        {filteredItems.length === 0 ? (
-          <div className="text-center py-20 bg-slate-800/30 rounded-2xl border-2 border-dashed border-slate-700">
-            <MessageSquare className="w-12 h-12 text-slate-600 mx-auto mb-4" />
-            <p className="text-slate-400">No {filter === 'all' ? 'requests or issues' : filter + 's'} found.</p>
+      <div className="mb-5 grid gap-4 sm:grid-cols-3">
+        <div className="panel p-4">
+          <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Open</div>
+          <div className="mt-2 text-2xl font-semibold text-white">{stats.open}</div>
+        </div>
+        <div className="panel p-4">
+          <div className="text-xs uppercase tracking-[0.24em] text-slate-500">In progress</div>
+          <div className="mt-2 text-2xl font-semibold text-white">{stats.working}</div>
+        </div>
+        <div className="panel p-4">
+          <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Complete</div>
+          <div className="mt-2 text-2xl font-semibold text-white">{stats.complete}</div>
+        </div>
+      </div>
+
+      {message ? (
+        <div className={`mb-4 rounded-[24px] border px-4 py-3 text-sm ${message.toLowerCase().includes('failed') ? 'border-rose-500/20 bg-rose-500/10 text-rose-100' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-100'}`}>
+          {message}
+        </div>
+      ) : null}
+
+      <section className="grid gap-6 xl:grid-cols-[0.78fr_1.22fr]">
+        <div className="panel min-h-[70vh] overflow-hidden p-0">
+          <div className="border-b border-white/8 px-5 py-4 text-sm text-slate-400">
+            {loading ? 'Loading queue...' : `${visibleItems.length} items in view`}
           </div>
-        ) : (
-          filteredItems.map((item) => (
-            <div 
-              key={item.id} 
-              className={`bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden transition hover:border-slate-600 ${item.status === 'done' ? 'opacity-60' : ''}`}
-            >
-              <div className="flex flex-col md:flex-row">
-                {item.image && (
-                  <div className="w-full md:w-32 h-48 md:h-auto flex-shrink-0 bg-slate-900 overflow-hidden" title={item.title}>
-                    <img 
-                      src={item.image} 
-                      alt={item.title} 
-                      className="w-full h-full object-cover" 
+
+          <div className="max-h-[72vh] overflow-y-auto p-3">
+            {loading ? (
+              <div className="space-y-3">
+                {[1, 2, 3, 4].map((value) => <div key={value} className="h-28 rounded-[24px] bg-white/[0.03] animate-pulse" />)}
+              </div>
+            ) : visibleItems.length === 0 ? (
+              <div className="rounded-[24px] border border-white/8 bg-white/[0.03] p-6 text-sm text-slate-400">No matching items in the queue.</div>
+            ) : (
+              <div className="space-y-3">
+                {visibleItems.map((item) => {
+                  const active = selected?.id === item.id
+                  return (
+                    <button
+                      key={item.id}
+                      className={`w-full rounded-[24px] border p-4 text-left transition ${active ? 'border-cyan-400/25 bg-cyan-400/10' : 'border-white/8 bg-white/[0.03]'}`}
+                      onClick={() => setSelectedId(item.id)}
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] ${statusTone[item.status]}`}>
+                          {item.status === 'in-progress' ? 'In progress' : item.status === 'done' ? 'Complete' : 'Queued'}
+                        </div>
+                        <div className="rounded-full border border-white/8 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-slate-400">
+                          {item.kind}
+                        </div>
+                        <div className="ml-auto text-xs text-slate-500">{new Date(item.updated_at || item.created_at).toLocaleString('en-GB')}</div>
+                      </div>
+                      <div className="mt-3 text-lg font-semibold text-white">{item.title}</div>
+                      <div className="mt-1 text-sm text-slate-400">{item.submitter_email}</div>
+                      <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-500">
+                        <div className="inline-flex items-center gap-2">
+                          <MessageSquare size={14} />
+                          {item.comments_count || 0} updates
+                        </div>
+                        <div>{item.likes_count || 0} backing this</div>
+                      </div>
+                      {item.latest_comment_preview ? (
+                        <div className="mt-3 line-clamp-2 text-sm text-slate-300">Latest: {item.latest_comment_preview}</div>
+                      ) : null}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="panel min-h-[70vh] p-6">
+          {!selected ? (
+            <div className="flex h-full items-center justify-center text-sm text-slate-400">Choose a request to review.</div>
+          ) : (
+            <div className="flex h-full flex-col">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <div className={`inline-flex rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] ${statusTone[selected.status]}`}>
+                    {selected.status === 'in-progress' ? 'In progress' : selected.status === 'done' ? 'Complete' : 'Queued'}
+                  </div>
+                  <h2 className="mt-4 text-2xl font-semibold text-white">{selected.title}</h2>
+                  <div className="mt-2 text-sm text-slate-400">{selected.submitter_email}</div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {selected.url ? (
+                    <a href={selected.url} target="_blank" rel="noreferrer" className="btn-outline">
+                      Open link
+                      <ExternalLink size={14} />
+                    </a>
+                  ) : null}
+                  <button className="btn-outline text-rose-200" onClick={() => void deleteItem(selected.id)} disabled={busy}>
+                    <Trash2 size={14} />
+                    Delete
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-4 lg:grid-cols-[0.32fr_0.68fr]">
+                <div className="overflow-hidden rounded-[28px] border border-white/8 bg-white/[0.03]">
+                  {selected.image ? (
+                    <img
+                      src={selected.image}
+                      alt={selected.title}
+                      className="h-full min-h-[260px] w-full object-cover"
                       onError={(e) => {
-                        (e.target as HTMLImageElement).src = 'https://via.placeholder.com/150x225/1e293b/64748b?text=IMDb+Poster';
+                        ;(e.target as HTMLImageElement).style.display = 'none'
                       }}
                     />
-                  </div>
-                )}
-                
-                <div className="p-6 flex-1 flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center gap-3 mb-2">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${item.kind === 'issue' ? 'bg-red-500/20 text-red-400' : 'bg-blue-500/20 text-blue-400'}`}>
-                        {item.kind}
-                      </span>
-                      {item.status === 'done' && (
-                        <span className="px-2 py-0.5 rounded bg-green-500/20 text-green-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
-                          <Check className="w-3 h-3" /> Done
-                        </span>
-                      )}
-                      {item.status === 'in-progress' && (
-                        <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
-                          <Clock className="w-3 h-3" /> In Progress
-                        </span>
-                      )}
-                      <span className="text-xs text-slate-500 ml-auto">
-                        {new Date(item.created_at).toLocaleDateString()}
-                      </span>
+                  ) : (
+                    <div className="flex min-h-[260px] items-center justify-center text-slate-600">
+                      <CheckCircle2 size={24} />
                     </div>
-                    
-                    <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
-                      {item.title}
-                      {item.url && (
-                        <a href={item.url} target="_blank" rel="noreferrer" className="text-slate-500 hover:text-blue-400 transition">
-                          <ExternalLink className="w-4 h-4" />
-                        </a>
-                      )}
-                    </h3>
-                    
-                    <p className="text-slate-300 text-sm whitespace-pre-wrap mb-4 line-clamp-3">
-                      {item.description}
-                    </p>
-                    
-                    <div className="flex items-center gap-2 text-xs text-slate-500">
-                      <span className="font-medium text-slate-400">From:</span>
-                      <span className="hover:text-blue-400 transition cursor-pointer">{item.submitter_email}</span>
-                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-4">
+                  <div className="rounded-[28px] border border-white/8 bg-white/[0.03] p-5">
+                    <div className="text-sm font-semibold text-white">Customer note</div>
+                    <div className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-300">{selected.description}</div>
                   </div>
 
-                  <div className="mt-6 pt-6 border-t border-slate-700/50 flex items-center justify-between">
-                    <button 
-                      onClick={() => handleDelete(item.id)}
-                      className="p-2 text-slate-500 hover:text-red-400 transition rounded-lg hover:bg-red-500/10"
-                    >
-                      <Trash2 className="w-5 h-5" />
-                    </button>
-
-                    <div className="flex gap-3">
-                      {item.status === 'pending' && (
-                        <button 
-                          onClick={() => handleStatusChange(item.id, 'in-progress')}
-                          className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-sm font-semibold transition flex items-center gap-2 shadow-lg shadow-amber-900/20"
-                        >
-                          <Clock className="w-4 h-4" /> Start Work
-                        </button>
-                      )}
-                      {item.status !== 'done' ? (
-                        <button 
-                          onClick={() => handleStatusChange(item.id, 'done')}
-                          className="px-6 py-2 bg-green-600 hover:bg-green-500 text-white rounded-xl text-sm font-semibold transition flex items-center gap-2 shadow-lg shadow-green-900/20"
-                        >
-                          <Check className="w-4 h-4" /> Mark as Done
-                        </button>
-                      ) : (
-                        <button 
-                          onClick={() => handleStatusChange(item.id, 'pending')}
-                          className="px-6 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-xl text-sm font-semibold transition"
-                        >
-                          Reopen
-                        </button>
-                      )}
+                  <div className="rounded-[28px] border border-cyan-400/12 bg-cyan-400/[0.05] p-5">
+                    <div className="text-sm font-semibold text-white">Reply and update</div>
+                    <textarea
+                      className="input mt-3 min-h-[140px]"
+                      placeholder="Add a progress note for the customer. This will also appear in their request thread."
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                    />
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <button className="btn" onClick={() => void updateStatus('in-progress')} disabled={busy}>
+                        {busy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                        Start work
+                      </button>
+                      <button className="btn-outline" onClick={() => void updateStatus('done')} disabled={busy}>
+                        Mark complete
+                      </button>
+                      <button className="btn-xs-outline" onClick={() => void updateStatus('pending')} disabled={busy}>
+                        Return to queue
+                      </button>
                     </div>
                   </div>
                 </div>
               </div>
+
+              <div className="mt-6 flex-1 rounded-[28px] border border-white/8 bg-white/[0.03] p-5">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div className="text-sm font-semibold text-white">Activity thread</div>
+                  <button className="btn-xs-outline" onClick={() => selected?.id && void fetchThread(selected.id)} disabled={threadLoading}>
+                    {threadLoading ? 'Refreshing...' : 'Refresh thread'}
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {(threads[selected.id] || []).map((comment) => (
+                    <div
+                      key={comment.id}
+                      className={`rounded-[22px] border p-4 ${
+                        comment.role === 'admin'
+                          ? 'border-cyan-400/20 bg-cyan-400/10'
+                          : comment.role === 'system'
+                            ? 'border-emerald-500/20 bg-emerald-500/10'
+                            : 'border-white/8 bg-white/[0.03]'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="text-sm font-semibold text-white">{comment.author_label || 'Update'}</div>
+                        <div className="text-xs text-slate-500">{new Date(comment.created_at).toLocaleString('en-GB')}</div>
+                      </div>
+                      <div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-300">{comment.content}</div>
+                    </div>
+                  ))}
+                  {!threadLoading && !(threads[selected.id] || []).length ? (
+                    <div className="rounded-[22px] border border-white/8 bg-white/[0.03] p-4 text-sm text-slate-400">No replies or status history yet.</div>
+                  ) : null}
+                </div>
+              </div>
             </div>
-          ))
-        )}
-      </div>
-    </div>
+          )}
+        </div>
+      </section>
+    </main>
   )
 }

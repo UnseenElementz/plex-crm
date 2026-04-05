@@ -220,19 +220,19 @@ export default function Home() {
 
             <div className="grid gap-3 md:grid-cols-3">
               <div className="panel px-4 py-3.5">
-                <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Visual</div>
-                <div className="mt-1 text-base font-semibold text-white">Full artwork</div>
-                <div className="mt-1 text-xs leading-5 text-slate-400">Shown clearly as the hero focus, not hidden behind panels.</div>
+                <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Access</div>
+                <div className="mt-1 text-base font-semibold text-white">Private hosting</div>
+                <div className="mt-1 text-xs leading-5 text-slate-400">Clean access to hosted media with a proper portal behind it.</div>
               </div>
               <div className="panel px-4 py-3.5">
-                <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Atmosphere</div>
-                <div className="mt-1 text-base font-semibold text-white">Cosmic motion</div>
-                <div className="mt-1 text-xs leading-5 text-slate-400">Floating glows, star shimmer, and slower movement in the background.</div>
+                <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Support</div>
+                <div className="mt-1 text-base font-semibold text-white">Quick help</div>
+                <div className="mt-1 text-xs leading-5 text-slate-400">Billing, issue handling, and direct replies from one support desk.</div>
               </div>
               <div className="panel px-4 py-3.5">
-                <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Tone</div>
-                <div className="mt-1 text-base font-semibold text-white">Less noise</div>
-                <div className="mt-1 text-xs leading-5 text-slate-400">Smaller headings and calmer wording so the image can lead.</div>
+                <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">History</div>
+                <div className="mt-1 text-base font-semibold text-white">Since 2018</div>
+                <div className="mt-1 text-xs leading-5 text-slate-400">Eight years of refining a stable, premium customer experience.</div>
               </div>
             </div>
           </div>

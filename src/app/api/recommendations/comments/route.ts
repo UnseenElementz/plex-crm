@@ -1,19 +1,11 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
-import { cookies } from 'next/headers'
 import { getStatus } from '@/lib/pricing'
-
-function svc(){
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY as string
-  if (!url || !key) return null
-  return createClient(url, key)
-}
+import { createServiceClient, getRequester } from '@/lib/serverSupabase'
 
 async function isActive(email?: string | null){
   try{
     if (!email) return false
-    const s = svc(); if (!s) return false
+    const s = createServiceClient(); if (!s) return false
     const { data } = await s.from('customers').select('*').eq('email', email).limit(1)
     const row = data?.[0]
     if (!row) return false
@@ -28,40 +20,80 @@ export async function GET(req: Request){
     const url = new URL(req.url)
     const rid = url.searchParams.get('rid') || ''
     if (!rid) return NextResponse.json({ error: 'rid required' }, { status: 400 })
-    const s = svc()
-    if (s){
-      const { data, error } = await s.from('recommendation_comments').select('*').eq('recommendation_id', rid).order('created_at', { ascending: true })
-      if (!error) return NextResponse.json({ items: data || [] })
-    }
-    const jar = cookies(); const raw = jar.get(`comments_${rid}`)?.value
-    const items = raw ? JSON.parse(decodeURIComponent(raw)) : []
+    const s = createServiceClient()
+    if (!s) return NextResponse.json({ error: 'Service unavailable' }, { status: 503 })
+
+    const { data, error } = await s
+      .from('recommendation_comments')
+      .select('*')
+      .eq('recommendation_id', rid)
+      .order('created_at', { ascending: true })
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+    const items = (data || []).map((item: any) => {
+      const rawAuthor = String(item.author_email || '').trim().toLowerCase()
+      const isSystem = rawAuthor === 'system@streamzrus.local'
+      const isAdmin = isSystem || rawAuthor === 'support@streamzrus.local' || rawAuthor === 'admin@streamzrus.local'
+      return {
+        ...item,
+        role: isSystem ? 'system' : isAdmin ? 'admin' : 'customer',
+        author_label: isSystem ? 'Status update' : isAdmin ? 'Support team' : 'Customer',
+      }
+    })
+
     return NextResponse.json({ items })
   }catch(e:any){ return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 }) }
 }
 
 export async function POST(req: Request){
   try{
+    const requester = await getRequester(req)
     const b = await req.json().catch(()=>({}))
-    const ok = await isActive(String(b?.email || ''))
-    if (!ok) return NextResponse.json({ error: 'active subscription required' }, { status: 403 })
+    const recommendationId = String(b?.rid || '').trim()
+    const content = String(b?.content || '').trim()
+    if (!recommendationId || !content) return NextResponse.json({ error: 'rid and content required' }, { status: 400 })
+
+    const s = createServiceClient()
+    if (!s) return NextResponse.json({ error: 'Service unavailable' }, { status: 503 })
+
+    let authorEmail = requester.email
+    if (requester.isAdmin) {
+      authorEmail = 'support@streamzrus.local'
+    }
+
+    if (!authorEmail) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    if (!requester.isAdmin) {
+      const ok = await isActive(authorEmail)
+      if (!ok) return NextResponse.json({ error: 'active subscription required' }, { status: 403 })
+    }
+
     const payload = {
       id: crypto.randomUUID(),
-      recommendation_id: String(b?.rid || ''),
-      author_email: String(b?.email || ''),
-      content: String(b?.content || ''),
+      recommendation_id: recommendationId,
+      author_email: authorEmail,
+      content,
       created_at: new Date().toISOString()
     }
-    if (!payload.recommendation_id || !payload.content) return NextResponse.json({ error: 'rid and content required' }, { status: 400 })
-    const s = svc()
-    if (s){
-      const { data, error } = await s.from('recommendation_comments').insert([payload]).select('*').single()
-      if (!error) return NextResponse.json({ ok: true, item: data })
-    }
-    const jar = cookies(); const raw = jar.get(`comments_${payload.recommendation_id}`)?.value
-    const items = raw ? JSON.parse(decodeURIComponent(raw)) : []
-    items.push(payload)
-    const res = NextResponse.json({ ok: true, item: payload })
-    res.headers.set('Set-Cookie', `comments_${payload.recommendation_id}=${encodeURIComponent(JSON.stringify(items))}; Path=/; Max-Age=31536000`)
-    return res
+
+    const { data, error } = await s.from('recommendation_comments').insert([payload]).select('*').single()
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+    await s
+      .from('recommendations')
+      .update({ updated_at: payload.created_at })
+      .eq('id', recommendationId)
+
+    return NextResponse.json({
+      ok: true,
+      item: {
+        ...data,
+        role: requester.isAdmin ? 'admin' : 'customer',
+        author_label: requester.isAdmin ? 'Support team' : 'Customer',
+      },
+    })
   }catch(e:any){ return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 }) }
 }
