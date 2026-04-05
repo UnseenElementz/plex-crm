@@ -101,7 +101,7 @@ export default function Header() {
             {companyName}
           </Link>
           <div className="hidden h-8 w-px bg-white/10 sm:block" />
-          <div className="hidden text-xs uppercase tracking-[0.28em] text-slate-500 sm:block">Premium Plex Platform</div>
+          <div className="hidden text-xs uppercase tracking-[0.28em] text-slate-500 sm:block">Private Media Hosting</div>
         </div>
 
         <div className="flex flex-1 flex-wrap items-center justify-end gap-2">

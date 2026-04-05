@@ -23,9 +23,9 @@ type Customer = {
 }
 
 const planCards: Array<{ id: Plan; title: string; subtitle: string }> = [
-  { id: 'yearly', title: 'Full Package', subtitle: 'The complete premium library experience.' },
-  { id: 'movies_only', title: 'Movies Only', subtitle: 'Film-first access with family favourites included.' },
-  { id: 'tv_only', title: 'TV Shows Only', subtitle: 'Series-focused access with broad genre coverage.' },
+  { id: 'yearly', title: 'Full Access', subtitle: 'The complete hosted media package.' },
+  { id: 'movies_only', title: 'Movies Only', subtitle: 'Film-first access with the same clean account tools.' },
+  { id: 'tv_only', title: 'TV Shows Only', subtitle: 'Series-focused access with the same support and billing flow.' },
 ]
 
 export default function CustomerPortal() {
@@ -267,9 +267,9 @@ export default function CustomerPortal() {
       <main className="page-section py-12">
         <div className="panel mx-auto max-w-3xl p-8 text-center">
           <div className="eyebrow mx-auto">Customer Access</div>
-          <h1 className="mt-5 text-4xl font-semibold text-white">Sign in to manage your subscription</h1>
+          <h1 className="mt-5 text-3xl font-semibold text-white sm:text-[2.2rem]">Sign in to manage your account</h1>
           <p className="mx-auto mt-3 max-w-xl text-slate-400">
-            Access your plan details, payment tools, service announcements, and direct support in one place.
+            Payments, service updates, and support for your hosting account in one place.
           </p>
           <a href="/customer/login" className="btn mt-8" data-no-prefetch>
             Go to Customer Login
@@ -290,12 +290,12 @@ export default function CustomerPortal() {
       <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
         <div className="space-y-6">
           <div className="panel-strong overflow-hidden p-7">
-            <div className="eyebrow">Member Access</div>
+            <div className="eyebrow">Account</div>
             <div className="mt-5 flex flex-wrap items-start justify-between gap-4">
               <div>
-                <h1 className="text-4xl font-semibold text-white">Manage your hosted service in one place.</h1>
+                <h1 className="text-3xl font-semibold text-white sm:text-[2.2rem]">Manage your hosting account.</h1>
                 <p className="mt-3 max-w-2xl text-slate-400">
-                  Billing, updates, and support for your premium video hosting account.
+                  Billing, support, and service updates in one clear dashboard.
                 </p>
               </div>
               <div className={`tag ${status.toLowerCase() === 'active' ? 'active' : 'inactive'}`}>{status}</div>
@@ -329,7 +329,7 @@ export default function CustomerPortal() {
           <div className="card-solid p-6">
             <div className="flex items-center justify-between gap-4">
               <h2 className="card-title">Choose your package</h2>
-              <div className="text-sm text-slate-400">Premium access, cleaner pricing</div>
+              <div className="text-sm text-slate-400">Simple package changes and renewals</div>
             </div>
             <div className="mt-5 grid gap-3">
               {planCards.map((plan) => (
@@ -353,7 +353,7 @@ export default function CustomerPortal() {
             </div>
 
             <div className="mt-5 rounded-[24px] border border-cyan-400/12 bg-cyan-400/8 p-4 text-sm text-slate-300">
-              Movies Only and TV Shows Only packages still include kids content and other shared genres such as sports.
+              Movies Only and TV Shows Only still include shared family categories such as kids and selected mixed content.
             </div>
 
             <div className="mt-6 grid gap-5 sm:grid-cols-2">

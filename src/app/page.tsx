@@ -6,8 +6,8 @@ import { useEffect, useRef, useState } from "react"
 
 const metrics = [
   { label: "Support", value: "Live", note: "Fast human replies" },
-  { label: "Streams", value: "Tracked", note: "Usage and device visibility" },
-  { label: "Admin", value: "Sharp", note: "Less clutter, more control" },
+  { label: "Access", value: "Tracked", note: "Usage, devices, and renewals" },
+  { label: "Admin", value: "Clean", note: "Less clutter, more control" },
 ]
 
 const featurePills = ["Portal", "Support", "Billing", "Plex", "Email", "Security"]
@@ -15,18 +15,18 @@ const featurePills = ["Portal", "Support", "Billing", "Plex", "Email", "Security
 const cards = [
   {
     icon: Sparkles,
-    title: "Premium hosting",
-    description: "Private video hosting with a cleaner customer experience.",
+    title: "Private hosting",
+    description: "Hosted media access with a cleaner account experience.",
   },
   {
     icon: Headphones,
-    title: "Trusted support",
-    description: "Fast replies backed by proper account and service context.",
+    title: "Direct support",
+    description: "Fast replies with the right service and account context.",
   },
   {
     icon: ShieldCheck,
-    title: "Built to last",
-    description: "Eight years of running and refining premium media hosting.",
+    title: "Eight years running",
+    description: "Stable service that has been refined over time, not rushed together.",
   },
 ]
 
@@ -100,18 +100,18 @@ export default function Home() {
           <div className="space-y-4">
             <div className="eyebrow">
               <Zap size={14} />
-              Premium video hosting
+              Since 2018
             </div>
 
             <div>
-              <div className="gradient-text text-sm font-medium uppercase tracking-[0.3em] text-cyan-300/90 sm:text-[0.95rem]">
+              <div className="gradient-text text-xs font-medium uppercase tracking-[0.32em] text-cyan-300/90 sm:text-[0.85rem]">
                 {companyName}
               </div>
-              <h1 className="mt-3 max-w-3xl text-[2.45rem] font-semibold leading-[0.96] tracking-[-0.055em] text-white sm:text-[3rem] lg:text-[3.45rem] xl:text-[3.7rem]">
-                Premium video hosting, support, and account control done properly.
+              <h1 className="mt-3 max-w-3xl text-[2rem] font-semibold leading-[0.98] tracking-[-0.045em] text-white sm:text-[2.45rem] lg:text-[2.9rem] xl:text-[3.1rem]">
+                Private media hosting with clean support and simple account access.
               </h1>
-              <p className="mt-3 max-w-lg text-sm leading-6 text-slate-300 sm:text-[15px]">
-                Streamz R Us has been delivering premium hosted media access for 8 years with clean support, stable service, and a polished customer experience.
+              <p className="mt-3 max-w-xl text-sm leading-6 text-slate-300 sm:text-[15px]">
+                Eight years of stable hosted media access, straightforward renewals, and direct support in one polished system.
               </p>
             </div>
 
@@ -159,10 +159,10 @@ export default function Home() {
                 </div>
               ) : null}
               <div className="relative">
-                <div className="text-[11px] uppercase tracking-[0.24em] text-cyan-300">Since 2018</div>
-                <div className="mt-2 text-xl font-semibold text-white sm:text-2xl">Reliable premium media hosting.</div>
+                <div className="text-[11px] uppercase tracking-[0.24em] text-cyan-300">Private media hosting</div>
+                <div className="mt-2 text-lg font-semibold text-white sm:text-[1.35rem]">Stable service, clear access, direct support.</div>
                 <p className="mt-2.5 max-w-md text-sm leading-6 text-slate-400">
-                  A clean front door for hosted streaming access, account management, and direct support.
+                  A calmer front door for billing, account access, and support without the usual clutter.
                 </p>
               </div>
             </div>
