@@ -326,6 +326,29 @@
     animation: twinkleSoft 4.8s ease-in-out infinite;
   }
 
+  .shooting-star {
+    width: 180px;
+    height: 2px;
+    background: linear-gradient(90deg, rgba(255,255,255,0), rgba(191,219,254,0.9), rgba(34,211,238,0));
+    filter: drop-shadow(0 0 10px rgba(125, 211, 252, 0.55));
+    opacity: 0;
+    transform: rotate(-18deg) translate3d(0, 0, 0);
+    animation: shootingStar 6s linear infinite;
+  }
+
+  .shooting-star::after {
+    content: "";
+    position: absolute;
+    right: 16px;
+    top: 50%;
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.95);
+    transform: translateY(-50%);
+    box-shadow: 0 0 16px rgba(191, 219, 254, 0.75);
+  }
+
   .modal-backdrop {
     background: rgba(2, 6, 23, 0.78);
     backdrop-filter: blur(16px);
@@ -390,5 +413,25 @@
   50% {
     opacity: 1;
     transform: scale(1.2);
+  }
+}
+
+@keyframes shootingStar {
+  0% {
+    opacity: 0;
+    transform: rotate(-18deg) translate3d(0, 0, 0);
+  }
+
+  10% {
+    opacity: 1;
+  }
+
+  45% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: rotate(-18deg) translate3d(240px, 120px, 0);
   }
 }

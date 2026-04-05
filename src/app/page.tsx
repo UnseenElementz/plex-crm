@@ -48,6 +48,12 @@ const stars = [
   { left: "79%", top: "58%", size: 3, delay: "2.6s" },
 ]
 
+const shootingStars = [
+  { left: "12%", top: "18%", delay: "0.8s", duration: "5.8s" },
+  { left: "64%", top: "12%", delay: "2.6s", duration: "6.4s" },
+  { left: "38%", top: "32%", delay: "4.1s", duration: "5.6s" },
+]
+
 export default function Home() {
   const [parallaxY, setParallaxY] = useState(0)
   const [heroImageUrl, setHeroImageUrl] = useState(defaultHeroImage)
@@ -105,30 +111,45 @@ export default function Home() {
   const layer = { transform: `translateY(${-(parallaxY * 0.08)}px)` }
 
   return (
-    <main className="page-section flex min-h-[calc(100vh-5.5rem)] items-center py-4 sm:py-6">
-      <section className="relative w-full overflow-hidden rounded-[36px] border border-cyan-400/15 bg-[radial-gradient(circle_at_top,rgba(99,102,241,0.14),transparent_26%),radial-gradient(circle_at_80%_18%,rgba(34,211,238,0.16),transparent_24%),linear-gradient(180deg,rgba(2,8,23,0.96),rgba(5,10,24,0.92))] px-4 py-5 shadow-[0_30px_120px_rgba(8,145,178,0.16)] sm:px-6 sm:py-6 lg:px-8 lg:py-7">
-        <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-          <div className="absolute inset-0 opacity-90" style={layer}>
-            <div className="absolute -left-10 top-[-2rem] h-52 w-52 rounded-full bg-cyan-400/14 blur-3xl drift-slower" />
-            <div className="absolute right-[-3rem] top-[10%] h-64 w-64 rounded-full bg-violet-400/14 blur-3xl drift-slower" />
-            <div className="absolute bottom-[-3rem] left-[28%] h-56 w-56 rounded-full bg-blue-500/16 blur-3xl drift-slower" />
-            <div className="absolute inset-x-0 top-[48%] h-px bg-gradient-to-r from-transparent via-cyan-300/20 to-transparent" />
-            {stars.map((star) => (
-              <span
-                key={`${star.left}-${star.top}`}
-                className="twinkle-soft absolute rounded-full bg-white/80"
-                style={{
-                  left: star.left,
-                  top: star.top,
-                  width: `${star.size}px`,
-                  height: `${star.size}px`,
-                  animationDelay: star.delay,
-                  boxShadow: "0 0 18px rgba(255,255,255,0.65)",
-                }}
-              />
-            ))}
-          </div>
+    <main className="relative min-h-[calc(100vh-5.5rem)] overflow-hidden">
+      <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(56,189,248,0.2),transparent_22%),radial-gradient(circle_at_78%_14%,rgba(168,85,247,0.22),transparent_24%),radial-gradient(circle_at_50%_58%,rgba(37,99,235,0.16),transparent_30%),linear-gradient(180deg,rgba(1,4,17,0.98),rgba(3,8,24,0.96)_48%,rgba(2,5,17,0.98))]" />
+        <div className="absolute inset-0 opacity-95" style={layer}>
+          <div className="absolute -left-[12rem] top-[-8rem] h-[28rem] w-[28rem] rounded-full bg-cyan-400/14 blur-[140px] drift-slower" />
+          <div className="absolute right-[-14rem] top-[-6rem] h-[30rem] w-[30rem] rounded-full bg-violet-400/16 blur-[160px] drift-slower" />
+          <div className="absolute left-[24%] top-[32%] h-[26rem] w-[26rem] rounded-full bg-blue-500/14 blur-[150px] drift-slower" />
+          <div className="absolute bottom-[-12rem] right-[18%] h-[24rem] w-[24rem] rounded-full bg-cyan-300/10 blur-[140px] drift-slower" />
+          {stars.map((star) => (
+            <span
+              key={`${star.left}-${star.top}`}
+              className="twinkle-soft absolute rounded-full bg-white/85"
+              style={{
+                left: star.left,
+                top: star.top,
+                width: `${star.size}px`,
+                height: `${star.size}px`,
+                animationDelay: star.delay,
+                boxShadow: "0 0 18px rgba(255,255,255,0.65)",
+              }}
+            />
+          ))}
+          {shootingStars.map((star) => (
+            <span
+              key={`${star.left}-${star.top}-trail`}
+              className="shooting-star absolute"
+              style={{
+                left: star.left,
+                top: star.top,
+                animationDelay: star.delay,
+                animationDuration: star.duration,
+              }}
+            />
+          ))}
         </div>
+      </div>
+
+      <div className="page-section relative z-10 flex min-h-[calc(100vh-5.5rem)] items-center py-4 sm:py-6">
+      <section className="relative w-full overflow-hidden rounded-[36px] border border-cyan-400/15 bg-[linear-gradient(180deg,rgba(3,8,23,0.72),rgba(4,9,24,0.62))] px-4 py-5 shadow-[0_30px_120px_rgba(8,145,178,0.16)] backdrop-blur-[14px] sm:px-6 sm:py-6 lg:px-8 lg:py-7">
 
         <div className="grid gap-6 xl:grid-cols-[0.78fr_1.22fr] xl:items-center">
           <div className="relative z-10 space-y-4 xl:pr-3">
@@ -236,6 +257,7 @@ export default function Home() {
           })}
         </div>
       </section>
+      </div>
     </main>
   )
 }
