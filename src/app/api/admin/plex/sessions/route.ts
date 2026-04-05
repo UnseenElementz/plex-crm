@@ -10,6 +10,10 @@ function svc() {
   return createClient(url, key)
 }
 
+function envString(key: string) {
+  return String(process.env[key] || '').trim()
+}
+
 export async function GET() {
   try {
     if (cookies().get('admin_session')?.value !== '1') {
@@ -19,13 +23,17 @@ export async function GET() {
     const s = svc()
     if (!s) return NextResponse.json({ error: 'Supabase not configured' }, { status: 500 })
 
-    const { data: settings } = await s
+    const { data: settings, error: settingsError } = await s
       .from('admin_settings')
-      .select('plex_token,plex_server_url,ip_logs,blocked_ips')
+      .select('*')
       .eq('id', 1)
       .maybeSingle()
-    const token = String(settings?.plex_token || '').trim()
-    const url = String(settings?.plex_server_url || 'https://plex.tv').trim() || 'https://plex.tv'
+    if (settingsError) {
+      console.error('Plex settings load error:', settingsError)
+    }
+
+    const token = String(settings?.plex_token || envString('PLEX_TOKEN') || '').trim()
+    const url = String(settings?.plex_server_url || envString('PLEX_SERVER_URL') || 'https://plex.tv').trim() || 'https://plex.tv'
     if (!token) return NextResponse.json({ error: 'Plex token not configured' }, { status: 400 })
 
     const [sessions, customers] = await Promise.all([
@@ -82,8 +90,11 @@ export async function GET() {
       }
     }
 
-    await Promise.allSettled([
-      s.from('admin_settings').update({ ip_logs: ipLogs }).eq('id', 1),
+    const updates: any[] = []
+    if (settings && Object.prototype.hasOwnProperty.call(settings, 'ip_logs')) {
+      updates.push(s.from('admin_settings').update({ ip_logs: ipLogs }).eq('id', 1))
+    }
+    updates.push(
       items.length
         ? s.from('plex_audit_logs').upsert(
             items.map((item) => ({
@@ -112,8 +123,10 @@ export async function GET() {
             })),
             { onConflict: 'id' }
           )
-        : Promise.resolve(),
-    ])
+        : Promise.resolve()
+    )
+
+    await Promise.allSettled(updates)
 
     const { data: historyRows } = await s
       .from('plex_audit_logs')
