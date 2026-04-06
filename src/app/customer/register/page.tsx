@@ -1,11 +1,12 @@
 "use client"
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import { getSupabase } from '@/lib/supabaseClient'
+import { mergeCustomerNotes, parseCustomerNotes } from '@/lib/customerNotes'
 
 function isBanned(notes: unknown) {
-  return /Access:\s*Banned/i.test(String(notes || ''))
+  return parseCustomerNotes(notes).banned
 }
 
 export default function CustomerRegisterPage() {
@@ -13,9 +14,16 @@ export default function CustomerRegisterPage() {
   const [password, setPassword] = useState('')
   const [fullName, setFullName] = useState('')
   const [plexUsername, setPlexUsername] = useState('')
+  const [referralCode, setReferralCode] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
+  const searchParams = useSearchParams()
+
+  useEffect(() => {
+    const ref = String(searchParams?.get('ref') || '').trim().toUpperCase()
+    if (ref) setReferralCode(ref)
+  }, [searchParams])
 
   async function register() {
     setError('')
@@ -80,9 +88,10 @@ export default function CustomerRegisterPage() {
           router.push('/customer/banned')
           return
         }
-        const currentNotes = String((existingCustomer as any).notes || '')
-        const cleanedNotes = currentNotes.replace(/Plex:\s*[^\n]+\n?/gi, '').trim()
-        const nextNotes = [cleanedNotes || undefined, trimmedPlex ? `Plex: ${trimmedPlex}` : undefined].filter(Boolean).join('\n')
+        const nextNotes = mergeCustomerNotes({
+          existing: (existingCustomer as any).notes || '',
+          plexUsername: trimmedPlex,
+        })
         await s
           .from('customers')
           .update({
@@ -99,8 +108,24 @@ export default function CustomerRegisterPage() {
           start_date: null,
           next_payment_date: null,
           subscription_status: 'inactive',
-          notes: trimmedPlex ? `Plex: ${trimmedPlex}` : '',
+          notes: mergeCustomerNotes({
+            existing: '',
+            plexUsername: trimmedPlex,
+          }),
         })
+      }
+
+      if (referralCode.trim()) {
+        const session = await s.auth.getSession()
+        const token = session.data.session?.access_token
+        await fetch('/api/referrals/me', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ referralCode: referralCode.trim().toUpperCase() }),
+        }).catch(() => null)
       }
 
       router.push('/customer/login?registered=1')
@@ -128,6 +153,7 @@ export default function CustomerRegisterPage() {
         <div className="space-y-4">
           <input className="input w-full" placeholder="Full Name" value={fullName} onChange={(e) => setFullName(e.target.value)} onKeyPress={handleKeyPress} />
           <input className="input w-full" placeholder="Plex Username" value={plexUsername} onChange={(e) => setPlexUsername(e.target.value)} onKeyPress={handleKeyPress} />
+          <input className="input w-full" placeholder="Referral Code (Optional)" value={referralCode} onChange={(e) => setReferralCode(e.target.value.toUpperCase())} onKeyPress={handleKeyPress} />
           <input className="input w-full" placeholder="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} onKeyPress={handleKeyPress} />
           <input className="input w-full" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyPress={handleKeyPress} />
 

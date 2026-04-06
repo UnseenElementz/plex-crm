@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { mergeCustomerNotes, parseCustomerNotes } from '@/lib/customerNotes'
 
 export type ModerationCustomer = {
   id: string
@@ -22,21 +23,19 @@ function svc() {
 }
 
 export function parsePlexUsername(notes: unknown) {
-  return String(notes || '').match(/Plex:\s*([^\n]+)/i)?.[1]?.trim() || ''
+  return parseCustomerNotes(notes).plexUsername
 }
 
 export function isCustomerBannedInNotes(notes: unknown) {
-  return /Access:\s*Banned/i.test(String(notes || ''))
+  return parseCustomerNotes(notes).banned
 }
 
 export function setCustomerBannedInNotes(notes: unknown, banned: boolean) {
-  const base = String(notes || '')
-    .replace(/Access:\s*Banned\s*\n?/gi, '')
-    .replace(/Banned At:\s*[^\n]+\n?/gi, '')
-    .trim()
-
-  if (!banned) return base
-  return [base || undefined, 'Access: Banned', `Banned At: ${new Date().toISOString()}`].filter(Boolean).join('\n')
+  return mergeCustomerNotes({
+    existing: notes,
+    banned,
+    bannedAt: banned ? new Date().toISOString() : null,
+  })
 }
 
 export async function findCustomerByIdentity(identity: {
@@ -88,19 +87,20 @@ export async function findCustomerByIdentity(identity: {
 export async function countWarnings(email: string) {
   const supabase = svc()
   if (!supabase || !email) return 0
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('plex_audit_logs')
     .select('id')
     .eq('action', 'customer_warning')
     .eq('email', email)
 
+  if (error) return 0
   return Array.isArray(data) ? data.length : 0
 }
 
 export async function isCustomerBanned(email: string) {
   const supabase = svc()
   if (!supabase || !email) return false
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('plex_audit_logs')
     .select('action,created_at')
     .eq('email', email)
@@ -108,6 +108,7 @@ export async function isCustomerBanned(email: string) {
     .order('created_at', { ascending: false })
     .limit(1)
 
+  if (error) return false
   return (data || [])[0]?.action === 'customer_ban'
 }
 
@@ -120,26 +121,32 @@ export async function addAuditLog(input: {
 }) {
   const supabase = svc()
   if (!supabase) return
-  await supabase.from('plex_audit_logs').insert({
-    id: crypto.randomUUID(),
-    action: input.action,
-    email: input.email || null,
-    share_id: input.share_id || null,
-    server_machine_id: input.server_machine_id || null,
-    details: input.details || {},
-  })
+  try {
+    await supabase.from('plex_audit_logs').insert({
+      id: crypto.randomUUID(),
+      action: input.action,
+      email: input.email || null,
+      share_id: input.share_id || null,
+      server_machine_id: input.server_machine_id || null,
+      details: input.details || {},
+    })
+  } catch {}
 }
 
 export async function getSecurityOverview() {
   const supabase = svc()
   if (!supabase) return { ipLogs: {}, blockedIps: [], bannedCustomers: [] as any[] }
 
-  const { data: logs } = await supabase
+  const { data: logs, error } = await supabase
     .from('plex_audit_logs')
     .select('action,email,created_at,details')
     .in('action', ['ip_seen', 'ip_block', 'ip_unblock', 'customer_warning', 'customer_ban', 'customer_unban', 'session_seen'])
     .order('created_at', { ascending: true })
     .limit(2000)
+
+  if (error) {
+    return { ipLogs: {}, blockedIps: [], bannedCustomers: [] as any[] }
+  }
 
   const ipLogs: Record<string, string[]> = {}
   const blockedSet = new Set<string>()

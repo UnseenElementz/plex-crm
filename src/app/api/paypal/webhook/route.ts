@@ -31,6 +31,7 @@ export async function POST(request: Request) {
     let resolvedPlan = 'yearly' as Plan
     let resolvedStreams = 1
     let resolvedDownloads = false
+    let resolvedCreditUsed = 0
 
     if (orderId) {
       const c = client()
@@ -43,6 +44,7 @@ export async function POST(request: Request) {
         resolvedPlan = parsed.plan
         resolvedStreams = parsed.streams
         resolvedDownloads = parsed.downloads
+        resolvedCreditUsed = parsed.creditUsed
       }
     }
 
@@ -56,6 +58,8 @@ export async function POST(request: Request) {
       streams: resolvedStreams,
       downloads: resolvedDownloads,
       amount,
+      creditUsed: resolvedCreditUsed,
+      paymentOrderId: orderId,
     })
 
     return NextResponse.json({ ok: true })

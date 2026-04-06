@@ -15,7 +15,7 @@ export default function BackgroundAudio(){
     if (isAdmin) return
     (async()=>{
       try{
-        const res = await fetch('/api/admin/settings')
+        const res = await fetch('/api/admin/settings', { cache: 'no-store' })
         const s = res.ok ? await res.json() : {}
         let url: string = s.bg_music_url || ''
         let vol: number = Number(s.bg_music_volume ?? 0.1)

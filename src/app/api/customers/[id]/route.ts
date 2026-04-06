@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabaseClient'
 import { createClient } from '@supabase/supabase-js'
 import { CustomerUpdateSchema, formatZodError } from '@/lib/validation'
 import { cookies } from 'next/headers'
+import { getVisibleCustomerNotes, mergeCustomerNotes, parseCustomerNotes } from '@/lib/customerNotes'
 
 function mem(){
   const g = globalThis as any
@@ -60,6 +61,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
     const d = rawNext ? new Date(rawNext) : null
     const year = d ? d.getFullYear() : 0
     const safeNext = (!d || isNaN(d.getTime()) || year < 2000 || year > 2100) ? new Date().toISOString() : rawNext
+    const parsedNotes = parseCustomerNotes(row.notes)
     return {
       id: row.id,
       full_name: row.full_name ?? row.name,
@@ -68,11 +70,11 @@ export async function GET(request: Request, { params }: { params: { id: string }
       streams: row.streams,
       start_date: row.start_date,
       next_due_date: safeNext,
-      notes: row.notes,
-      plex_username: (row.notes || '').match(/Plex:\s*(.+)/i)?.[1] || undefined,
-      timezone: (row.notes || '').match(/Timezone:\s*(.+)/i)?.[1] || undefined,
+      notes: getVisibleCustomerNotes(row.notes),
+      plex_username: parsedNotes.plexUsername || undefined,
+      timezone: parsedNotes.timezone || undefined,
       status: row.status ?? row.subscription_status,
-      downloads: (row.notes || '').includes('Downloads: Yes')
+      downloads: parsedNotes.downloads
     }
   })() : null
   return NextResponse.json(mapped)
@@ -150,40 +152,22 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   if (payload.start_date !== undefined) dbPayload.start_date = payload.start_date
   if (payload.next_due_date !== undefined) dbPayload.next_payment_date = payload.next_due_date
   if (payload.subscription_status !== undefined) dbPayload.subscription_status = payload.subscription_status
-  if (payload.notes !== undefined || payload.plex_username !== undefined || payload.timezone !== undefined) {
-    // We need existing data to preserve fields not present in payload
-    // If client provided ALL fields, we don't strictly need to fetch, but it's safer to fetch if we are partial updating.
-    // However, for simplicity, if any of these are missing, we should probably fetch.
-    
+  if (payload.notes !== undefined || payload.plex_username !== undefined || payload.timezone !== undefined || payload.downloads !== undefined) {
     let currentNotes = ''
+    let currentRawNotes = ''
     let currentPlex = ''
     let currentTimezone = ''
     let currentDownloads = false
     
-    // Fetch existing if we are missing any component or if we just want to be safe
-    // We already check for duplicates with email, but let's fetch current row if not already fetched
     if (client) {
       const { data: current } = await client.from('customers').select('notes, plan, subscription_type').eq('id', params.id).single()
       if (current) {
-        currentNotes = current.notes || ''
-        // Extract existing values
-        const plexM = currentNotes.match(/Plex:\s*([^\n]+)/i)
-        if (plexM) currentPlex = plexM[1].trim()
-        
-        const tzM = currentNotes.match(/Timezone:\s*([^\n]+)/i)
-        if (tzM) currentTimezone = tzM[1].trim()
-        
-        const dlM = currentNotes.includes('Downloads: Yes')
-        currentDownloads = dlM
-        
-        // Remove the virtual fields from the "base" notes to get the user's actual notes
-        // This is a bit hacky because we store everything in one string. 
-        // We should strip the system lines to get the "user notes".
-        currentNotes = currentNotes
-          .replace(/Plex:\s*[^\n]+\n?/gi, '')
-          .replace(/Timezone:\s*[^\n]+\n?/gi, '')
-          .replace(/Downloads: Yes\n?/gi, '')
-          .trim()
+        currentRawNotes = String(current.notes || '')
+        const parsedNotes = parseCustomerNotes(current.notes || '')
+        currentNotes = parsedNotes.visibleNotes
+        currentPlex = parsedNotes.plexUsername
+        currentTimezone = parsedNotes.timezone
+        currentDownloads = parsedNotes.downloads
       }
     }
 
@@ -193,13 +177,13 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 
     const downloads = payload.downloads !== undefined ? payload.downloads : currentDownloads
 
-    const combined = [
-      notes || undefined, 
-      plex ? `Plex: ${plex}` : undefined, 
-      tz ? `Timezone: ${tz}` : undefined,
-      downloads ? 'Downloads: Yes' : undefined
-    ].filter(Boolean).join('\n')
-    dbPayload.notes = combined
+    dbPayload.notes = mergeCustomerNotes({
+      existing: currentRawNotes,
+      visibleNotes: notes,
+      plexUsername: plex,
+      timezone: tz,
+      downloads,
+    })
   }
   if (!client){
     const list = mem()
@@ -218,8 +202,8 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     streams: row.streams,
     start_date: row.start_date,
     next_due_date: row.next_due_date ?? row.next_payment_date,
-    notes: row.notes,
-    plex_username: (row.notes || '').match(/Plex:\s*(.+)/i)?.[1] || undefined,
+    notes: getVisibleCustomerNotes(row.notes),
+    plex_username: parseCustomerNotes(row.notes).plexUsername || undefined,
     status: row.status ?? row.subscription_status
   }) : null
   return NextResponse.json(mapped)

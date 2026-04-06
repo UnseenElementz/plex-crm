@@ -73,11 +73,13 @@ export async function fetchInboxMessages({
   customerIndex,
   limit = 40,
   serviceOnly = true,
+  unreadOnly = true,
 }: {
   config: MailboxConfig
   customerIndex: Map<string, { email: string; name: string }>
   limit?: number
   serviceOnly?: boolean
+  unreadOnly?: boolean
 }) {
   const client = new ImapFlow({
     host: config.host,
@@ -99,7 +101,7 @@ export async function fetchInboxMessages({
 
     const lock = await client.getMailboxLock(config.mailbox || 'INBOX')
     try {
-      const allUids = await client.search({ all: true })
+      const allUids = await client.search(unreadOnly ? { seen: false } : { all: true })
       if (!Array.isArray(allUids)) return []
       const recentUids = allUids.slice(-Math.max(limit * 4, 60))
       if (!recentUids.length) return []

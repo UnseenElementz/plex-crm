@@ -6,6 +6,7 @@ import { format } from 'date-fns'
 import { useSearchParams } from 'next/navigation'
 import { calculateNextDue, calculatePrice, getTransactionFee, Plan } from '@/lib/pricing'
 import { getSupabase } from '@/lib/supabaseClient'
+import { parseCustomerNotes } from '@/lib/customerNotes'
 
 const PayPalButton = dynamic(() => import('@/components/PayPalButton'), { ssr: false })
 const ChatWidget = dynamic(() => import('@/components/chat/ChatWidget'), { ssr: false })
@@ -20,6 +21,19 @@ type Customer = {
   nextDueDate: string
   notes?: string
   downloads?: boolean
+}
+
+type ReferralDashboard = {
+  code: string
+  shareUrl: string
+  availableCredit: number
+  creditCap: number
+  rewardValue: number
+  successfulReferrals: number
+  rewardHistory: Array<{ email: string; at: string; amount: number; label: string }>
+  referredBy: string | null
+  claimed: boolean
+  canClaim: boolean
 }
 
 const planCards: Array<{ id: Plan; title: string; subtitle: string }> = [
@@ -38,6 +52,11 @@ export default function CustomerPortal() {
   const [updateModal, setUpdateModal] = useState<{ id?: string; title: string; content: string } | null>(null)
   const [billingMessage, setBillingMessage] = useState('')
   const [capturingPayment, setCapturingPayment] = useState(false)
+  const [referral, setReferral] = useState<ReferralDashboard | null>(null)
+  const [referralLoading, setReferralLoading] = useState(false)
+  const [referralMessage, setReferralMessage] = useState('')
+  const [referralCodeInput, setReferralCodeInput] = useState('')
+  const [applyingCredit, setApplyingCredit] = useState(false)
   const [customer, setCustomer] = useState<Customer>({
     id: 'demo',
     fullName: 'Demo User',
@@ -49,10 +68,50 @@ export default function CustomerPortal() {
     notes: '',
   })
 
+  async function loadReferralDashboard(accessToken?: string | null) {
+    setReferralLoading(true)
+    try {
+      const res = await fetch('/api/referrals/me', {
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+        cache: 'no-store',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setReferral(null)
+        return
+      }
+      setReferral(data)
+    } catch {
+      setReferral(null)
+    } finally {
+      setReferralLoading(false)
+    }
+  }
+
+  async function refreshCustomerState(email: string) {
+    const s = getSupabase()
+    if (!s || !email) return
+    const { data: refreshed } = await s.from('customers').select('*').eq('email', email).single()
+    if (!refreshed) return
+    const parsedNotes = parseCustomerNotes(refreshed.notes || '')
+    setCustomer({
+      id: refreshed.id,
+      fullName: refreshed.name,
+      email: refreshed.email,
+      plan: refreshed.subscription_type || customer.plan,
+      streams: Math.min(5, refreshed.streams || customer.streams || 1),
+      startDate: refreshed.start_date || customer.startDate,
+      nextDueDate: refreshed.next_payment_date || customer.nextDueDate,
+      notes: parsedNotes.visibleNotes || '',
+      downloads: parsedNotes.downloads,
+    })
+    setHasSubscription(true)
+  }
+
   useEffect(() => {
     ;(async () => {
       try {
-        const res = await fetch('/api/admin/settings')
+        const res = await fetch('/api/admin/settings', { cache: 'no-store' })
         if (res.ok) {
           const data = await res.json()
           setPaymentLock(Boolean(data?.payment_lock))
@@ -67,6 +126,7 @@ export default function CustomerPortal() {
       }
 
       const { data } = await s.auth.getUser()
+      const { data: sessionData } = await s.auth.getSession()
       if (!data.user) {
         setAuthState('unauth')
         return
@@ -98,6 +158,7 @@ export default function CustomerPortal() {
         const { data: customerData, error } = await loadCustomer()
 
         if (!error && customerData) {
+          const parsedNotes = parseCustomerNotes(customerData.notes || '')
           setCustomer({
             id: customerData.id,
             fullName: customerData.name,
@@ -106,11 +167,12 @@ export default function CustomerPortal() {
             streams: Math.min(5, customerData.streams || 1),
             startDate: customerData.start_date || new Date().toISOString(),
             nextDueDate: customerData.next_payment_date || calculateNextDue(customerData.subscription_type || 'monthly', new Date()).toISOString(),
-            notes: customerData.notes || '',
-            downloads: (customerData.notes || '').includes('Downloads: Yes'),
+            notes: parsedNotes.visibleNotes || '',
+            downloads: parsedNotes.downloads,
           })
           setHasSubscription(true)
           setAuthState('ready')
+          await loadReferralDashboard(sessionData.session?.access_token || null)
           try {
             await fetch('/api/security/ip-log', {
               method: 'POST',
@@ -132,6 +194,7 @@ export default function CustomerPortal() {
           }))
           setHasSubscription(false)
           setAuthState('ready')
+          await loadReferralDashboard(sessionData.session?.access_token || null)
           return
         }
 
@@ -174,21 +237,9 @@ export default function CustomerPortal() {
 
         const s = getSupabase()
         if (s) {
-          const { data: refreshed } = await s.from('customers').select('*').eq('email', customer.email).single()
-          if (refreshed) {
-            setCustomer({
-              id: refreshed.id,
-              fullName: refreshed.name,
-              email: refreshed.email,
-              plan: refreshed.subscription_type || customer.plan,
-              streams: Math.min(5, refreshed.streams || customer.streams || 1),
-              startDate: refreshed.start_date || customer.startDate,
-              nextDueDate: refreshed.next_payment_date || customer.nextDueDate,
-              notes: refreshed.notes || '',
-              downloads: (refreshed.notes || '').includes('Downloads: Yes'),
-            })
-            setHasSubscription(true)
-          }
+          const session = await s.auth.getSession()
+          await refreshCustomerState(customer.email)
+          await loadReferralDashboard(session.data.session?.access_token || null)
         }
 
         setBillingMessage('Payment received and your account has been updated.')
@@ -208,6 +259,9 @@ export default function CustomerPortal() {
   }, [authState, capturingPayment, customer.downloads, customer.email, customer.nextDueDate, customer.plan, customer.startDate, customer.streams, searchParams])
 
   const price = useMemo(() => calculatePrice(customer.plan, customer.streams, pricingConfig, customer.downloads), [customer, pricingConfig])
+  const referralCreditApplied = useMemo(() => Math.min(price, Number(referral?.availableCredit || 0)), [price, referral?.availableCredit])
+  const payableToday = useMemo(() => Math.max(0, Number((price - referralCreditApplied).toFixed(2))), [price, referralCreditApplied])
+  const checkoutFee = useMemo(() => (payableToday > 0 ? getTransactionFee(customer.plan) : 0), [customer.plan, payableToday])
   const status = useMemo(() => {
     if (!hasSubscription) return 'Inactive'
     const due = new Date(customer.nextDueDate)
@@ -222,6 +276,86 @@ export default function CustomerPortal() {
     const beforeDue = !isNaN(due.getTime()) ? new Date() < due : false
     return status === 'Active' && beforeDue
   }, [customer.nextDueDate, hasSubscription, paymentLock, status])
+
+  async function copyReferralValue(value: string, message: string) {
+    try {
+      await navigator.clipboard.writeText(value)
+      setReferralMessage(message)
+      setTimeout(() => setReferralMessage(''), 3000)
+    } catch {
+      setReferralMessage('Copy failed. Please copy it manually.')
+      setTimeout(() => setReferralMessage(''), 3000)
+    }
+  }
+
+  async function claimReferralCode() {
+    const code = referralCodeInput.trim().toUpperCase()
+    if (!code) {
+      setReferralMessage('Enter a referral code first.')
+      return
+    }
+    const s = getSupabase()
+    const token = (await s?.auth.getSession())?.data.session?.access_token
+    try {
+      const res = await fetch('/api/referrals/me', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ referralCode: code }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setReferralMessage(data?.error || 'Referral code could not be claimed.')
+        return
+      }
+      setReferral(data.dashboard)
+      setReferralCodeInput('')
+      setReferralMessage('Referral code linked to your account.')
+      setTimeout(() => setReferralMessage(''), 3000)
+    } catch (e: any) {
+      setReferralMessage(e?.message || 'Referral code could not be claimed.')
+    }
+  }
+
+  async function applyReferralCreditRenewal() {
+    const s = getSupabase()
+    const token = (await s?.auth.getSession())?.data.session?.access_token
+    if (!token) {
+      setBillingMessage('You must be signed in to renew with credit.')
+      return
+    }
+
+    setApplyingCredit(true)
+    setBillingMessage('')
+    try {
+      const res = await fetch('/api/payments/referral-credit', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          plan: customer.plan,
+          streams: customer.streams,
+          downloads: customer.downloads,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setBillingMessage(data?.error || 'Referral credit could not be applied.')
+        return
+      }
+      await refreshCustomerState(customer.email)
+      await loadReferralDashboard(token)
+      setBillingMessage(`Renewal completed using GBP ${Number(data?.creditUsed || 0).toFixed(2)} of referral credit.`)
+    } catch (e: any) {
+      setBillingMessage(e?.message || 'Referral credit could not be applied.')
+    } finally {
+      setApplyingCredit(false)
+    }
+  }
 
   const handleSaveChanges = async () => {
     setSaving(true)
@@ -396,11 +530,99 @@ export default function CustomerPortal() {
 
         <div className="space-y-6">
           <div className="card-solid p-6">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 className="card-title">Referral rewards</h2>
+                <div className="mt-1 text-sm text-slate-400">Bring a friend over and earn GBP 10.00 per paid signup, capped at GBP 80.00 available credit.</div>
+              </div>
+              <div className="rounded-[22px] border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-right">
+                <div className="text-[11px] uppercase tracking-[0.24em] text-emerald-200/80">Available credit</div>
+                <div className="mt-1 text-2xl font-semibold text-white">
+                  GBP {Number(referral?.availableCredit || 0).toFixed(2)}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="panel p-4">
+                <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Your referral code</div>
+                <div className="mt-2 text-xl font-semibold text-white">{referral?.code || 'Loading...'}</div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button className="btn-xs" onClick={() => referral?.code && void copyReferralValue(referral.code, 'Referral code copied.')}>
+                    Copy code
+                  </button>
+                  <button className="btn-xs-outline" onClick={() => referral?.shareUrl && void copyReferralValue(referral.shareUrl, 'Referral link copied.')}>
+                    Copy share link
+                  </button>
+                </div>
+                <div className="mt-3 text-xs text-slate-400">
+                  Share this with new customers. Credit lands on your account once they complete their first paid renewal.
+                </div>
+              </div>
+
+              <div className="panel p-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Reward per signup</div>
+                    <div className="mt-2 text-xl font-semibold text-white">GBP {Number(referral?.rewardValue || 10).toFixed(2)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Successful referrals</div>
+                    <div className="mt-2 text-xl font-semibold text-white">{referral?.successfulReferrals || 0}</div>
+                  </div>
+                </div>
+                {referral?.referredBy ? (
+                  <div className="mt-4 rounded-[20px] border border-cyan-400/15 bg-cyan-400/10 px-4 py-3 text-sm text-cyan-100">
+                    This account is linked to referral code {referral.referredBy}.
+                  </div>
+                ) : null}
+                {referralLoading ? <div className="mt-4 text-sm text-slate-500">Loading referral details...</div> : null}
+              </div>
+            </div>
+
+            {referral?.canClaim ? (
+              <div className="mt-4 rounded-[24px] border border-cyan-400/15 bg-cyan-400/8 p-4">
+                <div className="text-sm font-semibold text-white">Been referred by a friend?</div>
+                <div className="mt-1 text-sm text-slate-400">Add their code before your first paid renewal so the reward goes to the right account.</div>
+                <div className="mt-4 flex flex-wrap gap-3">
+                  <input
+                    className="input max-w-sm"
+                    placeholder="Enter referral code"
+                    value={referralCodeInput}
+                    onChange={(e) => setReferralCodeInput(e.target.value.toUpperCase())}
+                  />
+                  <button className="btn-xs" onClick={claimReferralCode} disabled={!referralCodeInput.trim()}>
+                    Link code
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {referralMessage ? (
+              <div className="mt-4 rounded-[20px] border border-cyan-400/15 bg-cyan-400/8 px-4 py-3 text-sm text-cyan-100">{referralMessage}</div>
+            ) : null}
+
+            {referral?.rewardHistory?.length ? (
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                {referral.rewardHistory.slice(0, 4).map((entry) => (
+                  <div key={`${entry.email}-${entry.at}`} className="panel p-4">
+                    <div className="text-sm font-semibold text-white">{entry.label}</div>
+                    <div className="mt-1 text-xs text-slate-400">{format(new Date(entry.at), 'dd/MM/yyyy HH:mm')}</div>
+                    <div className="mt-2 text-sm text-emerald-300">+ GBP {Number(entry.amount || 0).toFixed(2)} credit</div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="card-solid p-6">
             <h2 className="card-title">Billing overview</h2>
             <div className="mt-5 rounded-[28px] border border-cyan-400/15 bg-[linear-gradient(135deg,rgba(34,211,238,0.12),rgba(15,23,42,0.3))] p-5">
-              <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Current total</div>
-              <div className="mt-2 text-4xl font-semibold text-white">GBP {price.toFixed(2)}</div>
-              <div className="mt-2 text-sm text-slate-400">Transaction fee: GBP {getTransactionFee(customer.plan)}</div>
+              <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Pay today</div>
+              <div className="mt-2 text-4xl font-semibold text-white">GBP {payableToday.toFixed(2)}</div>
+              <div className="mt-2 text-sm text-slate-400">Package total: GBP {price.toFixed(2)}</div>
+              <div className="mt-2 text-sm text-slate-400">Referral credit applied: GBP {referralCreditApplied.toFixed(2)}</div>
+              <div className="mt-2 text-sm text-slate-400">Transaction fee: GBP {checkoutFee}</div>
               <div className="mt-2 text-sm text-slate-400">Next due date: {format(new Date(customer.nextDueDate), 'dd/MM/yyyy')}</div>
             </div>
 
@@ -415,14 +637,22 @@ export default function CustomerPortal() {
                 </div>
               ) : null}
               {canPay ? (
-                <PayPalButton
-                  amount={price}
-                  plan={customer.plan}
-                  streams={customer.streams}
-                  downloads={customer.downloads}
-                  customerEmail={customer.email}
-                  onSuccess={() => {}}
-                />
+                payableToday > 0 ? (
+                  <PayPalButton
+                    amount={payableToday}
+                    baseAmount={price}
+                    creditApplied={referralCreditApplied}
+                    plan={customer.plan}
+                    streams={customer.streams}
+                    downloads={customer.downloads}
+                    customerEmail={customer.email}
+                    onSuccess={() => {}}
+                  />
+                ) : (
+                  <button className="btn w-full" onClick={applyReferralCreditRenewal} disabled={applyingCredit || referralCreditApplied <= 0}>
+                    {applyingCredit ? 'Applying credit...' : 'Renew using referral credit'}
+                  </button>
+                )
               ) : (
                 <div className="rounded-[24px] border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
                   Payments are temporarily locked. Active subscribers can extend before their due date.

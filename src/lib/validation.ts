@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const PlanEnum = z.enum(['monthly','yearly'])
+export const PlanEnum = z.enum(['monthly','yearly','movies_only','tv_only'])
 
 export const CustomerCreateSchema = z.object({
   full_name: z.string().min(2),

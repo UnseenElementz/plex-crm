@@ -1,5 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { calculateNextDue, type Plan } from '@/lib/pricing'
+import { mergeCustomerNotes as mergeStoredCustomerNotes, parseCustomerNotes } from '@/lib/customerNotes'
+import { grantReferralRewardForCustomer } from '@/lib/referrals'
 
 function svc() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
@@ -14,14 +16,6 @@ function isValidDate(value: unknown) {
   if (!value) return false
   const date = new Date(String(value))
   return !Number.isNaN(date.getTime())
-}
-
-function mergeCustomerNotes(existingNotes: string, downloads?: boolean) {
-  const base = String(existingNotes || '')
-    .replace(/Downloads:\s*Yes\s*\n?/gi, '')
-    .trim()
-
-  return [base || undefined, downloads ? 'Downloads: Yes' : undefined].filter(Boolean).join('\n')
 }
 
 export function buildHostingReference(plan: Plan, screens: number, downloads?: boolean) {
@@ -41,12 +35,14 @@ export function buildPayPalCustomId(input: {
   plan: Plan
   streams: number
   downloads?: boolean
+  creditUsed?: number
 }) {
   const email = String(input.email || '').trim().toLowerCase()
   const plan = String(input.plan || 'yearly').trim()
   const streams = Math.max(1, Number(input.streams || 1))
   const downloads = input.downloads ? '1' : '0'
-  return `v1|${email}|${plan}|${streams}|${downloads}`
+  const creditUsed = Math.max(0, Number(input.creditUsed || 0)).toFixed(2)
+  return `v2|${email}|${plan}|${streams}|${downloads}|${creditUsed}`
 }
 
 export function parsePayPalCustomId(value: unknown): null | {
@@ -54,16 +50,19 @@ export function parsePayPalCustomId(value: unknown): null | {
   plan: Plan
   streams: number
   downloads: boolean
+  creditUsed: number
 } {
   const raw = String(value || '').trim()
   const parts = raw.split('|')
-  if (parts.length !== 5 || parts[0] !== 'v1') return null
+  if (parts[0] !== 'v1' && parts[0] !== 'v2') return null
+
   const email = String(parts[1] || '').trim().toLowerCase()
   const plan = String(parts[2] || 'yearly').trim() as Plan
   const streams = Math.max(1, Number(parts[3] || 1))
   const downloads = String(parts[4] || '0') === '1'
+  const creditUsed = parts[0] === 'v2' ? Math.max(0, Number(parts[5] || 0)) : 0
   if (!email || !email.includes('@')) return null
-  return { email, plan, streams, downloads }
+  return { email, plan, streams, downloads, creditUsed: Number(creditUsed.toFixed(2)) }
 }
 
 export async function applySuccessfulPayment(input: {
@@ -72,6 +71,9 @@ export async function applySuccessfulPayment(input: {
   streams: number
   downloads?: boolean
   amount: number
+  creditUsed?: number
+  paymentMethod?: string
+  paymentOrderId?: string
 }) {
   const supabase = svc()
   if (!supabase) throw new Error('Supabase not configured')
@@ -81,11 +83,23 @@ export async function applySuccessfulPayment(input: {
   const streams = Math.max(1, Number(input.streams || 1))
   const downloads = Boolean(input.downloads)
   const amount = Number(input.amount || 0)
+  const creditUsed = Math.max(0, Number(input.creditUsed || 0))
+  const paymentMethod = String(input.paymentMethod || 'PayPal').trim() || 'PayPal'
+  const paymentOrderId = String(input.paymentOrderId || '').trim()
   if (!email) throw new Error('Customer email is required')
 
   const now = new Date()
   const { data: existing } = await supabase.from('customers').select('*').eq('email', email).maybeSingle()
   const { data: profile } = await supabase.from('profiles').select('full_name').eq('email', email).maybeSingle()
+  const currentNotesState = parseCustomerNotes(existing?.notes || '')
+
+  if (paymentOrderId && currentNotesState.paymentOrders.includes(paymentOrderId)) {
+    return {
+      mode: 'duplicate',
+      customerId: existing?.id || null,
+      nextDue: existing?.next_payment_date || null,
+    }
+  }
 
   const existingNextDue = existing?.next_payment_date
   const activeBase =
@@ -94,7 +108,14 @@ export async function applySuccessfulPayment(input: {
       : now
 
   const nextDue = calculateNextDue(plan, activeBase)
-  const nextNotes = mergeCustomerNotes(String(existing?.notes || ''), downloads)
+  const nextNotes = mergeStoredCustomerNotes({
+    existing: existing?.notes || '',
+    downloads,
+    referralCredit: Math.max(0, Number(currentNotesState.referralCredit || 0) - creditUsed),
+    paymentOrders: paymentOrderId
+      ? Array.from(new Set([...currentNotesState.paymentOrders, paymentOrderId])).slice(-12)
+      : currentNotesState.paymentOrders,
+  })
   const customerName = String(existing?.name || profile?.full_name || email).trim()
 
   if (existing?.id) {
@@ -115,11 +136,19 @@ export async function applySuccessfulPayment(input: {
       customer_id: existing.id,
       amount,
       status: 'completed',
-      payment_method: 'PayPal',
+      payment_method: paymentMethod,
     })
 
+    await grantReferralRewardForCustomer(email).catch(() => null)
     return { mode: 'updated', customerId: existing.id, nextDue: nextDue.toISOString() }
   }
+
+  const createdNotes = mergeStoredCustomerNotes({
+    existing: '',
+    downloads,
+    referralCredit: 0,
+    paymentOrders: paymentOrderId ? [paymentOrderId] : [],
+  })
 
   const { data: created, error: createError } = await supabase
     .from('customers')
@@ -131,7 +160,7 @@ export async function applySuccessfulPayment(input: {
       start_date: now.toISOString(),
       next_payment_date: nextDue.toISOString(),
       subscription_status: 'active',
-      notes: nextNotes,
+      notes: createdNotes,
     })
     .select('id')
     .single()
@@ -144,8 +173,9 @@ export async function applySuccessfulPayment(input: {
     customer_id: created.id,
     amount,
     status: 'completed',
-    payment_method: 'PayPal',
+    payment_method: paymentMethod,
   })
 
+  await grantReferralRewardForCustomer(email).catch(() => null)
   return { mode: 'created', customerId: created.id, nextDue: nextDue.toISOString() }
 }

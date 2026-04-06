@@ -41,6 +41,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url)
     const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit') || 40)))
     const serviceOnly = parseBool(url.searchParams.get('serviceOnly'), true)
+    const unreadOnly = parseBool(url.searchParams.get('unreadOnly'), true)
 
     let settings: any = null
     try {
@@ -86,7 +87,7 @@ export async function GET(request: Request) {
       })
     }
 
-    const messages = await fetchInboxMessages({ config, customerIndex, limit, serviceOnly })
+    const messages = await fetchInboxMessages({ config, customerIndex, limit, serviceOnly, unreadOnly })
     return NextResponse.json({ messages, count: messages.length })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Failed to load inbox' }, { status: 500 })

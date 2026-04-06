@@ -135,6 +135,7 @@ export async function POST(request: Request) {
     const resolvedDownloads = Boolean(
       parsedCustomId ? parsedCustomId.downloads : requestedDownloads
     )
+    const resolvedCreditUsed = Math.max(0, Number(parsedCustomId?.creditUsed || 0))
     const amount = Number(
       (orderPurchaseUnit?.payments?.captures?.[0]?.amount?.value) ||
       (orderPurchaseUnit?.amount?.value) ||
@@ -154,6 +155,8 @@ export async function POST(request: Request) {
             streams: resolvedStreams,
             downloads: resolvedDownloads,
             amount,
+            creditUsed: resolvedCreditUsed,
+            paymentOrderId: orderId,
           })
         }
       }
@@ -166,6 +169,7 @@ export async function POST(request: Request) {
       plan: resolvedPlan,
       streams: resolvedStreams,
       downloads: resolvedDownloads,
+      creditUsed: resolvedCreditUsed,
       details: res.result
     })
     

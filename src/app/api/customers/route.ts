@@ -4,6 +4,7 @@ import { cookies } from 'next/headers'
 import { createClient } from '@supabase/supabase-js'
 import { CustomerCreateSchema, formatZodError } from '@/lib/validation'
 import { calculateNextDue } from '@/lib/pricing'
+import { getVisibleCustomerNotes, mergeCustomerNotes, parseCustomerNotes } from '@/lib/customerNotes'
 
 function mem(){
   const g = globalThis as any
@@ -31,6 +32,7 @@ export async function GET(){
     const safeNext = plan
       ? ((!d || isNaN(d.getTime()) || year < 2000 || year > 2100) ? calculateNextDue(plan, start).toISOString() : rawNext)
       : (rawNext || null)
+    const parsedNotes = parseCustomerNotes(c.notes)
     return {
       id: c.id,
       full_name: c.full_name ?? c.name,
@@ -39,11 +41,11 @@ export async function GET(){
       streams: c.streams,
       start_date: c.start_date,
       next_due_date: safeNext,
-      notes: c.notes,
-      plex_username: (c.notes || '').match(/Plex:\s*(.+)/i)?.[1] || undefined,
-      timezone: (c.notes || '').match(/Timezone:\s*(.+)/i)?.[1] || undefined,
+      notes: getVisibleCustomerNotes(c.notes),
+      plex_username: parsedNotes.plexUsername || undefined,
+      timezone: parsedNotes.timezone || undefined,
       status: c.status ?? c.subscription_status,
-      downloads: (c.notes || '').includes('Downloads: Yes')
+      downloads: parsedNotes.downloads
     }
   })
   return NextResponse.json(mapped)
@@ -94,11 +96,13 @@ export async function POST(request: Request){
     streams: payload.streams,
     start_date: payload.start_date,
     next_payment_date: payload.next_due_date,
-    notes: [
-      payload.notes?.trim(),
-      plex ? `Plex: ${plex}` : undefined,
-      tz ? `Timezone: ${tz}` : undefined
-    ].filter(Boolean).join('\n')
+    notes: mergeCustomerNotes({
+      existing: '',
+      visibleNotes: payload.notes?.trim(),
+      plexUsername: plex,
+      timezone: tz,
+      downloads: Boolean(payload.downloads),
+    })
   }
   const { data, error } = await client.from('customers').insert(dbPayload).select('*')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -111,9 +115,9 @@ export async function POST(request: Request){
     streams: row.streams,
     start_date: row.start_date,
     next_due_date: row.next_due_date ?? row.next_payment_date,
-    notes: row.notes,
-    plex_username: (row.notes || '').match(/Plex:\s*(.+)/i)?.[1] || undefined,
-    timezone: (row.notes || '').match(/Timezone:\s*(.+)/i)?.[1] || undefined,
+    notes: getVisibleCustomerNotes(row.notes),
+    plex_username: parseCustomerNotes(row.notes).plexUsername || undefined,
+    timezone: parseCustomerNotes(row.notes).timezone || undefined,
     status: row.status ?? row.subscription_status
   }) : null
   return NextResponse.json(mapped)

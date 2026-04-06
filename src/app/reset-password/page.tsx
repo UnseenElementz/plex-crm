@@ -18,7 +18,7 @@ export default function ResetPasswordPage(){
     checkSession()
     ;(async () => {
       try {
-        const res = await fetch('/api/admin/settings')
+        const res = await fetch('/api/admin/settings', { cache: 'no-store' })
         if (res.ok) {
           const data = await res.json()
           if (data.company_name) setCompanyName(data.company_name)

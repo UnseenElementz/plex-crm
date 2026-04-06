@@ -19,6 +19,8 @@ function buildHostingReference(plan?: Plan, servers?: number, downloads?: boolea
 
 export default function PayPalButton({
   amount,
+  baseAmount,
+  creditApplied = 0,
   currency = 'GBP',
   customerEmail,
   plan,
@@ -26,6 +28,8 @@ export default function PayPalButton({
   downloads,
 }: {
   amount: number
+  baseAmount?: number
+  creditApplied?: number
   currency?: string
   customerEmail?: string
   plan?: Plan
@@ -79,6 +83,12 @@ export default function PayPalButton({
         <div>
           <div className="text-xs uppercase tracking-[0.24em] text-cyan-200/80">PayPal Checkout</div>
           <div className="mt-2 text-3xl font-semibold text-white">GBP {amount.toFixed(2)}</div>
+          {creditApplied > 0 && baseAmount !== undefined ? (
+            <div className="mt-2 space-y-1 text-xs text-slate-400">
+              <div>Base total: GBP {baseAmount.toFixed(2)}</div>
+              <div>Referral credit: -GBP {creditApplied.toFixed(2)}</div>
+            </div>
+          ) : null}
         </div>
         <div className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-slate-300">
           Secure payment

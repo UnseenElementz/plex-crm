@@ -3,6 +3,7 @@ import paypal from '@paypal/checkout-server-sdk'
 import { calculatePrice, type Plan } from '@/lib/pricing'
 import { createClient } from '@supabase/supabase-js'
 import { buildHostingReference, buildPayPalCustomId } from '@/lib/payments'
+import { getReferralDiscountSnapshot } from '@/lib/referrals'
 export const runtime = 'nodejs'
 const sanitize = (v?: string) => (v || '').trim().replace(/^['"]|['"]$/g, '')
 
@@ -53,6 +54,7 @@ function resolveBaseUrl(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json()
+    const normalizedEmail = String(body?.customerEmail || '').trim().toLowerCase()
     let { amount, currency = 'GBP', plan, streams, downloads, customerEmail } = body || {}
     if (plan && typeof plan === 'string') {
       const p = plan as Plan
@@ -60,9 +62,22 @@ export async function POST(request: Request) {
       const cfg = await readPricingConfig()
       amount = calculatePrice(p, s, cfg, downloads)
     }
+
+    const referralDiscount =
+      normalizedEmail && amount
+        ? await getReferralDiscountSnapshot(normalizedEmail, Number(amount || 0)).catch(() => null)
+        : null
+
+    if (referralDiscount) {
+      amount = referralDiscount.payableAmount
+    }
     
     if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
-      return NextResponse.json({ error: 'Valid amount required' }, { status: 400 })
+      return NextResponse.json({
+        error: 'Referral credit covers the full renewal. Use the credit renewal button in the portal instead.',
+        zeroBalance: true,
+        creditApplied: referralDiscount?.creditToUse || 0,
+      }, { status: 400 })
     }
 
     try {
@@ -73,10 +88,11 @@ export async function POST(request: Request) {
       const purchaseUnit: any = {
         description,
         custom_id: customerEmail ? buildPayPalCustomId({
-          email: String(customerEmail || '').trim().toLowerCase(),
+          email: normalizedEmail,
           plan: (plan as Plan) || 'yearly',
           streams: Math.max(1, Number(streams || 1)),
           downloads: Boolean(downloads),
+          creditUsed: referralDiscount?.creditToUse || 0,
         }) : undefined,
         amount: { currency_code: currency, value: String(Number(amount).toFixed(2)) }
       }
@@ -102,10 +118,11 @@ export async function POST(request: Request) {
       const purchase_units: any[] = [{
         description: buildHostingReference((plan as Plan) || 'yearly', Math.max(1, Number(streams || 1)), Boolean(downloads)),
         custom_id: customerEmail ? buildPayPalCustomId({
-          email: String(customerEmail || '').trim().toLowerCase(),
+          email: normalizedEmail,
           plan: (plan as Plan) || 'yearly',
           streams: Math.max(1, Number(streams || 1)),
           downloads: Boolean(downloads),
+          creditUsed: referralDiscount?.creditToUse || 0,
         }) : undefined,
         amount: { currency_code: currency, value: String(Number(amount).toFixed(2)) }
       }]

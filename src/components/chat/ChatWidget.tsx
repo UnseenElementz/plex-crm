@@ -92,7 +92,7 @@ export default function ChatWidget({
   useEffect(() => {
     ;(async () => {
       try {
-        const res = await fetch('/api/admin/settings')
+        const res = await fetch('/api/admin/settings', { cache: 'no-store' })
         if (!res.ok) return
         const data = await res.json()
         const avail = String(data?.chat_availability ?? (data?.chat_online === false ? 'off' : 'active')).toLowerCase()

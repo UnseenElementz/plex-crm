@@ -77,7 +77,7 @@ export default function AdminEmailPage(){
     try {
       setInboxLoading(true)
       setInboxError('')
-      const res = await fetch('/api/admin/email/inbox?serviceOnly=true&limit=40')
+      const res = await fetch('/api/admin/email/inbox?serviceOnly=true&unreadOnly=true&limit=40')
       const data = await res.json().catch(()=>({}))
       if (!res.ok) {
         setInboxError(data?.error || 'Failed to load inbox')
@@ -439,8 +439,8 @@ export default function AdminEmailPage(){
           <div className="glass rounded-2xl overflow-hidden">
             <div className="p-4 border-b border-slate-700/50 flex items-center justify-between">
               <div>
-                <h3 className="text-lg font-semibold text-slate-200">Customer Reply Inbox</h3>
-                <p className="text-xs text-slate-400">Matched to CRM emails and filtered by service-related keywords.</p>
+                <h3 className="text-lg font-semibold text-slate-200">Unread Customer Inbox</h3>
+                <p className="text-xs text-slate-400">Unread customer replies only, matched to CRM emails and service-related keywords.</p>
               </div>
               <div className="text-xs text-cyan-300">{inbox.length} found</div>
             </div>
@@ -448,7 +448,7 @@ export default function AdminEmailPage(){
               {inboxLoading && <div className="p-4 text-sm text-slate-400">Loading inbox...</div>}
               {!inboxLoading && inboxError && <div className="p-4 text-sm text-rose-400">{inboxError}</div>}
               {!inboxLoading && !inboxError && inbox.length === 0 && (
-                <div className="p-4 text-sm text-slate-500">No matched service replies found.</div>
+                <div className="p-4 text-sm text-slate-500">No unread customer replies matched the service filters.</div>
               )}
               {inbox.map(mail => (
                 <button
@@ -478,7 +478,7 @@ export default function AdminEmailPage(){
           <div className="glass rounded-2xl h-full min-h-[24rem] flex flex-col">
             <div className="p-4 border-b border-slate-700/50">
               <h3 className="text-lg font-semibold text-slate-200">Reply Preview</h3>
-              <p className="text-xs text-slate-400">Only emails from known customers with likely service-related content are shown here.</p>
+              <p className="text-xs text-slate-400">Unread replies only, filtered to known customers with likely service-related content.</p>
             </div>
             {!selectedInbox ? (
               <div className="p-6 text-sm text-slate-500">Select a customer email reply to view it.</div>

@@ -223,7 +223,7 @@ export default function AdminDashboard() {
     } catch {}
     setSaving(true)
     try {
-      const g = await fetch('/api/admin/settings')
+      const g = await fetch('/api/admin/settings', { cache: 'no-store' })
       const cur = g.ok ? await g.json() : {}
       const payload = { ...cur, chat_availability: next }
       await fetch('/api/admin/settings', {

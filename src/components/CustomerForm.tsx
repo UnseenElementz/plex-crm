@@ -84,7 +84,7 @@ export default function CustomerForm({ initial, onSaved, onCancel }: { initial?:
   }, [])
   useEffect(()=>{ 
     (async()=>{ try{
-      const res = await fetch('/api/admin/settings')
+        const res = await fetch('/api/admin/settings', { cache: 'no-store' })
       if (res.ok){ setPricingConfig(await res.json()) }
     } catch{} })() 
   }, [])
