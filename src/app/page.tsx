@@ -59,6 +59,8 @@ export default function Home() {
     return `/api/proxy-image?src=${encodeURIComponent(n)}`
   }
 
+  const heroSrc = normalizeHeroUrl(heroImageUrl)
+
   const layer1 = { transform: `translateY(${-(parallaxY * 0.08)}px)` }
   const layer2 = { transform: `translateY(${-(parallaxY * 0.14)}px)` }
 
@@ -68,8 +70,10 @@ export default function Home() {
       <div aria-hidden="true" className="absolute inset-0 -z-10 pointer-events-none">
         <div className="absolute inset-0 blur-3xl opacity-40" style={layer1}></div>
         <div className="absolute -top-24 left-0 right-0 h-[60vh]" style={layer2}>
-          <div className="mx-auto max-w-6xl h-full shimmer metallic-card"></div>
+          <div className="mx-auto h-full max-w-6xl shimmer metallic-card"></div>
         </div>
+        <div className="absolute right-[8%] top-[10%] h-40 w-40 rounded-full border border-cyan-400/20 bg-cyan-400/10 blur-2xl"></div>
+        <div className="absolute bottom-[12%] left-[6%] h-56 w-56 rounded-full border border-sky-400/15 bg-sky-500/10 blur-3xl"></div>
       </div>
 
       {/* Hero Section */}
@@ -79,10 +83,10 @@ export default function Home() {
             <h1 className="text-5xl md:text-6xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-cyan-200 via-white to-blue-200">
               {companyName}
             </h1>
-            <p className="mt-3 text-slate-300 text-lg">
-              Ultimate Hosting Experiance
+            <p className="mt-3 text-lg text-slate-300">
+              A cinema-scale Plex experience wrapped in a starfield control room.
               <br />
-              <span className="text-slate-400">When The best matters</span>
+              <span className="text-slate-400">Referral rewards, premium uptime, and a customer portal built for long-term retention.</span>
             </p>
             <div className="mt-8 flex flex-wrap gap-4">
               <Link 
@@ -110,7 +114,7 @@ export default function Home() {
             {heroImageUrl && (
               <>
                 <img
-                  src={proxied(heroImageUrl)}
+                  src={heroSrc}
                   alt=""
                   className="absolute inset-0 w-full h-full object-cover scale-110 blur-md opacity-45"
                   onError={(e)=>{ const t = e.target as HTMLImageElement; t.style.display = 'none' }}
@@ -119,7 +123,7 @@ export default function Home() {
                 />
                 <div className="absolute inset-0 p-5 md:p-7">
                   <img
-                    src={proxied(heroImageUrl)}
+                    src={heroSrc}
                     alt={`${companyName} hero`}
                     className="w-full h-full object-contain"
                     onError={(e)=>{ const t = e.target as HTMLImageElement; t.style.display = 'none' }}
@@ -141,7 +145,7 @@ export default function Home() {
           {[
             { title: '99% Uptime', desc: 'We strive to keep the servers at top performance' },
             { title: 'Huge Collection', desc: 'We have one of the largest collections of movies and shows in the world' },
-            { title: 'Worldwide Servers', desc: 'We have servers placed around the world for top-tier performance' }
+            { title: 'Referral Rewards', desc: 'Bring friends to the service and earn up to GBP 80 in renewal credit' }
           ].map((f, i)=> (
             <div key={f.title} className="metallic-card p-6 fade-up" style={{ animationDelay: `${(i+1)*160}ms` }}>
               <h3 className="text-xl font-semibold text-slate-200 mb-1">{f.title}</h3>

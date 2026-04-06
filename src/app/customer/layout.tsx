@@ -1,19 +1,20 @@
 "use client"
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { getSupabase } from '@/lib/supabaseClient'
-import { getStatus } from '@/lib/pricing'
+import CosmicBackdrop from '@/components/CosmicBackdrop'
 
 export default function CustomerLayout({ children }: { children: React.ReactNode }){
   const router = useRouter()
   const pathname = usePathname()
   const [checking, setChecking] = useState(true)
+  const isAuthPage = pathname?.startsWith('/customer/login') || pathname?.startsWith('/customer/register')
 
   useEffect(()=>{
     (async()=>{
       try{
-        const skip = pathname?.startsWith('/customer/login') || pathname?.startsWith('/customer/register')
-        if (skip) { setChecking(false); return }
+        if (isAuthPage) { setChecking(false); return }
         if (typeof window !== 'undefined' && sessionStorage.getItem('customerDemo') === 'true'){
           setChecking(false); return
         }
@@ -26,7 +27,7 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
         setChecking(false)
       }catch{ router.replace('/customer/login') }
     })()
-  }, [pathname, router])
+  }, [isAuthPage, pathname, router])
 
   if (checking){
     return (
@@ -39,5 +40,73 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
     )
   }
 
-  return <>{children}</>
+  if (isAuthPage) {
+    return (
+      <div className="relative">
+        <CosmicBackdrop variant="portal" />
+        <div className="relative z-10">{children}</div>
+      </div>
+    )
+  }
+
+  const navItems = [
+    { href: '/customer', label: 'Portal' },
+    { href: '/customer/payments', label: 'Payments' },
+    { href: '/customer/service-updates', label: 'Updates' },
+    { href: '/customer/recommendations', label: 'Requests' },
+    { href: '/customer/settings', label: 'Settings' },
+    { href: '/customer/contact', label: 'Support' },
+  ]
+
+  return (
+    <div className="relative">
+      <CosmicBackdrop variant="portal" />
+      <div className="relative z-10 px-4 pb-12 pt-5 md:px-6">
+        <div className="mx-auto max-w-6xl">
+          <div className="glass rounded-[2rem] border border-cyan-500/20 bg-slate-950/45 px-5 py-5 shadow-[0_24px_80px_rgba(2,6,23,0.45)]">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+              <div className="max-w-2xl">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.35em] text-cyan-300/80">
+                  Customer Command Deck
+                </div>
+                <h1 className="mt-2 text-2xl font-semibold text-slate-100 md:text-3xl">
+                  Streaming management inside a cosmic control room
+                </h1>
+                <p className="mt-2 max-w-xl text-sm text-slate-300">
+                  Renew, track referral credit, review updates, and send requests from one shared customer hub.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-cyan-500/20 bg-slate-950/55 px-4 py-3 text-right">
+                <div className="text-[11px] uppercase tracking-[0.28em] text-slate-500">Referral bonus</div>
+                <div className="mt-1 text-xl font-semibold text-cyan-300">Earn up to £80</div>
+                <div className="text-xs text-slate-400">£10 per successful signup</div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex flex-wrap gap-2">
+              {navItems.map((item) => {
+                const active = pathname === item.href
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    prefetch={false}
+                    className={`rounded-2xl border px-4 py-2 text-sm font-medium transition-all ${
+                      active
+                        ? 'border-cyan-400/50 bg-cyan-500/15 text-cyan-200 shadow-[0_0_24px_rgba(34,211,238,0.14)]'
+                        : 'border-slate-700/70 bg-slate-950/45 text-slate-300 hover:border-cyan-500/30 hover:text-cyan-200'
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div className="relative z-10 mt-6">{children}</div>
+      </div>
+    </div>
+  )
 }

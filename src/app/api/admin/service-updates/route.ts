@@ -48,7 +48,7 @@ export async function POST(request: Request){
           .select('*')
           .single()
         if (!error && data) return NextResponse.json({ ok: true, update: data })
-      } catch(e:any){ /* fall back below */ }
+      } catch { /* fall back below */ }
     }
 
     const jar = cookies()

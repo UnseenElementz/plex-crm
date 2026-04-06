@@ -13,7 +13,8 @@ import { shouldAutoWait } from '@/lib/chatIdle'
 export default function AdminDashboard() {
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
-  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'closed' | 'waiting'>('active')
+  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'closed' | 'waiting'>('all')
+  const [showUnreadOnly, setShowUnreadOnly] = useState(true)
   const [isMobile, setIsMobile] = useState(false)
   const [saving, setSaving] = useState(false)
   const [idleMinutes, setIdleMinutes] = useState(5)
@@ -41,6 +42,12 @@ export default function AdminDashboard() {
     setAdminAvailability,
     hydrateAdminAvailability
   } = useChatStore()
+
+  const hasUnreadMessages = (conversation: Conversation) => {
+    const unreadCount = Number((conversation as any).metadata?.unread_customer_count || 0)
+    const unreadFlag = Boolean((conversation as any).metadata?.has_unread_customer_message)
+    return unreadCount > 0 || unreadFlag
+  }
 
   // Handle deletion safely
   const handleDelete = async () => {
@@ -142,6 +149,7 @@ export default function AdminDashboard() {
       }
     }
     const arr = Array.from(byKey.values())
+      .filter(c => !showUnreadOnly || hasUnreadMessages(c))
       .filter(c => (filterStatus === 'all' || c.status === filterStatus))
       .filter(c => {
         const meta: any = (c as any).metadata || {}
@@ -154,7 +162,7 @@ export default function AdminDashboard() {
       .sort((a,b)=> new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
     const first = arr[0]
     if (first) setSelectedConversation(first)
-  }, [conversations, filterStatus, searchTerm, selectedConversation])
+  }, [conversations, filterStatus, searchTerm, selectedConversation, showUnreadOnly])
 
   // Live updates come from realtime subscriptions; manual fetch occurs on selection only.
 
@@ -207,6 +215,7 @@ export default function AdminDashboard() {
     }
     const arr = Array.from(byKey.values())
     return arr
+      .filter(c => !showUnreadOnly || hasUnreadMessages(c))
       .filter(c => (filterStatus === 'all' || c.status === filterStatus))
       .filter(c => {
         const meta: any = (c as any).metadata || {}
@@ -317,6 +326,15 @@ export default function AdminDashboard() {
             <option value="waiting">Waiting</option>
             <option value="closed">Closed</option>
           </select>
+          <label className="flex items-center justify-between rounded-xl border border-slate-700 bg-slate-900/40 px-3 py-2 text-sm text-slate-300">
+            <span>Unread only</span>
+            <input
+              type="checkbox"
+              checked={showUnreadOnly}
+              onChange={(e) => setShowUnreadOnly(e.target.checked)}
+              className="checkbox checkbox-sm checkbox-info"
+            />
+          </label>
           <div className="flex gap-2">
             <button
               className="btn-ghost text-xs border border-slate-700 hover:bg-slate-800 flex-1"

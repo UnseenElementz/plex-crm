@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabaseClient'
 import { createClient } from '@supabase/supabase-js'
 import { CustomerUpdateSchema, formatZodError } from '@/lib/validation'
+import { buildCustomerNotes, parseCustomerNotes } from '@/lib/customerNotes'
+import { normalizeReferralCode } from '@/lib/referrals'
 
 function mem(){
   const g = globalThis as any
@@ -17,6 +19,7 @@ export async function GET(_: Request, { params }: { params: { id: string } }){
   const { data, error } = await supabase.from('customers').select('*').eq('id', params.id).limit(1)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   const row = data?.[0]
+  const parsedNotes = parseCustomerNotes(row?.notes)
   const mapped = row ? (()=>{
     const plan = (row.plan ?? row.subscription_type)
     const rawNext = row.next_due_date ?? row.next_payment_date
@@ -32,10 +35,15 @@ export async function GET(_: Request, { params }: { params: { id: string } }){
       start_date: row.start_date,
       next_due_date: safeNext,
       notes: row.notes,
-      plex_username: (row.notes || '').match(/Plex:\s*(.+)/i)?.[1] || undefined,
-      timezone: (row.notes || '').match(/Timezone:\s*(.+)/i)?.[1] || undefined,
+      plex_username: parsedNotes.plexUsername || undefined,
+      timezone: parsedNotes.timezone || undefined,
       status: row.status ?? row.subscription_status,
-      downloads: (row.notes || '').includes('Downloads: Yes')
+      downloads: parsedNotes.downloads,
+      referral_code: normalizeReferralCode(row.referral_code) || undefined,
+      referral_credit_balance: Number(row.referral_credit_balance || 0),
+      referral_credit_earned_total: Number(row.referral_credit_earned_total || 0),
+      referral_credit_redeemed_total: Number(row.referral_credit_redeemed_total || 0),
+      successful_referrals_count: Number(row.successful_referrals_count || 0),
     }
   })() : null
   return NextResponse.json(mapped)
@@ -108,25 +116,11 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     if (client) {
       const { data: current } = await client.from('customers').select('notes, plan, subscription_type').eq('id', params.id).single()
       if (current) {
-        currentNotes = current.notes || ''
-        // Extract existing values
-        const plexM = currentNotes.match(/Plex:\s*([^\n]+)/i)
-        if (plexM) currentPlex = plexM[1].trim()
-        
-        const tzM = currentNotes.match(/Timezone:\s*([^\n]+)/i)
-        if (tzM) currentTimezone = tzM[1].trim()
-        
-        const dlM = currentNotes.includes('Downloads: Yes')
-        currentDownloads = dlM
-        
-        // Remove the virtual fields from the "base" notes to get the user's actual notes
-        // This is a bit hacky because we store everything in one string. 
-        // We should strip the system lines to get the "user notes".
-        currentNotes = currentNotes
-          .replace(/Plex:\s*[^\n]+\n?/gi, '')
-          .replace(/Timezone:\s*[^\n]+\n?/gi, '')
-          .replace(/Downloads: Yes\n?/gi, '')
-          .trim()
+        const parsedCurrentNotes = parseCustomerNotes(current.notes)
+        currentNotes = parsedCurrentNotes.plainNotes
+        currentPlex = parsedCurrentNotes.plexUsername
+        currentTimezone = parsedCurrentNotes.timezone
+        currentDownloads = parsedCurrentNotes.downloads
       }
     }
 
@@ -136,13 +130,12 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 
     const downloads = payload.downloads !== undefined ? payload.downloads : currentDownloads
 
-    const combined = [
-      notes || undefined, 
-      plex ? `Plex: ${plex}` : undefined, 
-      tz ? `Timezone: ${tz}` : undefined,
-      downloads ? 'Downloads: Yes' : undefined
-    ].filter(Boolean).join('\n')
-    dbPayload.notes = combined
+    dbPayload.notes = buildCustomerNotes({
+      plainNotes: notes,
+      plexUsername: plex,
+      timezone: tz,
+      downloads,
+    })
   }
   if (!client){
     const list = mem()
@@ -153,6 +146,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   const { data, error } = await client.from('customers').update(dbPayload).eq('id', params.id).select('*')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   const row = data?.[0]
+  const parsedNotes = parseCustomerNotes(row?.notes)
   const mapped = row ? ({
     id: row.id,
     full_name: row.full_name ?? row.name,
@@ -162,8 +156,15 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     start_date: row.start_date,
     next_due_date: row.next_due_date ?? row.next_payment_date,
     notes: row.notes,
-    plex_username: (row.notes || '').match(/Plex:\s*(.+)/i)?.[1] || undefined,
-    status: row.status ?? row.subscription_status
+    plex_username: parsedNotes.plexUsername || undefined,
+    timezone: parsedNotes.timezone || undefined,
+    status: row.status ?? row.subscription_status,
+    downloads: parsedNotes.downloads,
+    referral_code: normalizeReferralCode(row.referral_code) || undefined,
+    referral_credit_balance: Number(row.referral_credit_balance || 0),
+    referral_credit_earned_total: Number(row.referral_credit_earned_total || 0),
+    referral_credit_redeemed_total: Number(row.referral_credit_redeemed_total || 0),
+    successful_referrals_count: Number(row.successful_referrals_count || 0),
   }) : null
   return NextResponse.json(mapped)
 }

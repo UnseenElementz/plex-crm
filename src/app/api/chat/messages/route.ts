@@ -47,7 +47,21 @@ export async function POST(request: Request){
       list.push(msg)
       const convRaw = jar.get('admin_conversations')?.value
       const convs = convRaw ? JSON.parse(decodeURIComponent(convRaw)) : []
-      const updatedConvs = (convs||[]).map((c:any)=> c.id===conversation_id ? { ...c, updated_at: new Date().toISOString() } : c)
+      const updatedConvs = (convs||[]).map((c:any) => {
+        if (c.id !== conversation_id) return c
+        const unreadCount = sender_type === 'customer'
+          ? Number(c?.metadata?.unread_customer_count || 0) + 1
+          : Number(c?.metadata?.unread_customer_count || 0)
+        return {
+          ...c,
+          updated_at: new Date().toISOString(),
+          metadata: {
+            ...(c?.metadata || {}),
+            unread_customer_count: unreadCount,
+            has_unread_customer_message: unreadCount > 0,
+          },
+        }
+      })
       const res = NextResponse.json(msg)
       res.cookies.set(`admin_messages_${conversation_id}`, encodeURIComponent(JSON.stringify(list)), { path: '/', maxAge: 31536000 })
       res.cookies.set('admin_conversations', encodeURIComponent(JSON.stringify(updatedConvs)), { path: '/', maxAge: 31536000 })
@@ -84,7 +98,11 @@ export async function POST(request: Request){
       const meta: any = conv?.metadata || {}
       meta.last_message_at = nowIso
       if (sender_type === 'admin') meta.last_admin_at = nowIso
-      if (sender_type === 'customer') meta.last_customer_at = nowIso
+      if (sender_type === 'customer') {
+        meta.last_customer_at = nowIso
+        meta.unread_customer_count = Number(meta.unread_customer_count || 0) + 1
+        meta.has_unread_customer_message = true
+      }
       const nextStatus = conv?.status ? nextConversationStatus({ current: conv.status, senderType: sender_type }) : undefined
       await supabase.from('conversations').update({ updated_at: nowIso, status: nextStatus, metadata: meta }).eq('id', conversation_id)
     } catch {}
@@ -107,8 +125,22 @@ export async function PUT(request: Request){
       const raw = jar.get(`admin_messages_${conversation_id}`)?.value
       const list = raw ? JSON.parse(decodeURIComponent(raw)) : []
       const updated = (list||[]).map((m:any)=> m.sender_type==='customer' ? { ...m, is_read: true } : m)
+      const convRaw = jar.get('admin_conversations')?.value
+      const convs = convRaw ? JSON.parse(decodeURIComponent(convRaw)) : []
+      const updatedConvs = (convs || []).map((c: any) => {
+        if (c.id !== conversation_id) return c
+        return {
+          ...c,
+          metadata: {
+            ...(c?.metadata || {}),
+            unread_customer_count: 0,
+            has_unread_customer_message: false,
+          },
+        }
+      })
       const res = NextResponse.json({ ok: true })
       res.cookies.set(`admin_messages_${conversation_id}`, encodeURIComponent(JSON.stringify(updated)), { path: '/', maxAge: 31536000 })
+      res.cookies.set('admin_conversations', encodeURIComponent(JSON.stringify(updatedConvs)), { path: '/', maxAge: 31536000 })
       return res
     } catch(e:any){ return NextResponse.json({ error: e?.message || 'Unknown error' }, { status: 500 }) }
   }
@@ -125,6 +157,17 @@ export async function PUT(request: Request){
       .eq('conversation_id', conversation_id)
       .eq('sender_type', 'customer')
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    const { data: conv } = await supabase
+      .from('conversations')
+      .select('metadata')
+      .eq('id', conversation_id)
+      .maybeSingle()
+    const nextMetadata = {
+      ...(conv?.metadata || {}),
+      unread_customer_count: 0,
+      has_unread_customer_message: false,
+    }
+    await supabase.from('conversations').update({ metadata: nextMetadata }).eq('id', conversation_id)
     return NextResponse.json({ ok: true })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Unknown error' }, { status: 500 })

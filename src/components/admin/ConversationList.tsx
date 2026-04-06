@@ -55,53 +55,61 @@ export default function ConversationList({
           <p>No conversations found</p>
         </div>
       ) : (
-        conversations.map((conversation) => (
-          <div
-            key={conversation.id}
-            onClick={() => {
-              if (selectMode) onToggleSelect?.(conversation.id)
-              else onSelectConversation(conversation)
-            }}
-            className={`p-4 cursor-pointer hover:bg-gray-50 transition-colors ${
-              selectedConversation?.id === conversation.id ? 'bg-blue-50 border-r-2 border-blue-600' : ''
-            }`}
-          >
-            <div className="flex items-start justify-between">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center space-x-2 mb-1">
-                  {selectMode && (
-                    <input
-                      type="checkbox"
-                      checked={Boolean(selectedIds[conversation.id])}
-                      onChange={() => onToggleSelect?.(conversation.id)}
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                  )}
-                  <User className="w-4 h-4 text-gray-400" />
-                  <span className="text-sm font-medium text-gray-900 truncate">
-                    {(conversation as any).metadata?.full_name || (conversation as any).metadata?.email || `Customer #${conversation.id.slice(0, 8)}`}
-                  </span>
-                  <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                    conversation.status === 'active' ? 'bg-green-100 text-green-800' :
-                    conversation.status === 'waiting' ? 'bg-yellow-100 text-yellow-800' :
-                    'bg-gray-100 text-gray-800'
-                  }`}>
-                    {getStatusText(conversation.status)}
-                  </span>
+        conversations.map((conversation) => {
+          const unreadCount = Number((conversation as any).metadata?.unread_customer_count || 0)
+          return (
+            <div
+              key={conversation.id}
+              onClick={() => {
+                if (selectMode) onToggleSelect?.(conversation.id)
+                else onSelectConversation(conversation)
+              }}
+              className={`p-4 cursor-pointer hover:bg-gray-50 transition-colors ${
+                selectedConversation?.id === conversation.id ? 'bg-blue-50 border-r-2 border-blue-600' : ''
+              }`}
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center space-x-2 mb-1">
+                    {selectMode && (
+                      <input
+                        type="checkbox"
+                        checked={Boolean(selectedIds[conversation.id])}
+                        onChange={() => onToggleSelect?.(conversation.id)}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    )}
+                    <User className="w-4 h-4 text-gray-400" />
+                    <span className="text-sm font-medium text-gray-900 truncate">
+                      {(conversation as any).metadata?.full_name || (conversation as any).metadata?.email || `Customer #${conversation.id.slice(0, 8)}`}
+                    </span>
+                    {unreadCount > 0 && (
+                      <span className="inline-flex min-w-6 items-center justify-center rounded-full bg-cyan-500 px-2 py-1 text-[11px] font-semibold text-slate-950">
+                        {unreadCount}
+                      </span>
+                    )}
+                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                      conversation.status === 'active' ? 'bg-green-100 text-green-800' :
+                      conversation.status === 'waiting' ? 'bg-yellow-100 text-yellow-800' :
+                      'bg-gray-100 text-gray-800'
+                    }`}>
+                      {getStatusText(conversation.status)}
+                    </span>
+                  </div>
+                  
+                  <div className="flex items-center space-x-1 text-xs text-gray-500">
+                    <Clock className="w-3 h-3" />
+                    <span>{formatDistanceToNow(new Date(conversation.updated_at), { addSuffix: true })}</span>
+                  </div>
                 </div>
                 
-                <div className="flex items-center space-x-1 text-xs text-gray-500">
-                  <Clock className="w-3 h-3" />
-                  <span>{formatDistanceToNow(new Date(conversation.updated_at), { addSuffix: true })}</span>
+                <div className="ml-3">
+                  <div className={`w-2 h-2 rounded-full ${getStatusColor(conversation.status)}`}></div>
                 </div>
               </div>
-              
-              <div className="ml-3">
-                <div className={`w-2 h-2 rounded-full ${getStatusColor(conversation.status)}`}></div>
-              </div>
             </div>
-          </div>
-        ))
+          )
+        })
       )}
     </div>
   )
