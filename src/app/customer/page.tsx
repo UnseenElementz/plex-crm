@@ -54,6 +54,7 @@ export default function CustomerPortal() {
   const [capturingPayment, setCapturingPayment] = useState(false)
   const [referral, setReferral] = useState<ReferralDashboard | null>(null)
   const [referralLoading, setReferralLoading] = useState(false)
+  const [referralError, setReferralError] = useState('')
   const [referralMessage, setReferralMessage] = useState('')
   const [referralCodeInput, setReferralCodeInput] = useState('')
   const [applyingCredit, setApplyingCredit] = useState(false)
@@ -70,19 +71,35 @@ export default function CustomerPortal() {
 
   async function loadReferralDashboard(accessToken?: string | null) {
     setReferralLoading(true)
+    setReferralError('')
     try {
+      const s = getSupabase()
+      let token = String(accessToken || '').trim()
+      if (!token && s) {
+        const { data: sessionData } = await s.auth.getSession()
+        token = String(sessionData.session?.access_token || '').trim()
+      }
+
+      if (!token) {
+        setReferral(null)
+        setReferralError('Sign in again to load your referral code.')
+        return
+      }
+
       const res = await fetch('/api/referrals/me', {
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+        headers: { Authorization: `Bearer ${token}` },
         cache: 'no-store',
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         setReferral(null)
+        setReferralError(data?.error || 'Referral dashboard is unavailable right now.')
         return
       }
       setReferral(data)
     } catch {
       setReferral(null)
+      setReferralError('Referral dashboard is unavailable right now.')
     } finally {
       setReferralLoading(false)
     }
@@ -546,18 +563,26 @@ export default function CustomerPortal() {
             <div className="mt-5 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
               <div className="panel p-4">
                 <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Your referral code</div>
-                <div className="mt-2 text-xl font-semibold text-white">{referral?.code || 'Loading...'}</div>
+                <div className="mt-2 text-xl font-semibold text-white">
+                  {referral?.code ? referral.code : referralLoading ? 'Loading...' : 'Unavailable'}
+                </div>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <button className="btn-xs" onClick={() => referral?.code && void copyReferralValue(referral.code, 'Referral code copied.')}>
+                  <button className="btn-xs" onClick={() => referral?.code && void copyReferralValue(referral.code, 'Referral code copied.')} disabled={!referral?.code}>
                     Copy code
                   </button>
-                  <button className="btn-xs-outline" onClick={() => referral?.shareUrl && void copyReferralValue(referral.shareUrl, 'Referral link copied.')}>
+                  <button className="btn-xs-outline" onClick={() => referral?.shareUrl && void copyReferralValue(referral.shareUrl, 'Referral link copied.')} disabled={!referral?.shareUrl}>
                     Copy share link
                   </button>
+                  {referralError ? (
+                    <button className="btn-xs-outline" onClick={() => void loadReferralDashboard()}>
+                      Retry
+                    </button>
+                  ) : null}
                 </div>
                 <div className="mt-3 text-xs text-slate-400">
                   Share this with new customers. Credit lands on your account once they complete their first paid renewal.
                 </div>
+                {referralError ? <div className="mt-3 text-xs text-amber-300">{referralError}</div> : null}
               </div>
 
               <div className="panel p-4">
