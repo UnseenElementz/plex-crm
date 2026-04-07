@@ -1,21 +1,22 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-export function middleware(req: NextRequest){
+export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
-  if (pathname.startsWith('/admin')){
-    const isProd = process.env.NODE_ENV === 'production'
-    if (isProd){
-      const isAdmin = req.cookies.get('admin_session')?.value === '1'
-      if (!isAdmin){
-        const url = new URL('/login', req.url)
-        return NextResponse.redirect(url)
-      }
-    }
+
+  if (
+    pathname === '/' ||
+    pathname.startsWith('/api') ||
+    pathname.startsWith('/_next') ||
+    pathname === '/favicon.ico' ||
+    /\.[a-zA-Z0-9]+$/.test(pathname)
+  ) {
+    return NextResponse.next()
   }
-  return NextResponse.next()
+
+  return NextResponse.redirect(new URL('/', req.url))
 }
 
 export const config = {
-  matcher: ['/admin/:path*']
+  matcher: '/:path*',
 }
