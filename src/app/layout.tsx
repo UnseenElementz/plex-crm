@@ -6,17 +6,18 @@ import dynamic from 'next/dynamic'
 import Script from 'next/script'
 
 export const metadata = {
-  title: 'Plex CRM Beta V3',
-  description: 'Plex CRM Beta V3 local workspace'
+  title: 'Streamz R Us',
+  description: 'Private media hosting, support, and customer account management.'
 }
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   const BackgroundAudio = dynamic(() => import('@/components/BackgroundAudio'), { ssr: false })
   const ToasterClient = dynamic(() => import('@/components/ToasterClient'), { ssr: false })
+  const AppBackdrop = dynamic(() => import('@/components/AppBackdrop'), { ssr: false })
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="min-h-screen text-slate-100 relative overflow-x-hidden">
-        <CosmicBackdrop />
+      <body className="app-shell min-h-screen overflow-x-hidden text-slate-100">
+        <AppBackdrop />
         <div className="relative z-10">
           <Header />
           <main className="animate-fade-in">

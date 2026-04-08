@@ -4,8 +4,7 @@ import { cookies } from 'next/headers'
 import { createClient } from '@supabase/supabase-js'
 import { CustomerCreateSchema, formatZodError } from '@/lib/validation'
 import { calculateNextDue } from '@/lib/pricing'
-import { buildCustomerNotes, parseCustomerNotes } from '@/lib/customerNotes'
-import { createReferralCode, normalizeReferralCode } from '@/lib/referrals'
+import { getVisibleCustomerNotes, mergeCustomerNotes, parseCustomerNotes } from '@/lib/customerNotes'
 
 function mem(){
   const g = globalThis as any
@@ -34,6 +33,7 @@ export async function GET(){
     const safeNext = plan
       ? ((!d || isNaN(d.getTime()) || year < 2000 || year > 2100) ? calculateNextDue(plan, start).toISOString() : rawNext)
       : (rawNext || null)
+    const parsedNotes = parseCustomerNotes(c.notes)
     return {
       id: c.id,
       full_name: c.full_name ?? c.name,
@@ -42,16 +42,11 @@ export async function GET(){
       streams: c.streams,
       start_date: c.start_date,
       next_due_date: safeNext,
-      notes: c.notes,
+      notes: getVisibleCustomerNotes(c.notes),
       plex_username: parsedNotes.plexUsername || undefined,
       timezone: parsedNotes.timezone || undefined,
       status: c.status ?? c.subscription_status,
-      downloads: parsedNotes.downloads,
-      referral_code: normalizeReferralCode(c.referral_code) || undefined,
-      referral_credit_balance: Number(c.referral_credit_balance || 0),
-      referral_credit_earned_total: Number(c.referral_credit_earned_total || 0),
-      referral_credit_redeemed_total: Number(c.referral_credit_redeemed_total || 0),
-      successful_referrals_count: Number(c.successful_referrals_count || 0),
+      downloads: parsedNotes.downloads
     }
   })
   return NextResponse.json(mapped)
@@ -102,17 +97,13 @@ export async function POST(request: Request){
     streams: payload.streams,
     start_date: payload.start_date,
     next_payment_date: payload.next_due_date,
-    notes: buildCustomerNotes({
-      plainNotes: payload.notes?.trim(),
+    notes: mergeCustomerNotes({
+      existing: '',
+      visibleNotes: payload.notes?.trim(),
       plexUsername: plex,
       timezone: tz,
-      downloads: payload.downloads,
-    }),
-    referral_code: createReferralCode(payload.full_name || payload.email),
-    referral_credit_balance: 0,
-    referral_credit_earned_total: 0,
-    referral_credit_redeemed_total: 0,
-    successful_referrals_count: 0,
+      downloads: Boolean(payload.downloads),
+    })
   }
   const { data, error } = await client.from('customers').insert(dbPayload).select('*')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -126,15 +117,10 @@ export async function POST(request: Request){
     streams: row.streams,
     start_date: row.start_date,
     next_due_date: row.next_due_date ?? row.next_payment_date,
-    notes: row.notes,
-    plex_username: parsedNotes.plexUsername || undefined,
-    timezone: parsedNotes.timezone || undefined,
-    status: row.status ?? row.subscription_status,
-    referral_code: normalizeReferralCode(row.referral_code) || undefined,
-    referral_credit_balance: Number(row.referral_credit_balance || 0),
-    referral_credit_earned_total: Number(row.referral_credit_earned_total || 0),
-    referral_credit_redeemed_total: Number(row.referral_credit_redeemed_total || 0),
-    successful_referrals_count: Number(row.successful_referrals_count || 0),
+    notes: getVisibleCustomerNotes(row.notes),
+    plex_username: parseCustomerNotes(row.notes).plexUsername || undefined,
+    timezone: parseCustomerNotes(row.notes).timezone || undefined,
+    status: row.status ?? row.subscription_status
   }) : null
   return NextResponse.json(mapped)
 }

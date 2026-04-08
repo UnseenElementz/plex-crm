@@ -41,6 +41,42 @@ type LibraryRow = {
   is_shared?: boolean
 }
 
+type SessionRow = {
+  sessionKey: string
+  title: string
+  type: string
+  user: string
+  player: string
+  product: string
+  state: string
+  ip: string
+  startedAt: string | null
+  transcodeDecision: string
+  videoDecision: string
+  audioDecision: string
+  customer_name: string | null
+  customer_email: string | null
+  allowed_streams: number
+  active_streams: number
+  over_limit: boolean
+  ip_blocked?: boolean
+  warning_count?: number
+}
+
+type SessionHistoryRow = {
+  id: string
+  created_at: string
+  email: string | null
+  customer_name: string | null
+  title: string
+  player: string
+  product: string
+  state: string
+  ip: string
+  started_at: string | null
+  over_limit: boolean
+}
+
 function PlexToolsInner() {
   const searchParams = useSearchParams()
   const [loading, setLoading] = useState(false)
@@ -68,6 +104,116 @@ function PlexToolsInner() {
   const [actionBusy, setActionBusy] = useState(false)
   const [prefillEmail, setPrefillEmail] = useState('')
   const [autoOpened, setAutoOpened] = useState(false)
+  const [sessions, setSessions] = useState<SessionRow[]>([])
+  const [sessionsLoading, setSessionsLoading] = useState(false)
+  const [sessionsError, setSessionsError] = useState('')
+  const [sessionHistory, setSessionHistory] = useState<SessionHistoryRow[]>([])
+  const [blockingIp, setBlockingIp] = useState('')
+  const [moderatingKey, setModeratingKey] = useState('')
+
+  async function loadSessions() {
+    setSessionsLoading(true)
+    setSessionsError('')
+    try {
+      const res = await fetch('/api/admin/plex/sessions', { cache: 'no-store' as any })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSessionsError(data?.error || 'Failed to load Plex sessions')
+        setSessions([])
+        setSessionHistory([])
+        return
+      }
+      setSessions(Array.isArray(data?.items) ? data.items : [])
+      setSessionHistory(Array.isArray(data?.history) ? data.history : [])
+    } catch (e: any) {
+      setSessionsError(e?.message || 'Failed to load Plex sessions')
+      setSessions([])
+      setSessionHistory([])
+    } finally {
+      setSessionsLoading(false)
+    }
+  }
+
+  async function blockIp(ip: string) {
+    const cleanIp = String(ip || '').trim()
+    if (!cleanIp) return
+    if (!confirm(`Block IP ${cleanIp}?`)) return
+    setBlockingIp(cleanIp)
+    try {
+      const res = await fetch('/api/admin/security/block', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip: cleanIp })
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(data?.error || 'Failed to block IP')
+        return
+      }
+      toast.success(`Blocked ${cleanIp}`)
+      setSessions((current) => current.map((item) => (item.ip === cleanIp ? { ...item, ip_blocked: true } : item)))
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to block IP')
+    } finally {
+      setBlockingIp('')
+    }
+  }
+
+  async function moderateSession(action: 'warn' | 'ban', session: SessionRow) {
+    const targetKey = `${action}:${session.sessionKey}`
+    const targetLabel = session.customer_name || session.customer_email || session.user || 'this customer'
+    const shouldContinue = action === 'warn'
+      ? confirm(`Send a warning to ${targetLabel}, log the strike, and stop their active streams?`)
+      : confirm(`Ban ${targetLabel}, stop their active streams, and block their portal access?`)
+    if (!shouldContinue) return
+
+    const relatedSessions = sessions.filter((item) => {
+      if (session.customer_email && item.customer_email) {
+        return item.customer_email === session.customer_email
+      }
+      return item.user === session.user
+    })
+
+    setModeratingKey(targetKey)
+    try {
+      const res = await fetch('/api/admin/moderation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          customerEmail: session.customer_email,
+          user: session.user,
+          ip: session.ip,
+          sessionKeys: relatedSessions.map((item) => item.sessionKey),
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(data?.error || `Failed to ${action} customer`)
+        return
+      }
+
+      if (action === 'ban' && session.customer_email) {
+        await fetch('/api/admin/plex-tools/shares/remove-by-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: session.customer_email }),
+        }).catch(() => null)
+      }
+
+      if (action === 'warn') {
+        toast.success(`Warning sent (${data?.warning_label || 'logged'})`)
+      } else {
+        toast.success('Customer banned and access removed')
+      }
+
+      await Promise.all([loadSessions(), load()])
+    } catch (e: any) {
+      toast.error(e?.message || `Failed to ${action} customer`)
+    } finally {
+      setModeratingKey('')
+    }
+  }
 
   async function load() {
     setLoading(true)
@@ -154,6 +300,7 @@ function PlexToolsInner() {
     load()
     loadCustomers()
     loadLibrariesForInvite()
+    loadSessions()
   }, [])
 
   const emailValid = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())
@@ -376,7 +523,7 @@ function PlexToolsInner() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold gradient-text">Plex Tools</h1>
-            <p className="text-slate-300 text-sm">Manage server shares and see the exact users Plex says are actively shared.</p>
+            <p className="text-slate-300 text-sm">Manage shares, see live playback, and keep a usable moderation trail.</p>
           </div>
           <div className="flex gap-2">
             <a className="btn-outline" href="https://app.plex.tv/desktop/#!/settings/manage-library-access" target="_blank" rel="noreferrer">
@@ -385,6 +532,132 @@ function PlexToolsInner() {
             <button className="btn-outline" onClick={load} disabled={loading}>
               {loading ? 'Loading...' : 'Refresh'}
             </button>
+            <button className="btn-outline" onClick={loadSessions} disabled={sessionsLoading}>
+              {sessionsLoading ? 'Refreshing Activity...' : 'Refresh Activity'}
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 glass p-4 rounded-xl border border-slate-800">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-slate-200">Live Activity</div>
+              <div className="mt-1 text-xs text-slate-500">Current playback with customer, device, IP, state, and stream-limit checks.</div>
+            </div>
+            <div className="text-xs text-slate-400">
+              Live: <span className="text-slate-100 font-semibold">{sessions.length}</span>
+            </div>
+          </div>
+          {sessionsError && <div className="mt-3 text-xs text-rose-400">{sessionsError}</div>}
+          <div className="mt-3 border border-slate-800 rounded-lg overflow-hidden">
+            <div className="grid grid-cols-12 gap-2 px-3 py-2 text-[11px] text-slate-400 bg-slate-900/50 border-b border-slate-800">
+              <div className="col-span-2">Customer</div>
+              <div className="col-span-3">Watching</div>
+              <div className="col-span-2">Device</div>
+              <div className="col-span-1">State</div>
+              <div className="col-span-1">Use</div>
+              <div className="col-span-1">IP</div>
+              <div className="col-span-2">Action</div>
+            </div>
+            <div className="max-h-72 overflow-y-auto">
+              {sessionsLoading && <div className="p-4 text-xs text-slate-500">Loading live activity...</div>}
+              {!sessionsLoading && sessions.length === 0 && <div className="p-4 text-xs text-slate-500">No active Plex sessions.</div>}
+              {sessions.map((s) => (
+                <div key={s.sessionKey} className="grid grid-cols-12 gap-2 px-3 py-2 text-xs border-b border-slate-900/60">
+                  <div className="col-span-2 truncate text-slate-200" title={s.customer_email || s.user}>
+                    <div className="truncate">{s.customer_name || s.customer_email || s.user || '-'}</div>
+                    <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                      Warn {Math.min(Number(s.warning_count || 0), 3)}/3
+                    </div>
+                  </div>
+                  <div className="col-span-3 truncate text-slate-200" title={s.title}>
+                    {s.title}
+                  </div>
+                  <div className="col-span-2 truncate text-slate-300" title={`${s.player} ${s.product}`.trim()}>
+                    {s.player || s.product || '-'}
+                  </div>
+                  <div className="col-span-1 text-slate-300 capitalize">{s.state || '-'}</div>
+                  <div className={`col-span-1 ${s.over_limit ? 'text-rose-300' : 'text-emerald-300'}`}>
+                    {s.active_streams}/{s.allowed_streams}
+                  </div>
+                  <div className="col-span-1 truncate text-slate-300" title={`${s.ip}${s.ip_blocked ? ' (blocked)' : ''}`}>
+                    {s.ip || '-'}
+                    {s.ip_blocked ? <span className="ml-2 text-[10px] uppercase tracking-[0.2em] text-rose-300">blocked</span> : null}
+                  </div>
+                  <div className="col-span-2 flex justify-end gap-1">
+                    <button
+                      className="btn-xs-outline border-amber-500/30 px-2 py-1 text-amber-200 hover:bg-amber-500/10"
+                      onClick={() => moderateSession('warn', s)}
+                      disabled={moderatingKey === `warn:${s.sessionKey}`}
+                    >
+                      {moderatingKey === `warn:${s.sessionKey}` ? '...' : `Warn ${Math.min(Number(s.warning_count || 0) + 1, 3)}/3`}
+                    </button>
+                    <button
+                      className="btn-xs-outline border-rose-500/30 px-2 py-1 text-rose-200 hover:bg-rose-500/10"
+                      onClick={() => moderateSession('ban', s)}
+                      disabled={moderatingKey === `ban:${s.sessionKey}`}
+                    >
+                      {moderatingKey === `ban:${s.sessionKey}` ? '...' : 'Ban'}
+                    </button>
+                    <button
+                      className="btn-xs-outline px-2 py-1"
+                      onClick={() => blockIp(s.ip)}
+                      disabled={!s.ip || Boolean(s.ip_blocked) || blockingIp === s.ip}
+                    >
+                      {s.ip_blocked ? 'IP Set' : blockingIp === s.ip ? '...' : 'IP'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="mt-2 text-[11px] text-slate-500">Each refresh now also writes a recent session trail so device, IP, and over-limit activity can be checked again later.</div>
+        </div>
+
+        <div className="mt-4 glass p-4 rounded-xl border border-slate-800">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-slate-200">Recent Session Trail</div>
+              <div className="mt-1 text-xs text-slate-500">Most recently seen playback snapshots saved from Plex activity pulls.</div>
+            </div>
+            <div className="text-xs text-slate-400">
+              History: <span className="text-slate-100 font-semibold">{sessionHistory.length}</span>
+            </div>
+          </div>
+          <div className="mt-3 border border-slate-800 rounded-lg overflow-hidden">
+            <div className="grid grid-cols-12 gap-2 px-3 py-2 text-[11px] text-slate-400 bg-slate-900/50 border-b border-slate-800">
+              <div className="col-span-2">Seen</div>
+              <div className="col-span-3">Customer</div>
+              <div className="col-span-3">Watching</div>
+              <div className="col-span-2">Device</div>
+              <div className="col-span-1">IP</div>
+              <div className="col-span-1">Flag</div>
+            </div>
+            <div className="max-h-64 overflow-y-auto">
+              {!sessionsLoading && sessionHistory.length === 0 && <div className="p-4 text-xs text-slate-500">No saved session history yet.</div>}
+              {sessionHistory.map((item) => (
+                <div key={item.id} className="grid grid-cols-12 gap-2 px-3 py-2 text-xs border-b border-slate-900/60">
+                  <div className="col-span-2 text-slate-300">
+                    {item.created_at ? new Date(item.created_at).toLocaleString() : '-'}
+                  </div>
+                  <div className="col-span-3 truncate text-slate-200" title={item.email || ''}>
+                    {item.customer_name || item.email || '-'}
+                  </div>
+                  <div className="col-span-3 truncate text-slate-200" title={item.title}>
+                    {item.title}
+                  </div>
+                  <div className="col-span-2 truncate text-slate-300" title={`${item.player} ${item.product}`.trim()}>
+                    {item.player || item.product || '-'}
+                  </div>
+                  <div className="col-span-1 truncate text-slate-300" title={item.ip}>
+                    {item.ip || '-'}
+                  </div>
+                  <div className={`col-span-1 ${item.over_limit ? 'text-rose-300' : 'text-slate-500'}`}>
+                    {item.over_limit ? 'Limit' : '-'}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -437,7 +710,7 @@ function PlexToolsInner() {
               {actionBusy ? 'Removing...' : 'Remove User'}
             </button>
           </div>
-          <div className="mt-2 text-xs text-slate-500">Downloads must be disabled in Plex Web “Manage Library Access”.</div>
+          <div className="mt-2 text-xs text-slate-500">Downloads must be disabled in Plex Web &quot;Manage Library Access&quot;.</div>
         </div>
 
         <div className="mt-4 flex flex-col sm:flex-row gap-3">
@@ -504,13 +777,13 @@ function PlexToolsInner() {
         </div>
 
         <div className="mt-4 text-xs text-slate-500">
-          “Filtered” means the user does not have access to all libraries (they have a limited set of shared libraries and/or content filters).
+          &quot;Filtered&quot; means the user does not have access to all libraries and is on a limited share setup.
         </div>
 
         <div className="mt-4 glass p-4 rounded-xl border border-slate-800">
           <div className="text-sm font-semibold text-slate-200">Plex Web Access</div>
           <div className="mt-2 text-xs text-slate-500">
-            Plex overrides some share settings (especially downloads). Use Plex Web “Manage Library Access” to change them reliably.
+            Plex overrides some share settings, especially downloads. Use Plex Web &quot;Manage Library Access&quot; to change them reliably.
           </div>
           <div className="mt-3">
             <a className="btn-outline" href="https://app.plex.tv/desktop/#!/settings/manage-library-access" target="_blank" rel="noreferrer">
@@ -525,7 +798,7 @@ function PlexToolsInner() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-lg font-semibold text-slate-200">Manage Share</div>
-                <div className="text-xs text-slate-400">{manage.server_name} — {manage.email} {manage.username ? `(${manage.username})` : ''}</div>
+                <div className="text-xs text-slate-400">{manage.server_name} - {manage.email} {manage.username ? `(${manage.username})` : ''}</div>
               </div>
               <button className="btn-xs-outline" onClick={() => setManage(null)} disabled={saving}>Close</button>
             </div>

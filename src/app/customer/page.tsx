@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import dynamic from 'next/dynamic'
 import { format } from 'date-fns'
-import { getSupabase } from '@/lib/supabaseClient'
+import { useSearchParams } from 'next/navigation'
 import { calculateNextDue, calculatePrice, getTransactionFee, Plan } from '@/lib/pricing'
-import { getRenewalTotals, REFERRAL_CREDIT_CAP_GBP, REFERRAL_REWARD_GBP } from '@/lib/referrals'
+import { getSupabase } from '@/lib/supabaseClient'
+import { parseCustomerNotes } from '@/lib/customerNotes'
 
 const PayPalButton = dynamic(() => import('@/components/PayPalButton'), { ssr: false })
 const ChatWidget = dynamic(() => import('@/components/chat/ChatWidget'), { ssr: false })
@@ -28,15 +29,40 @@ type Customer = {
   successfulReferralsCount?: number
 }
 
+type ReferralDashboard = {
+  code: string
+  shareUrl: string
+  availableCredit: number
+  creditCap: number
+  rewardValue: number
+  successfulReferrals: number
+  rewardHistory: Array<{ email: string; at: string; amount: number; label: string }>
+  referredBy: string | null
+  claimed: boolean
+  canClaim: boolean
+}
+
+const planCards: Array<{ id: Plan; title: string; subtitle: string }> = [
+  { id: 'yearly', title: 'Full Access', subtitle: 'The complete hosted media package.' },
+  { id: 'movies_only', title: 'Movies Only', subtitle: 'Film-first access with the same clean account tools.' },
+  { id: 'tv_only', title: 'TV Shows Only', subtitle: 'Series-focused access with the same support and billing flow.' },
+]
+
 export default function CustomerPortal() {
+  const searchParams = useSearchParams()
   const [saving, setSaving] = useState(false)
   const [authState, setAuthState] = useState<'checking' | 'unauth' | 'ready'>('checking')
   const [hasSubscription, setHasSubscription] = useState(false)
   const [paymentLock, setPaymentLock] = useState(false)
   const [pricingConfig, setPricingConfig] = useState<any>(null)
   const [updateModal, setUpdateModal] = useState<{ id?: string; title: string; content: string } | null>(null)
-  const [copiedState, setCopiedState] = useState<'code' | 'link' | null>(null)
-  const [origin, setOrigin] = useState('')
+  const [billingMessage, setBillingMessage] = useState('')
+  const [capturingPayment, setCapturingPayment] = useState(false)
+  const [referral, setReferral] = useState<ReferralDashboard | null>(null)
+  const [referralLoading, setReferralLoading] = useState(false)
+  const [referralMessage, setReferralMessage] = useState('')
+  const [referralCodeInput, setReferralCodeInput] = useState('')
+  const [applyingCredit, setApplyingCredit] = useState(false)
   const [customer, setCustomer] = useState<Customer>({
     id: 'demo',
     fullName: 'Demo User',
@@ -45,79 +71,78 @@ export default function CustomerPortal() {
     streams: 1,
     startDate: new Date().toISOString(),
     nextDueDate: calculateNextDue('monthly', new Date()).toISOString(),
-    subscriptionStatus: 'active',
     notes: '',
-    referralCode: 'STREAMZDEMO',
-    referralCreditBalance: 0,
-    referralCreditEarnedTotal: 0,
-    referralCreditRedeemedTotal: 0,
-    successfulReferralsCount: 0,
   })
+
+  async function loadReferralDashboard(accessToken?: string | null) {
+    setReferralLoading(true)
+    try {
+      const res = await fetch('/api/referrals/me', {
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+        cache: 'no-store',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setReferral(null)
+        return
+      }
+      setReferral(data)
+    } catch {
+      setReferral(null)
+    } finally {
+      setReferralLoading(false)
+    }
+  }
+
+  async function refreshCustomerState(email: string) {
+    const s = getSupabase()
+    if (!s || !email) return
+    const { data: refreshed } = await s.from('customers').select('*').eq('email', email).single()
+    if (!refreshed) return
+    const parsedNotes = parseCustomerNotes(refreshed.notes || '')
+    setCustomer({
+      id: refreshed.id,
+      fullName: refreshed.name,
+      email: refreshed.email,
+      plan: refreshed.subscription_type || customer.plan,
+      streams: Math.min(5, refreshed.streams || customer.streams || 1),
+      startDate: refreshed.start_date || customer.startDate,
+      nextDueDate: refreshed.next_payment_date || customer.nextDueDate,
+      notes: parsedNotes.visibleNotes || '',
+      downloads: parsedNotes.downloads,
+    })
+    setHasSubscription(true)
+  }
 
   useEffect(() => {
     ;(async () => {
       try {
-        const settingsRes = await fetch('/api/admin/settings')
-        if (settingsRes.ok) {
-          const settings = await settingsRes.json()
-          setPaymentLock(Boolean(settings?.payment_lock))
-          setPricingConfig(settings)
+        const res = await fetch('/api/admin/settings', { cache: 'no-store' })
+        if (res.ok) {
+          const data = await res.json()
+          setPaymentLock(Boolean(data?.payment_lock))
+          setPricingConfig(data)
         }
       } catch {}
 
-      if (typeof window !== 'undefined' && sessionStorage.getItem('customerDemo') === 'true') {
-        const raw = localStorage.getItem('customerProfile')
-        if (raw) {
-          const profile = JSON.parse(raw)
-          setCustomer((current) => ({
-            ...current,
-            fullName: profile.fullName || current.fullName,
-            email: profile.email || current.email,
-            plan: profile.plan || current.plan,
-            streams: Math.min(5, profile.streams || current.streams),
-            startDate: new Date().toISOString(),
-            nextDueDate: profile.nextDueDate || calculateNextDue(profile.plan || 'monthly', new Date()).toISOString(),
-            referralCode: profile.referralCode || current.referralCode,
-            referralCreditBalance: Number(profile.referralCreditBalance || current.referralCreditBalance || 0),
-            referralCreditEarnedTotal: Number(profile.referralCreditEarnedTotal || current.referralCreditEarnedTotal || 0),
-            referralCreditRedeemedTotal: Number(profile.referralCreditRedeemedTotal || current.referralCreditRedeemedTotal || 0),
-            successfulReferralsCount: Number(profile.successfulReferralsCount || current.successfulReferralsCount || 0),
-          }))
-        }
-        setAuthState('ready')
-        return
-      }
-
-      const supabase = getSupabase()
-      if (!supabase) {
+      const s = getSupabase()
+      if (!s) {
         setAuthState('unauth')
         return
       }
 
-      const { data } = await supabase.auth.getUser()
+      const { data } = await s.auth.getUser()
+      const { data: sessionData } = await s.auth.getSession()
       if (!data.user) {
         setAuthState('unauth')
         return
       }
 
       try {
-        await fetch('/api/customer/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: data.user.id,
-            email: data.user.email,
-            fullName: data.user.user_metadata?.fullName || data.user.user_metadata?.full_name || '',
-            plexUsername: data.user.user_metadata?.plexUsername || data.user.user_metadata?.plex_username || '',
-          }),
-        })
-      } catch {}
-
-      try {
-        const serviceUpdateRes = await fetch('/api/admin/service-updates', { cache: 'no-store' })
-        if (serviceUpdateRes.ok) {
-          const payload = await serviceUpdateRes.json().catch(() => ({}))
-          const updates: any[] = payload?.updates || []
+        const res = await fetch('/api/admin/service-updates', { cache: 'no-store' })
+        if (res.ok) {
+          const j = await res.json().catch(() => ({}))
+          const updates: any[] = j?.updates || []
           if (updates.length) {
             const latest = updates.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
             const key = `svc_updates_seen:${data.user.email}`
@@ -132,13 +157,14 @@ export default function CustomerPortal() {
 
       try {
         const userEmail = data.user.email as string
-        const { data: customerData, error } = await supabase
-          .from('customers')
-          .select('*')
-          .eq('email', userEmail)
-          .single()
+        const loadCustomer = async () => {
+          return s.from('customers').select('*').eq('email', userEmail).single()
+        }
+
+        const { data: customerData, error } = await loadCustomer()
 
         if (!error && customerData) {
+          const parsedNotes = parseCustomerNotes(customerData.notes || '')
           setCustomer({
             id: customerData.id,
             fullName: customerData.name,
@@ -147,33 +173,27 @@ export default function CustomerPortal() {
             streams: Math.min(5, customerData.streams || 1),
             startDate: customerData.start_date || new Date().toISOString(),
             nextDueDate: customerData.next_payment_date || calculateNextDue(customerData.subscription_type || 'monthly', new Date()).toISOString(),
-            subscriptionStatus: customerData.subscription_status || 'active',
-            notes: customerData.notes || '',
-            downloads: String(customerData.notes || '').includes('Downloads: Yes'),
-            referralCode: customerData.referral_code || '',
-            referralCreditBalance: Number(customerData.referral_credit_balance || 0),
-            referralCreditEarnedTotal: Number(customerData.referral_credit_earned_total || 0),
-            referralCreditRedeemedTotal: Number(customerData.referral_credit_redeemed_total || 0),
-            successfulReferralsCount: Number(customerData.successful_referrals_count || 0),
+            notes: parsedNotes.visibleNotes || '',
+            downloads: parsedNotes.downloads,
           })
           setHasSubscription(true)
           setAuthState('ready')
+          await loadReferralDashboard(sessionData.session?.access_token || null)
           try {
-            await fetch('/api/security/ip-log', { method: 'POST' })
+            await fetch('/api/security/ip-log', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: userEmail }),
+            })
           } catch {}
           return
         }
 
         if (error && (error.code === 'PGRST116' || /no rows/i.test(error.message || ''))) {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('full_name')
-            .eq('email', userEmail)
-            .single()
-
-          setCustomer((current) => ({
-            ...current,
-            fullName: profile?.full_name || current.fullName,
+          const { data: profile } = await s.from('profiles').select('full_name').eq('email', userEmail).single()
+          setCustomer((c) => ({
+            ...c,
+            fullName: profile?.full_name || c.fullName,
             email: userEmail,
             startDate: new Date().toISOString(),
             nextDueDate: calculateNextDue(current.plan, new Date()).toISOString(),
@@ -181,9 +201,7 @@ export default function CustomerPortal() {
           }))
           setHasSubscription(false)
           setAuthState('ready')
-          try {
-            await fetch('/api/security/ip-log', { method: 'POST' })
-          } catch {}
+          await loadReferralDashboard(sessionData.session?.access_token || null)
           return
         }
 
@@ -195,37 +213,68 @@ export default function CustomerPortal() {
   }, [])
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      setOrigin(window.location.origin)
+    const token = String(searchParams?.get('token') || '').trim()
+    const paypalState = String(searchParams?.get('paypal') || '').trim()
+    if (paypalState === 'cancelled') {
+      setBillingMessage('PayPal checkout was cancelled.')
+      return
     }
-  }, [])
+    if (!token || paypalState !== 'success' || authState !== 'ready' || capturingPayment || !customer.email) return
 
-  useEffect(() => {
-    setCustomer((current) => {
-      if (!current.nextDueDate) {
-        return { ...current, nextDueDate: calculateNextDue(current.plan, new Date(current.startDate)).toISOString() }
+    ;(async () => {
+      setCapturingPayment(true)
+      setBillingMessage('')
+      try {
+        const res = await fetch('/api/paypal/capture-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            orderId: token,
+            customerEmail: customer.email,
+            plan: customer.plan,
+            streams: customer.streams,
+            downloads: customer.downloads,
+          }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setBillingMessage(data?.error || 'Payment capture failed.')
+          return
+        }
+
+        const s = getSupabase()
+        if (s) {
+          const session = await s.auth.getSession()
+          await refreshCustomerState(customer.email)
+          await loadReferralDashboard(session.data.session?.access_token || null)
+        }
+
+        setBillingMessage('Payment received and your account has been updated.')
+        if (typeof window !== 'undefined') {
+          const next = new URL(window.location.href)
+          next.searchParams.delete('token')
+          next.searchParams.delete('PayerID')
+          next.searchParams.delete('paypal')
+          window.history.replaceState({}, '', next.toString())
+        }
+      } catch (e: any) {
+        setBillingMessage(e?.message || 'Payment capture failed.')
+      } finally {
+        setCapturingPayment(false)
       }
-      return current
-    })
-  }, [])
+    })()
+  }, [authState, capturingPayment, customer.downloads, customer.email, customer.nextDueDate, customer.plan, customer.startDate, customer.streams, searchParams])
 
-  const price = useMemo(
-    () => calculatePrice(customer.plan, customer.streams, pricingConfig, customer.downloads),
-    [customer, pricingConfig]
-  )
-  const renewalTotals = useMemo(
-    () => getRenewalTotals(price, customer.referralCreditBalance),
-    [price, customer.referralCreditBalance]
-  )
-
+  const price = useMemo(() => calculatePrice(customer.plan, customer.streams, pricingConfig, customer.downloads), [customer, pricingConfig])
+  const referralCreditApplied = useMemo(() => Math.min(price, Number(referral?.availableCredit || 0)), [price, referral?.availableCredit])
+  const payableToday = useMemo(() => Math.max(0, Number((price - referralCreditApplied).toFixed(2))), [price, referralCreditApplied])
+  const checkoutFee = useMemo(() => (payableToday > 0 ? getTransactionFee(customer.plan) : 0), [customer.plan, payableToday])
   const status = useMemo(() => {
     if (!hasSubscription) return 'Inactive'
-    const inactive = customer.subscriptionStatus === 'inactive'
-    if (inactive) return 'Inactive'
     const due = new Date(customer.nextDueDate)
     if (isNaN(due.getTime())) return 'Unknown'
     return new Date() > due ? 'Overdue' : 'Active'
-  }, [customer, hasSubscription])
+  }, [customer.nextDueDate, hasSubscription])
 
   const canPay = useMemo(() => {
     if (!paymentLock) return true
@@ -233,45 +282,111 @@ export default function CustomerPortal() {
     const due = new Date(customer.nextDueDate)
     const beforeDue = !isNaN(due.getTime()) ? new Date() < due : false
     return status === 'Active' && beforeDue
-  }, [paymentLock, hasSubscription, customer.nextDueDate, status])
+  }, [customer.nextDueDate, hasSubscription, paymentLock, status])
 
-  const referralProgress = useMemo(() => {
-    return Math.min(
-      100,
-      Math.round(((Number(customer.referralCreditEarnedTotal || 0) / REFERRAL_CREDIT_CAP_GBP) || 0) * 100)
-    )
-  }, [customer.referralCreditEarnedTotal])
+  async function copyReferralValue(value: string, message: string) {
+    try {
+      await navigator.clipboard.writeText(value)
+      setReferralMessage(message)
+      setTimeout(() => setReferralMessage(''), 3000)
+    } catch {
+      setReferralMessage('Copy failed. Please copy it manually.')
+      setTimeout(() => setReferralMessage(''), 3000)
+    }
+  }
 
-  const inviteLink = useMemo(() => {
-    if (!origin || !customer.referralCode) return ''
-    return `${origin}/customer/register?ref=${encodeURIComponent(customer.referralCode)}`
-  }, [customer.referralCode, origin])
+  async function claimReferralCode() {
+    const code = referralCodeInput.trim().toUpperCase()
+    if (!code) {
+      setReferralMessage('Enter a referral code first.')
+      return
+    }
+    const s = getSupabase()
+    const token = (await s?.auth.getSession())?.data.session?.access_token
+    try {
+      const res = await fetch('/api/referrals/me', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ referralCode: code }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setReferralMessage(data?.error || 'Referral code could not be claimed.')
+        return
+      }
+      setReferral(data.dashboard)
+      setReferralCodeInput('')
+      setReferralMessage('Referral code linked to your account.')
+      setTimeout(() => setReferralMessage(''), 3000)
+    } catch (e: any) {
+      setReferralMessage(e?.message || 'Referral code could not be claimed.')
+    }
+  }
+
+  async function applyReferralCreditRenewal() {
+    const s = getSupabase()
+    const token = (await s?.auth.getSession())?.data.session?.access_token
+    if (!token) {
+      setBillingMessage('You must be signed in to renew with credit.')
+      return
+    }
+
+    setApplyingCredit(true)
+    setBillingMessage('')
+    try {
+      const res = await fetch('/api/payments/referral-credit', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          plan: customer.plan,
+          streams: customer.streams,
+          downloads: customer.downloads,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setBillingMessage(data?.error || 'Referral credit could not be applied.')
+        return
+      }
+      await refreshCustomerState(customer.email)
+      await loadReferralDashboard(token)
+      setBillingMessage(`Renewal completed using GBP ${Number(data?.creditUsed || 0).toFixed(2)} of referral credit.`)
+    } catch (e: any) {
+      setBillingMessage(e?.message || 'Referral credit could not be applied.')
+    } finally {
+      setApplyingCredit(false)
+    }
+  }
 
   const handleSaveChanges = async () => {
     setSaving(true)
     try {
+      const s = getSupabase()
+      const token = (await s?.auth.getSession())?.data.session?.access_token
       const payload = {
         full_name: customer.fullName,
-        email: customer.email,
-        plan: customer.plan,
-        streams: customer.streams,
-        downloads: customer.downloads,
         notes: customer.notes,
-        next_due_date: customer.nextDueDate,
       }
 
       const res = await fetch(`/api/customers/${customer.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify(payload),
       })
 
-      const response = await res.json()
-      if (!res.ok) throw new Error(response.error || 'Failed to save')
-
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to save')
       alert('Changes saved successfully!')
     } catch (error: any) {
-      console.error('Error saving changes:', error)
       alert(error.message || 'Failed to save changes')
     } finally {
       setSaving(false)
@@ -281,11 +396,8 @@ export default function CustomerPortal() {
   function acknowledgeUpdate() {
     try {
       if (updateModal) {
-        const supabase = getSupabase()
-        const email = (supabase as any)?._auth?.currentUser?.email || customer.email || 'anon'
-        const key = `svc_updates_seen:${email}`
-        const value = String(updateModal.id || updateModal.title)
-        localStorage.setItem(key, value)
+        const key = `svc_updates_seen:${customer.email || 'anon'}`
+        localStorage.setItem(key, String(updateModal.id || updateModal.title))
       }
     } catch {}
     setUpdateModal(null)
@@ -303,323 +415,327 @@ export default function CustomerPortal() {
 
   if (authState === 'unauth') {
     return (
-      <main className="p-6 flex min-h-[80vh] items-center justify-center">
-        <div className="glass w-full max-w-md rounded-2xl p-6 text-center">
-          <div className="mb-2 text-2xl font-semibold">Customer Portal</div>
-          <div className="mb-4 text-slate-400">Please sign in to access your subscription</div>
-          <a href="/customer/login" className="btn" data-no-prefetch>
+      <main className="page-section py-12">
+        <div className="panel mx-auto max-w-3xl p-8 text-center">
+          <div className="eyebrow mx-auto">Customer Access</div>
+          <h1 className="mt-5 text-3xl font-semibold text-white sm:text-[2.2rem]">Sign in to manage your account</h1>
+          <p className="mx-auto mt-3 max-w-xl text-slate-400">
+            Payments, service updates, and support for your hosting account in one place.
+          </p>
+          <a href="/customer/login" className="btn mt-8" data-no-prefetch>
             Go to Customer Login
           </a>
+          {paymentLock ? (
+            <div className="mt-8 rounded-[28px] border border-cyan-400/15 bg-cyan-400/8 p-5 text-left text-sm text-slate-300">
+              We are not accepting new customers right now. Use the live chat button after logging in to leave your details and we will
+              contact you when availability opens up.
+            </div>
+          ) : null}
         </div>
       </main>
     )
   }
 
   return (
-    <main className="mx-auto max-w-5xl p-6">
-      <div className="glass rounded-[2rem] p-6">
-        <h2 className="text-2xl font-semibold">Customer Portal</h2>
-        <p className="text-slate-300">Manage your Plex subscription, renewal credit, and account details.</p>
+    <main className="page-section py-8">
+      <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+        <div className="space-y-6">
+          <div className="panel-strong overflow-hidden p-7">
+            <div className="eyebrow">Account</div>
+            <div className="mt-5 flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h1 className="text-3xl font-semibold text-white sm:text-[2.2rem]">Manage your hosting account.</h1>
+                <p className="mt-3 max-w-2xl text-slate-400">
+                  Billing, support, and service updates in one clear dashboard.
+                </p>
+              </div>
+              <div className={`tag ${status.toLowerCase() === 'active' ? 'active' : 'inactive'}`}>{status}</div>
+            </div>
 
-        <div className="mt-2 flex flex-wrap gap-4">
-          <a href="/customer/service-updates" className="cta-outline shimmer" data-no-prefetch>
-            Service Updates
-          </a>
-          <a href="/customer/recommendations" className="cta-btn shimmer" data-no-prefetch>
-            Requests &amp; Issues
-          </a>
-        </div>
+            <div className="mt-8 grid gap-4 sm:grid-cols-3">
+              <div className="panel p-4">
+                <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Plan</div>
+                <div className="mt-2 text-xl font-semibold text-white">{customer.plan.replace('_', ' ')}</div>
+              </div>
+              <div className="panel p-4">
+                <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Streams</div>
+                <div className="mt-2 text-xl font-semibold text-white">{customer.streams}</div>
+              </div>
+              <div className="panel p-4">
+                <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Next Due</div>
+                <div className="mt-2 text-xl font-semibold text-white">{format(new Date(customer.nextDueDate), 'dd/MM/yyyy')}</div>
+              </div>
+            </div>
 
-        {paymentLock && !canPay && (
-          <div className="card-solid mt-4 rounded-lg border border-cyan-500/30 p-4">
-            <p className="mb-2 text-sm text-slate-300">
-              To keep the server running at a professional and stable level, we are not accepting new customers at the moment.
-            </p>
-            <p className="mb-2 text-sm text-slate-300">
-              If you are interested, please click the chat icon in the bottom-right corner and send us a message with your details and email address. When new slots become available, we will contact you right away.
-            </p>
-            <p className="text-sm text-slate-300">Thank you,</p>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <a href="/customer/service-updates" className="cta-outline" data-no-prefetch>
+                Service Updates
+              </a>
+              <a href="/customer/recommendations" className="cta-btn" data-no-prefetch>
+                Requests & Issues
+              </a>
+            </div>
           </div>
-        )}
 
-        <div className="mt-6 grid gap-6 md:grid-cols-2">
-          <div className="card-solid">
-            <h3 className="card-title">Subscription</h3>
-            <div className="space-y-3">
-              <label className="label">Plan</label>
-              <div className="mb-4 grid grid-cols-1 gap-2">
+          <div className="card-solid p-6">
+            <div className="flex items-center justify-between gap-4">
+              <h2 className="card-title">Choose your package</h2>
+              <div className="text-sm text-slate-400">Simple package changes and renewals</div>
+            </div>
+            <div className="mt-5 grid gap-3">
+              {planCards.map((plan) => (
                 <button
-                  className={`btn w-full ${customer.plan === 'yearly' ? 'active' : ''}`}
+                  key={plan.id}
+                  className={`rounded-[24px] border p-4 text-left ${
+                    customer.plan === plan.id ? 'border-cyan-400/35 bg-cyan-400/10' : 'border-white/8 bg-white/[0.03]'
+                  }`}
                   onClick={() =>
                     setCustomer((current) => ({
                       ...current,
-                      plan: 'yearly',
-                      nextDueDate: calculateNextDue('yearly', new Date(current.startDate)).toISOString(),
+                      plan: plan.id,
+                      nextDueDate: calculateNextDue(plan.id, new Date(current.startDate)).toISOString(),
                     }))
                   }
                 >
-                  Full Package
+                  <div className="text-base font-semibold text-white">{plan.title}</div>
+                  <div className="mt-1 text-sm text-slate-400">{plan.subtitle}</div>
                 </button>
-                <button
-                  className={`btn w-full ${customer.plan === 'movies_only' ? 'active' : ''}`}
-                  onClick={() =>
+              ))}
+            </div>
+
+            <div className="mt-5 rounded-[24px] border border-cyan-400/12 bg-cyan-400/8 p-4 text-sm text-slate-300">
+              Movies Only and TV Shows Only still include shared family categories such as kids and selected mixed content.
+            </div>
+
+            <div className="mt-6 grid gap-5 sm:grid-cols-2">
+              <div>
+                <label className="label">Streams</label>
+                <select
+                  className="input"
+                  value={customer.streams}
+                  onChange={(e) =>
                     setCustomer((current) => ({
                       ...current,
-                      plan: 'movies_only',
-                      nextDueDate: calculateNextDue('movies_only', new Date(current.startDate)).toISOString(),
+                      streams: Math.min(5, Math.max(1, parseInt(e.target.value || '1', 10))),
                     }))
                   }
                 >
-                  Movies Only
-                </button>
-                <button
-                  className={`btn w-full ${customer.plan === 'tv_only' ? 'active' : ''}`}
-                  onClick={() =>
-                    setCustomer((current) => ({
-                      ...current,
-                      plan: 'tv_only',
-                      nextDueDate: calculateNextDue('tv_only', new Date(current.startDate)).toISOString(),
-                    }))
-                  }
-                >
-                  TV Shows Only
-                </button>
+                  {[1, 2, 3, 4, 5].map((count) => (
+                    <option key={count} value={count}>
+                      {count}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              <div className="rounded-lg border border-cyan-500/30 bg-cyan-900/20 p-3 text-xs text-slate-300">
-                <strong>Note:</strong> Movies Only and TV Shows Only packages still contain kids TV and other genres like sports.
-              </div>
-
-              <label className="label">Streams</label>
-              <select
-                className="input"
-                value={customer.streams}
-                onChange={(event) =>
-                  setCustomer((current) => ({
-                    ...current,
-                    streams: Math.min(5, Math.max(1, parseInt(event.target.value || '1', 10))),
-                  }))
-                }
-              >
-                <option value={1}>1</option>
-                <option value={2}>2</option>
-                <option value={3}>3</option>
-                <option value={4}>4</option>
-                <option value={5}>5</option>
-              </select>
-
-              <div className="mt-4 rounded-lg border border-slate-700 bg-slate-800/50 p-3">
-                <label className="flex cursor-pointer items-center gap-3">
+              <div className="panel p-4">
+                <label className="flex items-center gap-3">
                   <input
                     type="checkbox"
-                    className="checkbox checkbox-primary"
                     checked={customer.downloads || false}
-                    onChange={(event) => setCustomer((current) => ({ ...current, downloads: event.target.checked }))}
+                    onChange={(e) => setCustomer((current) => ({ ...current, downloads: e.target.checked }))}
                   />
                   <div>
-                    <div className="font-medium text-slate-200">Add Downloads</div>
-                    <div className="text-xs text-slate-400">Enable downloads for +£20.00</div>
+                    <div className="text-sm font-semibold text-white">Add downloads</div>
+                    <div className="text-xs text-slate-400">Enable downloads for an extra GBP 20.00.</div>
                   </div>
                 </label>
               </div>
+            </div>
+          </div>
+        </div>
 
-              <div className="mt-4 rounded-2xl border border-cyan-500/20 bg-slate-950/55 p-4">
-                <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Renewal quote</div>
-                {renewalTotals.appliedCredit > 0 ? (
-                  <div className="mt-3 space-y-2">
-                    <div className="flex items-center justify-between text-sm text-slate-300">
-                      <span>Base renewal</span>
-                      <span>£{renewalTotals.baseAmount.toFixed(2)}</span>
-                    </div>
-                    <div className="flex items-center justify-between text-sm text-emerald-300">
-                      <span>Referral credit applied</span>
-                      <span>-£{renewalTotals.appliedCredit.toFixed(2)}</span>
-                    </div>
-                    <div className="flex items-center justify-between border-t border-slate-800 pt-2 text-lg font-semibold text-slate-100">
-                      <span>Total to pay</span>
-                      <span>£{renewalTotals.finalAmount.toFixed(2)}</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="mt-3 flex items-center justify-between text-lg font-semibold text-slate-100">
-                    <span>Total to pay</span>
-                    <span>£{renewalTotals.finalAmount.toFixed(2)}</span>
-                  </div>
-                )}
+        <div className="space-y-6">
+          <div className="card-solid p-6">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 className="card-title">Referral rewards</h2>
+                <div className="mt-1 text-sm text-slate-400">Bring a friend over and earn GBP 10.00 per paid signup, capped at GBP 80.00 available credit.</div>
               </div>
-
-              <div className="text-xs text-slate-400">£{getTransactionFee(customer.plan)} transaction fee applies</div>
-              <div className="mt-1 text-slate-300">Next due: {format(new Date(customer.nextDueDate), 'dd/MM/yyyy')}</div>
-              <div className={`mt-1 tag ${status.toLowerCase()}`}>Status: {status}</div>
-              {renewalTotals.appliedCredit > 0 && (
-                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
-                  Your next renewal is reduced by £{renewalTotals.appliedCredit.toFixed(2)} from referral rewards.
+              <div className="rounded-[22px] border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-right">
+                <div className="text-[11px] uppercase tracking-[0.24em] text-emerald-200/80">Available credit</div>
+                <div className="mt-1 text-2xl font-semibold text-white">
+                  GBP {Number(referral?.availableCredit || 0).toFixed(2)}
                 </div>
-              )}
+              </div>
             </div>
 
-            <div className="mt-4 space-y-2" suppressHydrationWarning>
+            <div className="mt-5 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="panel p-4">
+                <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Your referral code</div>
+                <div className="mt-2 text-xl font-semibold text-white">{referral?.code || 'Loading...'}</div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button className="btn-xs" onClick={() => referral?.code && void copyReferralValue(referral.code, 'Referral code copied.')}>
+                    Copy code
+                  </button>
+                  <button className="btn-xs-outline" onClick={() => referral?.shareUrl && void copyReferralValue(referral.shareUrl, 'Referral link copied.')}>
+                    Copy share link
+                  </button>
+                </div>
+                <div className="mt-3 text-xs text-slate-400">
+                  Share this with new customers. Credit lands on your account once they complete their first paid renewal.
+                </div>
+              </div>
+
+              <div className="panel p-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Reward per signup</div>
+                    <div className="mt-2 text-xl font-semibold text-white">GBP {Number(referral?.rewardValue || 10).toFixed(2)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Successful referrals</div>
+                    <div className="mt-2 text-xl font-semibold text-white">{referral?.successfulReferrals || 0}</div>
+                  </div>
+                </div>
+                {referral?.referredBy ? (
+                  <div className="mt-4 rounded-[20px] border border-cyan-400/15 bg-cyan-400/10 px-4 py-3 text-sm text-cyan-100">
+                    This account is linked to referral code {referral.referredBy}.
+                  </div>
+                ) : null}
+                {referralLoading ? <div className="mt-4 text-sm text-slate-500">Loading referral details...</div> : null}
+              </div>
+            </div>
+
+            {referral?.canClaim ? (
+              <div className="mt-4 rounded-[24px] border border-cyan-400/15 bg-cyan-400/8 p-4">
+                <div className="text-sm font-semibold text-white">Been referred by a friend?</div>
+                <div className="mt-1 text-sm text-slate-400">Add their code before your first paid renewal so the reward goes to the right account.</div>
+                <div className="mt-4 flex flex-wrap gap-3">
+                  <input
+                    className="input max-w-sm"
+                    placeholder="Enter referral code"
+                    value={referralCodeInput}
+                    onChange={(e) => setReferralCodeInput(e.target.value.toUpperCase())}
+                  />
+                  <button className="btn-xs" onClick={claimReferralCode} disabled={!referralCodeInput.trim()}>
+                    Link code
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {referralMessage ? (
+              <div className="mt-4 rounded-[20px] border border-cyan-400/15 bg-cyan-400/8 px-4 py-3 text-sm text-cyan-100">{referralMessage}</div>
+            ) : null}
+
+            {referral?.rewardHistory?.length ? (
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                {referral.rewardHistory.slice(0, 4).map((entry) => (
+                  <div key={`${entry.email}-${entry.at}`} className="panel p-4">
+                    <div className="text-sm font-semibold text-white">{entry.label}</div>
+                    <div className="mt-1 text-xs text-slate-400">{format(new Date(entry.at), 'dd/MM/yyyy HH:mm')}</div>
+                    <div className="mt-2 text-sm text-emerald-300">+ GBP {Number(entry.amount || 0).toFixed(2)} credit</div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="card-solid p-6">
+            <h2 className="card-title">Billing overview</h2>
+            <div className="mt-5 rounded-[28px] border border-cyan-400/15 bg-[linear-gradient(135deg,rgba(34,211,238,0.12),rgba(15,23,42,0.3))] p-5">
+              <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Pay today</div>
+              <div className="mt-2 text-4xl font-semibold text-white">GBP {payableToday.toFixed(2)}</div>
+              <div className="mt-2 text-sm text-slate-400">Package total: GBP {price.toFixed(2)}</div>
+              <div className="mt-2 text-sm text-slate-400">Referral credit applied: GBP {referralCreditApplied.toFixed(2)}</div>
+              <div className="mt-2 text-sm text-slate-400">Transaction fee: GBP {checkoutFee}</div>
+              <div className="mt-2 text-sm text-slate-400">Next due date: {format(new Date(customer.nextDueDate), 'dd/MM/yyyy')}</div>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              {billingMessage ? (
+                <div className={`rounded-[24px] border px-4 py-3 text-sm ${
+                  billingMessage.toLowerCase().includes('failed') || billingMessage.toLowerCase().includes('cancelled')
+                    ? 'border-rose-500/20 bg-rose-500/10 text-rose-100'
+                    : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-100'
+                }`}>
+                  {billingMessage}
+                </div>
+              ) : null}
               {canPay ? (
-                <PayPalButton
-                  amount={renewalTotals.finalAmount}
-                  plan={customer.plan}
-                  streams={customer.streams}
-                  downloads={customer.downloads}
-                  customerEmail={customer.email}
-                  onSuccess={() => {}}
-                />
+                payableToday > 0 ? (
+                  <PayPalButton
+                    amount={payableToday}
+                    baseAmount={price}
+                    creditApplied={referralCreditApplied}
+                    plan={customer.plan}
+                    streams={customer.streams}
+                    downloads={customer.downloads}
+                    customerEmail={customer.email}
+                    onSuccess={() => {}}
+                  />
+                ) : (
+                  <button className="btn w-full" onClick={applyReferralCreditRenewal} disabled={applyingCredit || referralCreditApplied <= 0}>
+                    {applyingCredit ? 'Applying credit...' : 'Renew using referral credit'}
+                  </button>
+                )
               ) : (
-                <div className="glass rounded-lg border border-amber-500/30 bg-amber-900/20 p-4 text-sm text-amber-300">
+                <div className="rounded-[24px] border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
                   Payments are temporarily locked. Active subscribers can extend before their due date.
                 </div>
               )}
+              <button className={`btn-outline w-full ${saving ? 'opacity-50' : ''}`} onClick={handleSaveChanges} disabled={saving}>
+                {saving ? 'Saving...' : 'Save account changes'}
+              </button>
+            </div>
+          </div>
 
-              <div className="flex gap-3">
-                <button
-                  className={`btn-outline ${saving ? 'cursor-not-allowed opacity-50' : ''}`}
-                  onClick={handleSaveChanges}
-                  disabled={saving}
-                >
-                  {saving ? 'Saving...' : 'Save changes'}
-                </button>
+          <div className="card-solid p-6">
+            <h2 className="card-title">Account details</h2>
+            <div className="mt-5 space-y-4">
+              <div>
+                <label className="label">Full name</label>
+                <input className="input" value={customer.fullName} onChange={(e) => setCustomer((current) => ({ ...current, fullName: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Email</label>
+                <input className="input opacity-80" value={customer.email} readOnly />
+              </div>
+              <div>
+                <label className="label">Notes</label>
+                <textarea className="input min-h-[120px]" value={customer.notes} onChange={(e) => setCustomer((current) => ({ ...current, notes: e.target.value }))} />
               </div>
             </div>
           </div>
 
-          <div className="card-solid">
-            <h3 className="card-title">Account</h3>
-            <div className="space-y-3">
-              <label className="label">Full name</label>
-              <input className="input" value={customer.fullName} onChange={(event) => setCustomer((current) => ({ ...current, fullName: event.target.value }))} />
-              <label className="label">Email</label>
-              <input className="input" value={customer.email} onChange={(event) => setCustomer((current) => ({ ...current, email: event.target.value }))} />
-              <label className="label">Notes</label>
-              <textarea className="input" value={customer.notes} onChange={(event) => setCustomer((current) => ({ ...current, notes: event.target.value }))} />
-            </div>
+          <div className="rounded-[28px] border border-rose-400/15 bg-rose-500/8 p-5 text-sm text-slate-300">
+            If you purchase one stream, it may only be used on one device at a time. Multiple concurrent devices without the matching
+            stream count can lead to removal without refund.
           </div>
+
+          {paymentLock && !canPay ? (
+            <div className="rounded-[28px] border border-cyan-400/15 bg-cyan-500/8 p-5 text-sm text-slate-300">
+              New customer slots are temporarily paused so service quality stays high. Use live chat to leave your details and we will
+              contact you when capacity opens.
+            </div>
+          ) : null}
         </div>
+      </section>
 
-        <div className="mt-6 grid gap-6 lg:grid-cols-[1.25fr_0.75fr]">
-          <div className="relative overflow-hidden rounded-[2rem] border border-cyan-500/25 bg-[linear-gradient(160deg,rgba(8,20,42,0.95),rgba(4,10,20,0.88))] p-6 shadow-[0_28px_80px_rgba(2,6,23,0.4)]">
-            <div className="absolute -right-10 top-0 h-40 w-40 rounded-full bg-cyan-400/15 blur-3xl" />
-            <div className="absolute bottom-0 left-0 h-32 w-32 rounded-full bg-sky-500/10 blur-3xl" />
-            <div className="relative">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.35em] text-cyan-300/80">Referral Orbit</div>
-              <div className="mt-2 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-                <div>
-                  <h3 className="text-2xl font-semibold text-slate-100">Invite friends. Build credit. Cut your renewal.</h3>
-                  <p className="mt-2 max-w-2xl text-sm text-slate-300">
-                    Every successful signup adds £{REFERRAL_REWARD_GBP} to your credit balance. We cap the program at £{REFERRAL_CREDIT_CAP_GBP}, so eight friends takes you to the full reward ceiling.
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-right">
-                  <div className="text-[11px] uppercase tracking-[0.28em] text-emerald-300/80">Available credit</div>
-                  <div className="mt-1 text-3xl font-semibold text-emerald-200">£{Number(customer.referralCreditBalance || 0).toFixed(2)}</div>
-                </div>
-              </div>
-
-              <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl border border-slate-700/70 bg-slate-950/55 p-4">
-                  <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Successful referrals</div>
-                  <div className="mt-2 text-2xl font-semibold text-slate-100">{Number(customer.successfulReferralsCount || 0)}</div>
-                </div>
-                <div className="rounded-2xl border border-slate-700/70 bg-slate-950/55 p-4">
-                  <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Lifetime earned</div>
-                  <div className="mt-2 text-2xl font-semibold text-slate-100">£{Number(customer.referralCreditEarnedTotal || 0).toFixed(2)}</div>
-                </div>
-                <div className="rounded-2xl border border-slate-700/70 bg-slate-950/55 p-4">
-                  <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Headroom left</div>
-                  <div className="mt-2 text-2xl font-semibold text-slate-100">
-                    £{Math.max(0, REFERRAL_CREDIT_CAP_GBP - Number(customer.referralCreditEarnedTotal || 0)).toFixed(2)}
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-5 rounded-[1.5rem] border border-cyan-500/20 bg-slate-950/60 p-4">
-                <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Your referral code</div>
-                <div className="mt-2 font-mono text-2xl font-semibold tracking-[0.18em] text-cyan-200">
-                  {customer.referralCode || 'Generating'}
-                </div>
-                <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/70 px-3 py-3 text-sm text-slate-300">
-                  {inviteLink || 'Your invite link will appear here after your referral code is ready.'}
-                </div>
-                <div className="mt-3 flex flex-wrap gap-3">
-                  <button className="btn" onClick={() => copyReferralValue('link')} disabled={!inviteLink}>
-                    {copiedState === 'link' ? 'Invite link copied' : 'Copy invite link'}
-                  </button>
-                  <button className="btn-outline" onClick={() => copyReferralValue('code')} disabled={!customer.referralCode}>
-                    {copiedState === 'code' ? 'Code copied' : 'Copy code'}
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-5">
-                <div className="flex items-center justify-between text-xs uppercase tracking-[0.28em] text-slate-500">
-                  <span>Progress to max reward</span>
-                  <span>
-                    £{Number(customer.referralCreditEarnedTotal || 0).toFixed(2)} / £{REFERRAL_CREDIT_CAP_GBP.toFixed(2)}
-                  </span>
-                </div>
-                <div className="mt-3 h-3 rounded-full bg-slate-900/80">
-                  <div
-                    className="h-full rounded-full bg-[linear-gradient(90deg,#22d3ee,#60a5fa,#34d399)] shadow-[0_0_20px_rgba(34,211,238,0.25)]"
-                    style={{ width: `${referralProgress}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="card-solid border border-slate-700/70 bg-slate-950/70">
-            <h3 className="card-title">How It Works</h3>
-            <div className="space-y-3 text-sm text-slate-300">
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
-                Share your code or invite link with a friend.
-              </div>
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
-                When they create an account with your code, £10 is added to your credit balance.
-              </div>
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
-                Your credit automatically lowers the amount due on your renewal quote.
-              </div>
-              <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 text-amber-100">
-                The maximum referral reward is £80 total, so the ceiling is reached after 8 successful referrals.
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="card-solid mt-6 rounded-lg border border-rose-500/30 p-4">
-          <div className="mb-2 text-sm font-semibold text-rose-300">DISCLAIMER:</div>
-          <p className="mb-2 text-xs text-slate-300">
-            If you purchase 1 stream, it may only be used on one device at a time. Using multiple devices concurrently is strictly prohibited. We have a zero-tolerance policy for this, and violations will result in immediate disconnection with no refund.
-          </p>
-          <p className="text-xs text-slate-300">
-            If you need to use multiple devices, please purchase additional streams to avoid a ban.
-          </p>
-        </div>
-      </div>
-
-      {updateModal && (
+      {updateModal ? (
         <div className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="glass max-h-[80vh] w-full max-w-md overflow-hidden rounded-xl border border-cyan-500/30 bg-slate-900/80 p-4 sm:max-w-lg">
-            <div className="mb-2 text-lg font-semibold text-slate-200">{updateModal.title || 'Service Announcement'}</div>
-            <div className="mt-2 max-h-[55vh] overflow-y-auto space-y-2 pr-1 sm:max-h-[60vh]">
-              {(updateModal.content || '')
+          <div className="glass-strong w-full max-w-2xl rounded-[32px] p-6 shadow-[0_30px_120px_rgba(8,145,178,0.22)]">
+            <div className="inline-flex items-center rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-cyan-200">
+              New Service Update
+            </div>
+            <div className="mt-4 text-xl font-semibold text-white">{updateModal.title || 'Service Announcement'}</div>
+            <div className="mt-4 max-h-[55vh] space-y-3 overflow-y-auto pr-2">
+              {updateModal.content
                 .replace(/\\n/g, '\n')
                 .replace(/\r\n/g, '\n')
                 .split(/\n{2,}/)
-                .map((section) => section.trim())
+                .map((chunk) => chunk.trim())
                 .filter(Boolean)
                 .map((paragraph, index) => (
-                  <p key={index} className="text-sm leading-relaxed text-slate-300">
+                  <p key={index} className="text-sm leading-7 text-slate-300">
                     {paragraph}
                   </p>
                 ))}
             </div>
-            <div className="mt-3 flex justify-end gap-2">
+            <div className="mt-5 flex justify-end gap-2">
               <a href="/customer/service-updates" className="btn-xs-outline" onClick={acknowledgeUpdate} data-no-prefetch>
-                View all updates
+                Update history
               </a>
               <button className="btn-xs" onClick={acknowledgeUpdate}>
                 Got it
@@ -627,7 +743,7 @@ export default function CustomerPortal() {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       <ChatWidget position="bottom-right" />
     </main>

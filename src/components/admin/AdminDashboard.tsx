@@ -1,7 +1,8 @@
 'use client'
 
-import { useMemo, useRef, useState, useEffect } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
+import { Bell, MessageSquareMore, Sparkles, Trash2 } from 'lucide-react'
 import { useChatStore } from '@/stores/chatStore'
 import ConversationList from './ConversationList'
 import ChatArea from './ChatArea'
@@ -18,11 +19,11 @@ export default function AdminDashboard() {
   const [isMobile, setIsMobile] = useState(false)
   const [saving, setSaving] = useState(false)
   const [idleMinutes, setIdleMinutes] = useState(5)
-  const lastActiveNotifiedRef = useRef<number>(0)
   const [selectMode, setSelectMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({})
+  const lastActiveNotifiedRef = useRef<number>(0)
   const searchParams = useSearchParams()
-  
+
   const {
     conversations,
     stats,
@@ -32,72 +33,59 @@ export default function AdminDashboard() {
     fetchMessages,
     refreshMessages,
     createConversation,
-    updateConversationStatus,
-    endConversation,
     deleteConversation,
     isLoading,
     error,
     connectSocket,
     disconnectSocket,
     setAdminAvailability,
-    hydrateAdminAvailability
+    hydrateAdminAvailability,
   } = useChatStore()
 
-  const hasUnreadMessages = (conversation: Conversation) => {
-    const unreadCount = Number((conversation as any).metadata?.unread_customer_count || 0)
-    const unreadFlag = Boolean((conversation as any).metadata?.has_unread_customer_message)
-    return unreadCount > 0 || unreadFlag
-  }
-
-  // Handle deletion safely
-  const handleDelete = async () => {
-    if (!selectedConversation) return
-    if (!confirm('Delete this conversation permanently?')) return
-    
-    // Optimistic UI update - go back to list immediately
-    const id = selectedConversation.id
-    setSelectedConversation(null)
-    
-    // Perform deletion
-    await deleteConversation(id)
-    
-    // Force refresh list to ensure sync
-    setTimeout(() => refreshConversations(), 1000)
-  }
-
   useEffect(() => {
-    try{
+    try {
       const hasCookie = typeof document !== 'undefined' && document.cookie.includes('admin_session=')
       const localAdmin = typeof localStorage !== 'undefined' && !!localStorage.getItem('localAdmin')
       if (localAdmin && !hasCookie) {
-        fetch('/api/admin/auth/session', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ mode: 'local', username: localStorage.getItem('localAdminUser') || '', password: localStorage.getItem('localAdminPass') || '' }) }).catch(()=>{})
+        fetch('/api/admin/auth/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mode: 'local',
+            username: localStorage.getItem('localAdminUser') || '',
+            password: localStorage.getItem('localAdminPass') || '',
+          }),
+        }).catch(() => {})
       }
-    }catch{}
+    } catch {}
+
     fetchConversations()
-    ;(async()=>{
+    ;(async () => {
       await hydrateAdminAvailability()
       const avail = useChatStore.getState().adminAvailability
       if (avail !== 'off') connectSocket()
-      try{
+      try {
         const res = await fetch('/api/admin/settings', { cache: 'no-store' as any })
-        if(res.ok){
-          const d = await res.json().catch(()=>null)
+        if (res.ok) {
+          const d = await res.json().catch(() => null)
           const n = Number(d?.chat_idle_timeout_minutes || 5)
           setIdleMinutes(Number.isFinite(n) && n > 0 ? n : 5)
         }
-      } catch{}
+      } catch {}
     })()
-    try{ if (typeof Notification !== 'undefined' && Notification.permission === 'default') Notification.requestPermission().catch(()=>{}) } catch {}
-    
-    // Check for mobile
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 1024)
-    }
-    
+
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'default') Notification.requestPermission().catch(() => {})
+    } catch {}
+
+    const checkMobile = () => setIsMobile(window.innerWidth < 1024)
     checkMobile()
     window.addEventListener('resize', checkMobile)
-    
-    const interval = setInterval(() => { refreshConversations() }, 2500)
+
+    const interval = setInterval(() => {
+      void refreshConversations()
+    }, 2500)
+
     return () => {
       disconnectSocket()
       window.removeEventListener('resize', checkMobile)
@@ -106,65 +94,34 @@ export default function AdminDashboard() {
   }, [])
 
   useEffect(() => {
-    if (adminAvailability === 'off') {
-      disconnectSocket()
-    } else {
-      connectSocket()
-    }
-  }, [adminAvailability])
-
-  useEffect(() => {
-    if (selectedConversation) {
-      fetchMessages(selectedConversation.id)
-    }
-  }, [selectedConversation])
+    if (adminAvailability === 'off') disconnectSocket()
+    else connectSocket()
+  }, [adminAvailability, connectSocket, disconnectSocket])
 
   useEffect(() => {
     if (!selectedConversation) return
-    const interval = setInterval(() => { refreshMessages(selectedConversation.id) }, 1500)
-    return () => clearInterval(interval)
-  }, [selectedConversation])
+    void fetchMessages(selectedConversation.id)
+  }, [fetchMessages, selectedConversation])
 
-  // Preselect conversation from query param
-  useEffect(()=>{
+  useEffect(() => {
+    if (!selectedConversation) return
+    const interval = setInterval(() => {
+      void refreshMessages(selectedConversation.id)
+    }, 1500)
+    return () => clearInterval(interval)
+  }, [refreshMessages, selectedConversation])
+
+  useEffect(() => {
     const openId = searchParams?.get('open')
     if (!openId) return
-    const c = conversations.find(c=> c.id === openId)
+    const c = conversations.find((conv) => conv.id === openId)
     if (c) setSelectedConversation(c)
-  }, [searchParams, conversations])
+  }, [conversations, searchParams])
 
-  useEffect(()=>{
+  useEffect(() => {
     if (selectedConversation) return
-    const byKey = new Map<string, Conversation>()
-    for (const c of conversations) {
-      const meta: any = (c as any).metadata || {}
-      const key = (meta.email || meta.full_name || c.id).toString().toLowerCase()
-      const existing = byKey.get(key)
-      if (!existing) {
-        byKey.set(key, c)
-      } else {
-        const a = new Date(existing.updated_at).getTime()
-        const b = new Date(c.updated_at).getTime()
-        if (b > a) byKey.set(key, c)
-      }
-    }
-    const arr = Array.from(byKey.values())
-      .filter(c => !showUnreadOnly || hasUnreadMessages(c))
-      .filter(c => (filterStatus === 'all' || c.status === filterStatus))
-      .filter(c => {
-        const meta: any = (c as any).metadata || {}
-        const name = (meta.full_name || '').toLowerCase()
-        const email = (meta.email || '').toLowerCase()
-        const id = c.id.toLowerCase()
-        const q = searchTerm.toLowerCase()
-        return !q || name.includes(q) || email.includes(q) || id.includes(q)
-      })
-      .sort((a,b)=> new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
-    const first = arr[0]
-    if (first) setSelectedConversation(first)
-  }, [conversations, filterStatus, searchTerm, selectedConversation, showUnreadOnly])
-
-  // Live updates come from realtime subscriptions; manual fetch occurs on selection only.
+    if (filteredConversations[0]) setSelectedConversation(filteredConversations[0])
+  }, [selectedConversation, conversations, filterStatus, searchTerm])
 
   useEffect(() => {
     const activeNow = stats.active
@@ -174,316 +131,292 @@ export default function AdminDashboard() {
     }
     if (activeNow > lastActiveNotifiedRef.current) {
       lastActiveNotifiedRef.current = activeNow
-      try{
+      try {
         if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
           new Notification('New live chat', { body: 'A customer started a chat.' })
         }
       } catch {}
     }
-  }, [stats.active, adminAvailability])
+  }, [adminAvailability, stats.active])
 
   useEffect(() => {
     const interval = setInterval(() => {
-      const mins = idleMinutes
-      if (!mins || mins <= 0) return
       const now = Date.now()
       const list = useChatStore.getState().conversations || []
       list
-        .filter(c => c.status === 'active')
-        .forEach(c => {
-          const meta: any = (c as any).metadata || {}
-          if (shouldAutoWait({ lastAdminAt: meta.last_admin_at, lastCustomerAt: meta.last_customer_at, nowMs: now, idleMinutes: mins })) {
-            useChatStore.getState().updateConversationStatus(c.id, 'waiting')
+        .filter((conv) => conv.status === 'active')
+        .forEach((conv) => {
+          const meta: any = conv.metadata || {}
+          if (
+            shouldAutoWait({
+              lastAdminAt: meta.last_admin_at,
+              lastCustomerAt: meta.last_customer_at,
+              nowMs: now,
+              idleMinutes,
+            })
+          ) {
+            void useChatStore.getState().updateConversationStatus(conv.id, 'waiting')
           }
         })
     }, 60000)
     return () => clearInterval(interval)
   }, [idleMinutes])
-  const filteredConversations = (() => {
+
+  const filteredConversations = useMemo(() => {
     const byKey = new Map<string, Conversation>()
-    for (const c of conversations) {
-      const meta: any = (c as any).metadata || {}
-      const key = (meta.email || meta.full_name || c.id).toString().toLowerCase()
+    for (const conversation of conversations) {
+      const meta: any = conversation.metadata || {}
+      const key = (meta.email || meta.full_name || conversation.id).toString().toLowerCase()
       const existing = byKey.get(key)
-      if (!existing) {
-        byKey.set(key, c)
-      } else {
-        const a = new Date(existing.updated_at).getTime()
-        const b = new Date(c.updated_at).getTime()
-        if (b > a) byKey.set(key, c)
+      if (!existing || new Date(conversation.updated_at).getTime() > new Date(existing.updated_at).getTime()) {
+        byKey.set(key, conversation)
       }
     }
-    const arr = Array.from(byKey.values())
-    return arr
-      .filter(c => !showUnreadOnly || hasUnreadMessages(c))
-      .filter(c => (filterStatus === 'all' || c.status === filterStatus))
-      .filter(c => {
-        const meta: any = (c as any).metadata || {}
+
+    const query = searchTerm.toLowerCase()
+    return Array.from(byKey.values())
+      .filter((conversation) => filterStatus === 'all' || conversation.status === filterStatus)
+      .filter((conversation) => {
+        const meta: any = conversation.metadata || {}
         const name = (meta.full_name || '').toLowerCase()
         const email = (meta.email || '').toLowerCase()
-        const id = c.id.toLowerCase()
-        const q = searchTerm.toLowerCase()
-        return !q || name.includes(q) || email.includes(q) || id.includes(q)
+        const id = conversation.id.toLowerCase()
+        return !query || name.includes(query) || email.includes(query) || id.includes(query)
       })
-      .sort((a,b)=> new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
-  })()
-
-  const handleConversationSelect = (conversation: Conversation) => {
-    setSelectedConversation(conversation)
-  }
-
-  const toggleSelect = (conversationId: string) => {
-    setSelectedIds(prev => ({ ...prev, [conversationId]: !prev[conversationId] }))
-  }
+      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+  }, [conversations, filterStatus, searchTerm])
 
   const selectedCount = useMemo(() => Object.values(selectedIds).filter(Boolean).length, [selectedIds])
 
+  const availabilityLabel = useMemo(() => {
+    if (adminAvailability === 'off') return { text: 'Offline', cls: 'bg-rose-500/12 text-rose-200 border-rose-400/20' }
+    if (adminAvailability === 'waiting') return { text: 'Standby', cls: 'bg-amber-500/12 text-amber-200 border-amber-400/20' }
+    return { text: 'Live', cls: 'bg-emerald-500/12 text-emerald-200 border-emerald-400/20' }
+  }, [adminAvailability])
+
+  const toggleSelect = (conversationId: string) => {
+    setSelectedIds((prev) => ({ ...prev, [conversationId]: !prev[conversationId] }))
+  }
+
   const bulkDelete = async () => {
-    const ids = Object.entries(selectedIds).filter(([, v]) => v).map(([id]) => id)
+    const ids = Object.entries(selectedIds)
+      .filter(([, selected]) => selected)
+      .map(([id]) => id)
     if (!ids.length) return
     if (!confirm(`Delete ${ids.length} conversation(s) permanently?`)) return
     setSelectedConversation(null)
     for (const id of ids) {
-      try { await deleteConversation(id) } catch {}
+      try {
+        await deleteConversation(id)
+      } catch {}
     }
     setSelectedIds({})
     setSelectMode(false)
-    setTimeout(() => refreshConversations(), 800)
+    setTimeout(() => {
+      void refreshConversations()
+    }, 800)
   }
 
-  async function updateAvailability(next: 'off' | 'waiting' | 'active'){
+  async function updateAvailability(next: 'off' | 'waiting' | 'active') {
     setAdminAvailability(next)
-    try { if (typeof localStorage !== 'undefined') localStorage.setItem('admin_chat_availability', next) } catch {}
+    try {
+      if (typeof localStorage !== 'undefined') localStorage.setItem('admin_chat_availability', next)
+    } catch {}
     setSaving(true)
-    try{
-      const g = await fetch('/api/admin/settings')
+    try {
+      const g = await fetch('/api/admin/settings', { cache: 'no-store' })
       const cur = g.ok ? await g.json() : {}
       const payload = { ...cur, chat_availability: next }
-      const r = await fetch('/api/admin/settings', { method:'PUT', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(payload) })
-      if (!r.ok) return
-    } catch{}
-    finally{ setSaving(false) }
+      await fetch('/api/admin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+    } catch {}
+    setSaving(false)
   }
 
-  const availabilityLabel = useMemo(() => {
-    if (adminAvailability === 'off') return { text: 'Off', cls: 'bg-rose-500/20 text-rose-300 border-rose-500/30' }
-    if (adminAvailability === 'waiting') return { text: 'Waiting', cls: 'bg-amber-500/20 text-amber-300 border-amber-500/30' }
-    return { text: 'Active', cls: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' }
-  }, [adminAvailability])
-
   return (
-    <div className="flex h-[calc(100vh-9rem)] md:h-[calc(100vh-10rem)] bg-slate-900 rounded-xl overflow-hidden border border-slate-800 shadow-xl">
-      {/* Sidebar - Conversation List */}
-      <div className={`${
-        isMobile && selectedConversation ? 'hidden' : 'block'
-      } w-full lg:w-80 bg-slate-900/60 border-r border-slate-800 flex flex-col`}>
-        {/* Header */}
-        <div className="p-4 border-b border-slate-800">
-          <h1 className="text-xl font-semibold text-slate-200">Live Chat Admin</h1>
-          <p className="text-sm text-slate-400">Manage customer conversations</p>
-          
-          <div className="mt-3 flex items-center gap-3">
-            <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${availabilityLabel.cls}`}>
-              {availabilityLabel.text}
-            </span>
-            <div className="inline-flex rounded-lg overflow-hidden border border-slate-700">
-              <button
-                className={`px-2 py-1 text-[11px] ${adminAvailability === 'off' ? 'bg-slate-800 text-slate-200' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'}`}
-                onClick={() => updateAvailability('off')}
-                disabled={saving}
-              >Off</button>
-              <button
-                className={`px-2 py-1 text-[11px] ${adminAvailability === 'waiting' ? 'bg-slate-800 text-slate-200' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'}`}
-                onClick={() => updateAvailability('waiting')}
-                disabled={saving}
-              >Waiting</button>
-              <button
-                className={`px-2 py-1 text-[11px] ${adminAvailability === 'active' ? 'bg-slate-800 text-slate-200' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'}`}
-                onClick={() => updateAvailability('active')}
-                disabled={saving}
-              >Active</button>
+    <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)_320px]">
+      <section className={`${isMobile && selectedConversation ? 'hidden' : 'block'} panel overflow-hidden`}>
+        <div className="border-b border-white/8 p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="eyebrow">
+                <Bell size={13} />
+                Live Support
+              </div>
+              <h1 className="mt-4 text-2xl font-semibold text-white">Realtime customer inbox</h1>
+              <p className="mt-2 text-sm text-slate-400">Track active chats, jump into waiting conversations, and keep support feeling premium.</p>
             </div>
+            <div className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${availabilityLabel.cls}`}>
+              {availabilityLabel.text}
+            </div>
+          </div>
+
+          <div className="mt-5 grid grid-cols-3 gap-2">
+            {(['off', 'waiting', 'active'] as const).map((state) => (
+              <button
+                key={state}
+                className={`rounded-2xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] ${
+                  adminAvailability === state ? 'bg-cyan-400/14 text-cyan-100 border border-cyan-400/20' : 'bg-white/5 text-slate-400'
+                }`}
+                onClick={() => updateAvailability(state)}
+                disabled={saving}
+              >
+                {state}
+              </button>
+            ))}
           </div>
         </div>
 
-        {/* Search and Filter */}
-        <div className="p-4 space-y-3">
+        <div className="border-b border-white/8 p-5">
           <input
             type="text"
-            placeholder="Search conversations..."
+            placeholder="Search by name, email, or conversation ID"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="input w-full"
+            className="input"
           />
-          
-          <select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value as any)}
-            className="input w-full"
-          >
-            <option value="all">All Status</option>
-            <option value="active">Active</option>
-            <option value="waiting">Waiting</option>
-            <option value="closed">Closed</option>
-          </select>
-          <label className="flex items-center justify-between rounded-xl border border-slate-700 bg-slate-900/40 px-3 py-2 text-sm text-slate-300">
-            <span>Unread only</span>
-            <input
-              type="checkbox"
-              checked={showUnreadOnly}
-              onChange={(e) => setShowUnreadOnly(e.target.checked)}
-              className="checkbox checkbox-sm checkbox-info"
-            />
-          </label>
-          <div className="flex gap-2">
-            <button
-              className="btn-ghost text-xs border border-slate-700 hover:bg-slate-800 flex-1"
-              onClick={() => { setSelectMode(v => !v); setSelectedIds({}) }}
-            >
-              {selectMode ? 'Cancel' : 'Select'}
-            </button>
-            <button
-              className="btn-ghost text-xs border border-rose-500/30 text-rose-300 hover:bg-rose-500/10 flex-1 disabled:opacity-50"
-              disabled={!selectMode || selectedCount === 0}
-              onClick={bulkDelete}
-            >
-              Delete ({selectedCount})
+
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as any)} className="input">
+              <option value="all">All</option>
+              <option value="active">Active</option>
+              <option value="waiting">Waiting</option>
+              <option value="closed">Closed</option>
+            </select>
+            <button className="btn-outline" onClick={() => setSelectMode((value) => !value)}>
+              {selectMode ? 'Cancel select' : 'Select chats'}
             </button>
           </div>
-          {selectMode && (
-            <div className="flex gap-2">
+
+          {selectMode ? (
+            <div className="mt-3 flex gap-2">
               <button
-                className="btn-ghost text-xs border border-slate-700 hover:bg-slate-800 flex-1"
-                onClick={() => {
-                  setSelectedIds(prev => {
+                className="btn-ghost flex-1"
+                onClick={() =>
+                  setSelectedIds((prev) => {
                     const next = { ...prev }
-                    filteredConversations.forEach(c => { next[c.id] = true })
+                    filteredConversations.forEach((conversation) => {
+                      next[conversation.id] = true
+                    })
                     return next
                   })
-                }}
+                }
               >
-                Select All
+                Select all
               </button>
-              <button
-                className="btn-ghost text-xs border border-slate-700 hover:bg-slate-800 flex-1"
-                onClick={() => setSelectedIds({})}
-              >
+              <button className="btn-ghost flex-1" onClick={() => setSelectedIds({})}>
                 Clear
               </button>
             </div>
-          )}
-          {!isLoading && !error && conversations.length === 0 && (
-            <div className="mt-2">
-              <button
-                className="btn w-full"
-                onClick={async()=>{
-                  try{
-                    const demo = await createConversation('127.0.0.1', { full_name: 'Demo User', email: 'demo@example.com' })
-                    if (demo) setSelectedConversation(demo)
-                  } catch{}
-                }}
-              >Start Demo Conversation</button>
-              <div className="text-[11px] text-slate-400 mt-1">Creates a test chat so the dashboard isn’t blank.</div>
+          ) : null}
+
+          {selectMode ? (
+            <button
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm font-semibold text-rose-200 disabled:opacity-50"
+              disabled={selectedCount === 0}
+              onClick={bulkDelete}
+            >
+              <Trash2 size={15} />
+              Delete selected ({selectedCount})
+            </button>
+          ) : null}
+
+          {!isLoading && !error && conversations.length === 0 ? (
+            <div className="mt-4 panel-strong p-4">
+              <div className="flex items-start gap-3">
+                <div className="rounded-2xl bg-cyan-400/12 p-2 text-cyan-300">
+                  <Sparkles size={16} />
+                </div>
+                <div className="flex-1">
+                  <div className="text-sm font-semibold text-slate-100">No chats yet</div>
+                  <p className="mt-1 text-xs text-slate-400">Create a demo conversation so the support console is not blank while testing.</p>
+                  <button
+                    className="btn-xs mt-3"
+                    onClick={async () => {
+                      const demo = await createConversation('127.0.0.1', {
+                        full_name: 'Demo User',
+                        email: 'demo@example.com',
+                      })
+                      if (demo) setSelectedConversation(demo)
+                    }}
+                  >
+                    Start demo conversation
+                  </button>
+                </div>
+              </div>
             </div>
-          )}
-
-          {/* removed demo conversation seed button */}
-
-
+          ) : null}
         </div>
 
-        {/* Conversation List */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="max-h-[62vh] overflow-y-auto">
           {isLoading ? (
-            <div className="p-4 text-center text-slate-400">Loading conversations...</div>
+            <div className="p-5 text-sm text-slate-400">Loading conversations...</div>
           ) : error ? (
-            <div className="p-4 text-center text-rose-400">{error}</div>
+            <div className="p-5 text-sm text-rose-300">{error}</div>
           ) : (
             <ConversationList
               conversations={filteredConversations}
               selectedConversation={selectedConversation}
-              onSelectConversation={handleConversationSelect}
+              onSelectConversation={setSelectedConversation}
               selectMode={selectMode}
               selectedIds={selectedIds}
               onToggleSelect={toggleSelect}
             />
           )}
         </div>
-      </div>
+      </section>
 
-      {/* Main Chat Area */}
-      <div className={`${
-        isMobile && !selectedConversation ? 'hidden' : 'block'
-      } flex-1 flex flex-col bg-slate-900/60`}> 
+      <section className={`${isMobile && !selectedConversation ? 'hidden' : 'flex'} panel-strong min-h-[72vh] flex-col overflow-hidden`}>
         {selectedConversation ? (
           <>
-            {/* Chat Header */}
-            <div className="bg-slate-900/60 border-b border-slate-800 p-4">
-              <div className="flex justify-between items-center">
+            <div className="border-b border-white/8 px-5 py-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-semibold text-slate-200">
-                    Conversation #{selectedConversation.id.slice(0, 8)}
-                  </h2>
-                  <p className="text-sm text-slate-400">
-                    Status: <span className={`capitalize ${
-                      selectedConversation.status === 'active' ? 'text-emerald-400' :
-                      selectedConversation.status === 'waiting' ? 'text-amber-400' :
-                      'text-slate-400'
-                    }`}>{selectedConversation.status}</span>
-                  </p>
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Conversation</div>
+                  <div className="mt-1 flex items-center gap-3">
+                    <h2 className="text-xl font-semibold text-white">#{selectedConversation.id.slice(0, 8)}</h2>
+                    <span className={`tag ${selectedConversation.status === 'active' ? 'active' : selectedConversation.status === 'waiting' ? 'due-soon' : 'inactive'}`}>
+                      {selectedConversation.status}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex space-x-2">
-                  {isMobile && (
-                    <button
-                      onClick={() => setSelectedConversation(null)}
-                      className="px-3 py-1 bg-slate-800 text-slate-300 rounded text-sm hover:bg-slate-700"
-                    >
-                      ← Back
-                    </button>
-                  )}
-                  {/* removed header MP3 uploader */}
-                  <button onClick={() => useChatStore.getState().updateConversationStatus(selectedConversation.id, 'waiting')} className="px-3 py-1 bg-cyan-600 text-white rounded text-sm hover:bg-cyan-700">
-                    Resolve
+                {isMobile ? (
+                  <button className="btn-outline px-4 py-2" onClick={() => setSelectedConversation(null)}>
+                    Back to inbox
                   </button>
-                  <button onClick={() => { useChatStore.getState().endConversation(selectedConversation.id); setSelectedConversation(null) }} className="px-3 py-1 bg-slate-800 text-slate-300 rounded text-sm hover:bg-slate-700">
-                    Close
-                  </button>
-                  <button onClick={() => { if (confirm('Delete this conversation permanently?')) { useChatStore.getState().deleteConversation(selectedConversation.id); setSelectedConversation(null) } }} className="px-3 py-1 bg-rose-600 text-white rounded text-sm hover:bg-rose-700">
-                    Delete
-                  </button>
-                </div>
+                ) : null}
               </div>
             </div>
-
-          {/* Chat Messages */}
-          <ChatArea conversation={selectedConversation} />
-          {/* removed header upload progress bar */}
+            <ChatArea conversation={selectedConversation} />
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center bg-slate-900/60">
-            <div className="text-center">
-              <div className="text-slate-500 mb-4">
-                <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                </svg>
+          <div className="flex flex-1 items-center justify-center p-10 text-center">
+            <div>
+              <div className="mx-auto mb-4 inline-flex rounded-full border border-cyan-400/20 bg-cyan-400/10 p-4 text-cyan-300">
+                <MessageSquareMore size={26} />
               </div>
-              <h3 className="text-lg font-medium text-slate-200 mb-2">Select a conversation</h3>
-              <p className="text-slate-400">Choose a conversation from the sidebar to start chatting</p>
+              <h3 className="text-2xl font-semibold text-white">Choose a conversation</h3>
+              <p className="mt-2 max-w-md text-sm text-slate-400">Your modern support workspace is ready. Pick a chat from the inbox to jump into the thread.</p>
             </div>
           </div>
         )}
-      </div>
+      </section>
 
-      {!isMobile && (
-        <div className="w-80 bg-slate-900/60 border-l border-slate-800 overflow-y-auto">
-          <div className="p-4 border-b border-slate-800">
-            <DashboardStats conversations={filteredConversations} stats={stats} onOpenConversation={handleConversationSelect} />
+      {!isMobile ? (
+        <aside className="space-y-6">
+          <div className="panel p-5">
+            <DashboardStats conversations={filteredConversations} stats={stats} onOpenConversation={setSelectedConversation} />
           </div>
-          {selectedConversation && (
-            <CustomerInfo conversation={selectedConversation} />
-          )}
-        </div>
-      )}
+          {selectedConversation ? (
+            <div className="panel overflow-hidden">
+              <CustomerInfo conversation={selectedConversation} />
+            </div>
+          ) : null}
+        </aside>
+      ) : null}
     </div>
   )
 }

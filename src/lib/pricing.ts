@@ -1,4 +1,4 @@
-import { addMonths, addYears, differenceInDays } from 'date-fns'
+import { addMonths, addYears, differenceInCalendarDays, startOfDay } from 'date-fns'
 
 export type Plan = 'monthly' | 'yearly' | 'movies_only' | 'tv_only'
 export const TRANSACTION_FEE = 5
@@ -65,7 +65,7 @@ export function calculateNextDue(plan: Plan, startDate: Date): Date {
 }
 
 export function getStatus(nextDue: Date): 'Active' | 'Due Soon' | 'Due Today' | 'Overdue' {
-  const days = differenceInDays(nextDue, new Date())
+  const days = differenceInCalendarDays(startOfDay(nextDue), startOfDay(new Date()))
   if (days < 0) return 'Overdue'
   if (days === 0) return 'Due Today'
   if (days <= 7) return 'Due Soon'

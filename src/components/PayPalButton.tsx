@@ -1,57 +1,117 @@
 "use client"
 
+import { useMemo, useState } from 'react'
 import { type Plan } from '@/lib/pricing'
 
-export default function PayPalButton({ amount, currency = 'GBP', plan, streams, downloads, onSuccess }: { amount: number; currency?: string; customerEmail?: string; plan?: Plan; streams?: number; downloads?: boolean; onSuccess?: (orderId: string) => void }){
-  
-  const getPlanLabel = (p?: string) => {
-    if (p === 'yearly') return 'Full Package'
-    if (p === 'movies_only') return 'M hosting Only'
-    if (p === 'tv_only') return 'T Hosting Only'
-    return 'Monthly Hosting'
+function buildHostingReference(plan?: Plan, servers?: number, downloads?: boolean) {
+  const safePlan = plan || 'yearly'
+  const safeServers = Math.max(1, Number(servers || 1))
+  const duration = safePlan === 'monthly' ? '1 Month' : '1 Year'
+  const packageLabel =
+    safePlan === 'movies_only'
+      ? 'Movie Hosting'
+      : safePlan === 'tv_only'
+        ? 'TV Hosting'
+        : 'Hosting'
+  const serverLabel = `${safeServers} ${safeServers === 1 ? 'Server' : 'Servers'}`
+  return `${duration} ${packageLabel} - ${serverLabel}${downloads ? ' + Downloads' : ''}`
+}
+
+export default function PayPalButton({
+  amount,
+  baseAmount,
+  creditApplied = 0,
+  currency = 'GBP',
+  customerEmail,
+  plan,
+  streams,
+  downloads,
+}: {
+  amount: number
+  baseAmount?: number
+  creditApplied?: number
+  currency?: string
+  customerEmail?: string
+  plan?: Plan
+  streams?: number
+  downloads?: boolean
+  onSuccess?: (orderId: string) => void
+}) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const reference = useMemo(
+    () => buildHostingReference(plan, streams, downloads),
+    [downloads, plan, streams]
+  )
+
+  async function beginCheckout() {
+    setError('')
+    setLoading(true)
+    try {
+      const res = await fetch('/api/paypal/create-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount,
+          currency,
+          customerEmail,
+          plan,
+          streams,
+          downloads,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(data?.error || 'Unable to start checkout.')
+        return
+      }
+      if (!data?.approveUrl) {
+        setError('PayPal approval link was not returned.')
+        return
+      }
+      window.location.href = data.approveUrl
+    } catch (e: any) {
+      setError(e?.message || 'Unable to start checkout.')
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const currentPlanLabel = getPlanLabel(plan)
-  const currentStreamsLabel = streams === 1 ? '1 Stream' : `${streams} Streams`
-  const currentDownloadsLabel = downloads ? ' + Downloads' : ''
-  const yourReference = `${currentPlanLabel} – ${currentStreamsLabel}${currentDownloadsLabel}`
-
   return (
-    <div className="glass p-6 rounded-xl border border-amber-500/20 bg-amber-900/10 space-y-6">
-      <div className="text-center border-b border-white/10 pb-4">
-        <div className="text-slate-400 text-sm uppercase tracking-wider mb-1">Total to Pay</div>
-        <div className="text-3xl font-bold text-emerald-400">£{amount.toFixed(2)}</div>
+    <div className="glass rounded-[28px] border border-cyan-400/15 bg-[linear-gradient(135deg,rgba(34,211,238,0.08),rgba(15,23,42,0.55))] p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-xs uppercase tracking-[0.24em] text-cyan-200/80">PayPal Checkout</div>
+          <div className="mt-2 text-3xl font-semibold text-white">GBP {amount.toFixed(2)}</div>
+          {creditApplied > 0 && baseAmount !== undefined ? (
+            <div className="mt-2 space-y-1 text-xs text-slate-400">
+              <div>Base total: GBP {baseAmount.toFixed(2)}</div>
+              <div>Referral credit: -GBP {creditApplied.toFixed(2)}</div>
+            </div>
+          ) : null}
+        </div>
+        <div className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-slate-300">
+          Secure payment
+        </div>
       </div>
 
-      <div className="space-y-4 text-slate-300 text-sm">
-        <p>Please send payment via PayPal.</p>
-        
-        <div className="bg-black/20 p-4 rounded-lg border border-white/5">
-          <p className="mb-2">The payment reference should clearly state the package you selected, for example:</p>
-          <ul className="list-none space-y-1 text-slate-400 italic mb-3 pl-2 border-l-2 border-slate-600">
-            <li>– Full Package – 2 Streams</li>
-            <li>– Movies Only – 1 Stream</li>
-          </ul>
-          
-          <div className="mt-3 pt-3 border-t border-white/10">
-            <p className="text-xs text-amber-400 uppercase tracking-wide mb-1">Your Reference to use:</p>
-            <p className="font-mono text-slate-100 bg-black/40 p-2 rounded text-center select-all cursor-pointer hover:bg-black/60 transition-colors" title="Click to select">
-              {yourReference}
-            </p>
-          </div>
+      <div className="mt-4 rounded-[24px] border border-white/8 bg-slate-950/35 p-4">
+        <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Reference sent to PayPal</div>
+        <div className="mt-2 text-sm font-medium text-white">{reference}</div>
+        <div className="mt-2 text-xs text-slate-400">
+          Payment records use hosting wording only and update your account automatically once PayPal confirms the order.
         </div>
-
-        <div className="text-center py-2">
-          <p className="mb-1">The PayPal address is:</p>
-          <div className="text-lg font-semibold text-white select-all bg-amber-500/10 py-2 rounded border border-amber-500/20">
-            streamzrus1@gmail.com
-          </div>
-        </div>
-
-        <p className="text-center text-slate-400 italic">
-          Once signed up, you will receive an invite shortly after.
-        </p>
       </div>
+
+      {error ? (
+        <div className="mt-4 rounded-[20px] border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+          {error}
+        </div>
+      ) : null}
+
+      <button className="btn mt-5 w-full" onClick={beginCheckout} disabled={loading}>
+        {loading ? 'Opening PayPal...' : 'Continue to PayPal'}
+      </button>
     </div>
   )
 }

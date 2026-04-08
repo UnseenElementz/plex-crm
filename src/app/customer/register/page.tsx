@@ -1,9 +1,14 @@
 "use client"
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import { getSupabase } from '@/lib/supabaseClient'
+import { mergeCustomerNotes, parseCustomerNotes } from '@/lib/customerNotes'
+
+function isBanned(notes: unknown) {
+  return parseCustomerNotes(notes).banned
+}
 
 export default function CustomerRegisterPage() {
   const [email, setEmail] = useState('')
@@ -17,7 +22,7 @@ export default function CustomerRegisterPage() {
   const searchParams = useSearchParams()
 
   useEffect(() => {
-    const ref = String(searchParams?.get('ref') || '').trim()
+    const ref = String(searchParams?.get('ref') || '').trim().toUpperCase()
     if (ref) setReferralCode(ref)
   }, [searchParams])
 
@@ -25,44 +30,32 @@ export default function CustomerRegisterPage() {
     setError('')
     setLoading(true)
 
-    const supabase = getSupabase()
-    if (!supabase) {
-      try {
-        const profile = {
-          fullName,
-          email,
-          plan: 'yearly',
-          streams: 1,
-          nextDueDate: new Date().toISOString(),
-          plexUsername,
-          referralCode: referralCode || 'STREAMZDEMO',
-        }
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('customerProfile', JSON.stringify(profile))
-          sessionStorage.setItem('customerDemo', 'true')
-        }
-        router.push('/customer')
-      } finally {
-        setLoading(false)
-      }
+    const s = getSupabase()
+    const normalizedEmail = email.trim().toLowerCase()
+    const trimmedName = fullName.trim()
+    const trimmedPlex = plexUsername.trim()
+
+    if (!s) {
+      setError('Customer registration requires Supabase to be configured correctly.')
+      setLoading(false)
       return
     }
 
     try {
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email,
+      const { data, error } = await s.auth.signUp({
+        email: normalizedEmail,
         password,
         options: {
           data: {
             role: 'customer',
-            fullName,
-            plexUsername,
+            fullName: trimmedName,
+            plexUsername: trimmedPlex,
           },
         },
       })
 
-      if (signUpError) {
-        setError(signUpError.message)
+      if (error) {
+        setError(error.message)
         setLoading(false)
         return
       }
@@ -74,25 +67,69 @@ export default function CustomerRegisterPage() {
         return
       }
 
-      const syncRes = await fetch('/api/customer/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user.id,
-          email,
-          fullName,
-          plexUsername,
-          referralCode,
-          createCustomer: true,
-        }),
-      })
+      await s.from('profiles').upsert(
+        {
+          user_id: user.id,
+          email: normalizedEmail,
+          role: 'customer',
+          full_name: trimmedName,
+        },
+        { onConflict: 'email' }
+      )
 
-      const syncPayload = await syncRes.json().catch(() => ({}))
-      if (!syncRes.ok) {
-        throw new Error(syncPayload?.error || 'Failed to prepare your customer account')
+      const { data: existingCustomer } = await s
+        .from('customers')
+        .select('id,name,notes,subscription_type,streams,start_date,next_payment_date,subscription_status')
+        .eq('email', normalizedEmail)
+        .maybeSingle()
+
+      if (existingCustomer) {
+        if (isBanned((existingCustomer as any).notes)) {
+          await s.auth.signOut().catch(() => {})
+          router.push('/customer/banned')
+          return
+        }
+        const nextNotes = mergeCustomerNotes({
+          existing: (existingCustomer as any).notes || '',
+          plexUsername: trimmedPlex,
+        })
+        await s
+          .from('customers')
+          .update({
+            name: trimmedName || (existingCustomer as any).name || normalizedEmail,
+            notes: nextNotes,
+          })
+          .eq('id', (existingCustomer as any).id)
+      } else {
+        await s.from('customers').insert({
+          name: trimmedName || normalizedEmail,
+          email: normalizedEmail,
+          subscription_type: 'yearly',
+          streams: 1,
+          start_date: null,
+          next_payment_date: null,
+          subscription_status: 'inactive',
+          notes: mergeCustomerNotes({
+            existing: '',
+            plexUsername: trimmedPlex,
+          }),
+        })
       }
 
-      router.push('/customer')
+      if (referralCode.trim()) {
+        const session = await s.auth.getSession()
+        const token = session.data.session?.access_token
+        await fetch('/api/referrals/me', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ referralCode: referralCode.trim().toUpperCase() }),
+        }).catch(() => null)
+      }
+
+      router.push('/customer/login?registered=1')
     } catch (e: any) {
       setError(e?.message || 'An unexpected error occurred')
     } finally {
@@ -100,95 +137,39 @@ export default function CustomerRegisterPage() {
     }
   }
 
-  function handleKeyPress(event: React.KeyboardEvent) {
-    if (event.key === 'Enter' && email && password && fullName) {
-      register()
+  function handleKeyPress(e: React.KeyboardEvent) {
+    if (e.key === 'Enter' && email && password && fullName) {
+      void register()
     }
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-6">
-      <div className="glass w-full max-w-lg rounded-[2rem] border border-cyan-500/20 p-6 shadow-[0_24px_80px_rgba(2,6,23,0.45)]">
-        <div className="mb-6 text-center">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.35em] text-cyan-300/80">Join The Orbit</div>
-          <h1 className="mt-2 text-3xl font-bold text-slate-100">Customer Registration</h1>
-          <p className="mt-2 text-slate-400">Create your account and start building referral credit straight away.</p>
+    <main className="page-section flex min-h-screen items-center justify-center py-10">
+      <div className="glass w-full max-w-md rounded-[32px] p-6">
+        <div className="text-center mb-6">
+          <h1 className="text-2xl font-bold mb-2 text-white">Customer Registration</h1>
+          <p className="text-slate-400">Use the same email that exists in your customer record so your portal details stay synced.</p>
         </div>
 
-        {referralCode && (
-          <div className="mb-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-100">
-            Referral code detected: <span className="font-mono font-semibold">{referralCode}</span>
-          </div>
-        )}
-
         <div className="space-y-4">
-          <input
-            className="input w-full"
-            placeholder="Full Name"
-            value={fullName}
-            onChange={(event) => setFullName(event.target.value)}
-            onKeyPress={handleKeyPress}
-          />
+          <input className="input w-full" placeholder="Full Name" value={fullName} onChange={(e) => setFullName(e.target.value)} onKeyPress={handleKeyPress} />
+          <input className="input w-full" placeholder="Plex Username" value={plexUsername} onChange={(e) => setPlexUsername(e.target.value)} onKeyPress={handleKeyPress} />
+          <input className="input w-full" placeholder="Referral Code (Optional)" value={referralCode} onChange={(e) => setReferralCode(e.target.value.toUpperCase())} onKeyPress={handleKeyPress} />
+          <input className="input w-full" placeholder="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} onKeyPress={handleKeyPress} />
+          <input className="input w-full" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyPress={handleKeyPress} />
 
-          <input
-            className="input w-full"
-            placeholder="Plex Username"
-            value={plexUsername}
-            onChange={(event) => setPlexUsername(event.target.value)}
-            onKeyPress={handleKeyPress}
-          />
-
-          <input
-            className="input w-full"
-            placeholder="Email"
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            onKeyPress={handleKeyPress}
-          />
-
-          <input
-            className="input w-full"
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            onKeyPress={handleKeyPress}
-          />
-
-          <input
-            className="input w-full"
-            placeholder="Referral Code (optional)"
-            value={referralCode}
-            onChange={(event) => setReferralCode(event.target.value.toUpperCase())}
-            onKeyPress={handleKeyPress}
-          />
-
-          <div className="rounded-2xl border border-cyan-500/15 bg-slate-950/45 p-4 text-sm text-slate-300">
-            Every successful signup is worth £10 to the referrer, with a maximum of £80 total credit on the account.
-          </div>
-
-          {error && (
-            <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 p-3 text-sm text-rose-400">
-              {error}
-            </div>
-          )}
+          {error ? <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 p-3 text-sm text-rose-300">{error}</div> : null}
 
           <button className="btn w-full" onClick={register} disabled={!email || !password || !fullName || loading}>
             {loading ? 'Creating Account...' : 'Create Account'}
           </button>
         </div>
 
-        <div className="mt-6 space-y-2 text-center text-sm text-slate-400">
+        <div className="mt-6 text-center text-sm text-slate-400 space-y-2">
           <div>
             Already have an account?{' '}
-            <Link className="text-brand transition-colors hover:text-cyan-300" href="/customer/login">
+            <Link className="text-brand hover:text-cyan-300 transition-colors" href="/customer/login" prefetch={false}>
               Sign In
-            </Link>
-          </div>
-          <div>
-            <Link className="transition-colors hover:text-slate-300" href="/login">
-              Admin Login
             </Link>
           </div>
         </div>

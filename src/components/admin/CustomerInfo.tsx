@@ -1,188 +1,207 @@
 'use client'
 
-import { User, Globe, Calendar, Info } from 'lucide-react'
-import { useState } from 'react'
-import { Conversation, useChatStore } from '@/stores/chatStore'
+import { Calendar, Globe, Info, ShieldAlert, User } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { format } from 'date-fns'
+import { Conversation, useChatStore } from '@/stores/chatStore'
 
 interface CustomerInfoProps {
   conversation: Conversation
+}
+
+type DetailState = {
+  plex_username?: string
+  full_name?: string
+  status?: string
+  subscription_type?: string
+  streams?: number
+  next_payment_date?: string | null
+  notes?: string
+  ip_history?: string[]
+  blocked_ips?: string[]
 }
 
 export default function CustomerInfo({ conversation }: CustomerInfoProps) {
   const { sendMessage, updateConversationStatus, updateConversationMetadata } = useChatStore()
   const [sending, setSending] = useState(false)
   const [sendMsg, setSendMsg] = useState('')
-  const [fetchedPlexUser, setFetchedPlexUser] = useState<string | null>(null)
+  const [details, setDetails] = useState<DetailState | null>(null)
+  const [blocking, setBlocking] = useState(false)
 
-  useState(() => {
-      const email = (conversation as any).metadata?.email
-      if (email && !(conversation as any).metadata?.plex_username) {
-          fetch(`/api/admin/customers/details?email=${encodeURIComponent(email)}`)
-              .then(res => res.ok ? res.json() : null)
-              .then(data => {
-                  if (data?.plex_username) setFetchedPlexUser(data.plex_username)
-              })
-              .catch(() => {})
-      }
-  })
+  useEffect(() => {
+    const email = (conversation as any).metadata?.email
+    if (!email) return
+    fetch(`/api/admin/customers/details?email=${encodeURIComponent(email)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setDetails(data))
+      .catch(() => {})
+  }, [conversation])
+
+  const currentIp = conversation.customer_ip || ''
+  const isBlocked = Boolean(currentIp && details?.blocked_ips?.includes(currentIp))
+
   const sendTemplate = async () => {
-    await sendMessage(conversation.id, 'Thanks for reaching out! A team member will be with you shortly.', 'admin')
+    await sendMessage(conversation.id, 'Thanks for reaching out. A team member will review this and get back to you shortly.', 'admin')
   }
+
   const transferChat = async () => {
     await updateConversationMetadata(conversation.id, { assigned_admin: 'support' })
   }
-  const blockUser = async () => {
-    await updateConversationMetadata(conversation.id, { blocked: true })
-  }
+
   const resolve = async () => {
     await updateConversationStatus(conversation.id, 'waiting')
   }
+
   const close = async () => {
     await updateConversationStatus(conversation.id, 'closed')
   }
-  const sendSignedUp = async () => {
-    try{
-      setSending(true); setSendMsg('')
-      const email = (conversation as any).metadata?.email || ''
-      if (!email) { setSendMsg('No email found'); return }
-      const res = await fetch('/api/onboarding/signed-up', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ email }) })
-      const data = await res.json().catch(()=>({}))
-      if (!res.ok){
-        const msg = data?.error || 'Failed to send'
-        setSendMsg(msg.includes('SMTP not configured') ? 'Email service not configured' : msg)
-      } else {
-        setSendMsg('Setup email sent')
+
+  const hardBanIp = async () => {
+    if (!currentIp) return
+    if (!confirm(`Hard block IP ${currentIp}?`)) return
+    setBlocking(true)
+    try {
+      const res = await fetch('/api/admin/security/block', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip: currentIp }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSendMsg(data?.error || 'Failed to block IP')
+        return
       }
-    } catch(e:any){ setSendMsg(e?.message || 'Failed to send') }
-    finally{ setSending(false); setTimeout(()=> setSendMsg(''), 4000) }
+      setDetails((current) => ({ ...(current || {}), blocked_ips: data?.blocked_ips || [] }))
+      await updateConversationMetadata(conversation.id, { blocked: true, blocked_ip: currentIp })
+      setSendMsg(`Blocked ${currentIp}`)
+    } catch (e: any) {
+      setSendMsg(e?.message || 'Failed to block IP')
+    } finally {
+      setBlocking(false)
+      setTimeout(() => setSendMsg(''), 4000)
+    }
   }
+
+  const sendSignedUp = async () => {
+    try {
+      setSending(true)
+      setSendMsg('')
+      const email = (conversation as any).metadata?.email || ''
+      if (!email) {
+        setSendMsg('No email found')
+        return
+      }
+      const res = await fetch('/api/onboarding/signed-up', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) })
+      const data = await res.json().catch(() => ({}))
+      setSendMsg(res.ok ? 'Setup email sent' : data?.error || 'Failed to send')
+    } catch (e: any) {
+      setSendMsg(e?.message || 'Failed to send')
+    } finally {
+      setSending(false)
+      setTimeout(() => setSendMsg(''), 4000)
+    }
+  }
+
   return (
-    <div className="p-4 space-y-6">
-      {/* Header */}
+    <div className="space-y-6 p-5">
       <div>
-        <h3 className="text-lg font-semibold text-slate-200 mb-2">Customer Info</h3>
-        <div className="flex items-center space-x-2">
-          <div className="w-10 h-10 bg-blue-500/20 rounded-full flex items-center justify-center">
-            <User className="w-5 h-5 text-blue-400" />
+        <h3 className="text-lg font-semibold text-slate-100">Customer Profile</h3>
+        <div className="mt-4 flex items-start gap-3">
+          <div className="rounded-2xl border border-white/8 bg-white/5 p-3 text-cyan-300">
+            <User size={18} />
           </div>
           <div>
-            <p className="font-medium text-slate-200">{(conversation as any).metadata?.full_name || (conversation as any).metadata?.email || `Customer #${conversation.id.slice(0, 8)}`}</p>
-            {(conversation as any).metadata?.email && (
-              <p className="text-sm text-slate-400">{(conversation as any).metadata?.email}</p>
-            )}
-            {fetchedPlexUser && !(conversation as any).metadata?.plex_username && (
-              <p className="text-sm text-slate-400">Plex: {fetchedPlexUser}</p>
-            )}
+            <p className="font-medium text-slate-100">{(conversation as any).metadata?.full_name || (conversation as any).metadata?.email || `Customer #${conversation.id.slice(0, 8)}`}</p>
+            {(conversation as any).metadata?.email ? <p className="text-sm text-slate-400">{(conversation as any).metadata?.email}</p> : null}
+            {details?.plex_username ? <p className="text-sm text-slate-500">Plex: {details.plex_username}</p> : null}
           </div>
         </div>
       </div>
 
-      {/* Session Info */}
       <div className="space-y-3">
-        <h4 className="font-medium text-slate-300 flex items-center">
-          <Info className="w-4 h-4 mr-2" />
+        <h4 className="flex items-center gap-2 font-medium text-slate-300">
+          <Info size={15} />
           Session Details
         </h4>
-        
         <div className="space-y-2 text-sm">
-          {conversation.customer_ip && (
-            <div className="flex items-center space-x-2">
-              <Globe className="w-4 h-4 text-slate-500" />
-              <span className="text-slate-400">IP: {conversation.customer_ip}</span>
+          {currentIp ? (
+            <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-white/5 px-3 py-2">
+              <div className="flex items-center gap-2 text-slate-300">
+                <Globe size={14} className="text-slate-500" />
+                {currentIp}
+              </div>
+              {isBlocked ? <span className="tag inactive">blocked</span> : <span className="tag active">live</span>}
             </div>
-          )}
-          {(conversation as any).metadata?.plex_username && (
-            <div className="flex items-center space-x-2">
-              <User className="w-4 h-4 text-slate-500" />
-              <span className="text-slate-400">Plex: {(conversation as any).metadata.plex_username}</span>
+          ) : null}
+          <div className="flex items-center gap-2 text-slate-400">
+            <Calendar size={14} />
+            Started: {format(new Date(conversation.created_at), 'dd/MM/yyyy HH:mm')}
+          </div>
+          <div className="flex items-center gap-2 text-slate-400">
+            <Calendar size={14} />
+            Updated: {format(new Date(conversation.updated_at), 'dd/MM/yyyy HH:mm')}
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <h4 className="font-medium text-slate-300">Account Context</h4>
+        <div className="grid gap-2">
+          <div className="rounded-2xl border border-white/8 bg-white/5 px-3 py-2 text-sm text-slate-300">
+            Status: <span className="text-slate-100">{details?.status || 'unknown'}</span>
+          </div>
+          <div className="rounded-2xl border border-white/8 bg-white/5 px-3 py-2 text-sm text-slate-300">
+            Package: <span className="text-slate-100">{details?.subscription_type || 'unknown'}</span>
+          </div>
+          <div className="rounded-2xl border border-white/8 bg-white/5 px-3 py-2 text-sm text-slate-300">
+            Streams: <span className="text-slate-100">{details?.streams ?? '-'}</span>
+          </div>
+          {details?.next_payment_date ? (
+            <div className="rounded-2xl border border-white/8 bg-white/5 px-3 py-2 text-sm text-slate-300">
+              Next payment: <span className="text-slate-100">{details.next_payment_date}</span>
             </div>
-          )}
-          
-          <div className="flex items-center space-x-2">
-            <Calendar className="w-4 h-4 text-slate-500" />
-            <span className="text-slate-400">
-              Started: {format(new Date(conversation.created_at), 'dd/MM/yyyy')}
-            </span>
-          </div>
-          
-          <div className="flex items-center space-x-2">
-            <Calendar className="w-4 h-4 text-slate-500" />
-            <span className="text-slate-400">
-              Last update: {format(new Date(conversation.updated_at), 'dd/MM/yyyy')}
-            </span>
-          </div>
+          ) : null}
         </div>
       </div>
 
-      {/* Status */}
-      <div className="space-y-3">
-        <h4 className="font-medium text-slate-300">Conversation Status</h4>
-        
-        <div className="space-y-2">
-          <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-            conversation.status === 'active' ? 'bg-emerald-500/20 text-emerald-300' :
-            conversation.status === 'waiting' ? 'bg-amber-500/20 text-amber-300' :
-            'bg-slate-700/50 text-slate-300'
-          }`}>
-            {conversation.status === 'active' ? 'Active' :
-             conversation.status === 'waiting' ? 'Waiting for response' :
-             'Closed'}
-          </div>
-          
-          {conversation.closed_at && (
-            <p className="text-sm text-slate-500">
-              Closed: {format(new Date(conversation.closed_at), 'dd/MM/yyyy')}
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* Quick Actions */}
-      <div className="space-y-3">
-        <h4 className="font-medium text-slate-300">Quick Actions</h4>
-        
-        <div className="space-y-2">
-          <button onClick={sendTemplate} className="w-full px-3 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors">
-            Send Template
-          </button>
-          
-          <button onClick={sendSignedUp} disabled={sending} className="w-full px-3 py-2 bg-emerald-600 text-white rounded text-sm hover:bg-emerald-700 disabled:opacity-50 transition-colors">
-            Signed up
-          </button>
-          {sendMsg && (<div className="text-xs text-slate-500">{sendMsg}</div>)}
-
-          <button onClick={transferChat} className="w-full px-3 py-2 bg-gray-200 text-gray-700 rounded text-sm hover:bg-gray-300 transition-colors">
-            Transfer Chat
-          </button>
-          
-          <button onClick={blockUser} className="w-full px-3 py-2 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200 transition-colors">
-            Block User
-          </button>
-        </div>
-      </div>
-
-      {/* Metadata */}
-      {(conversation.metadata || fetchedPlexUser) && (
+      {details?.ip_history?.length ? (
         <div className="space-y-3">
-          <h4 className="font-medium text-slate-300">Additional Info</h4>
-          
-          <div className="space-y-1 text-sm">
-            {fetchedPlexUser && !(conversation as any).metadata?.plex_username && (
-                 <div className="flex justify-between">
-                    <span className="text-slate-400 capitalize">plex username:</span>
-                    <span className="text-slate-200">{fetchedPlexUser}</span>
-                 </div>
-            )}
-            {conversation.metadata && Object.entries(conversation.metadata).map(([key, value]) => (
-              <div key={key} className="flex justify-between">
-                <span className="text-slate-400 capitalize">{key.replace(/_/g, ' ')}:</span>
-                <span className="text-slate-200">{String(value)}</span>
+          <h4 className="font-medium text-slate-300">Known IP History</h4>
+          <div className="space-y-2">
+            {details.ip_history.map((ip) => (
+              <div key={ip} className="rounded-2xl border border-white/8 bg-white/5 px-3 py-2 text-xs text-slate-300">
+                {ip}
+                {details.blocked_ips?.includes(ip) ? <span className="ml-2 text-rose-300">blocked</span> : null}
               </div>
             ))}
           </div>
         </div>
-      )}
+      ) : null}
+
+      <div className="space-y-3">
+        <h4 className="font-medium text-slate-300">Quick Actions</h4>
+        <div className="space-y-2">
+          <button onClick={sendTemplate} className="btn-outline w-full">Send Template</button>
+          <button onClick={sendSignedUp} disabled={sending} className="btn-outline w-full">{sending ? 'Sending...' : 'Send Setup Email'}</button>
+          <button onClick={transferChat} className="btn-outline w-full">Transfer Chat</button>
+          <button onClick={resolve} className="btn-outline w-full">Mark Waiting</button>
+          <button onClick={close} className="btn-outline w-full">Close Conversation</button>
+          <button onClick={hardBanIp} disabled={!currentIp || blocking} className="w-full rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm font-semibold text-rose-200 disabled:opacity-50">
+            <span className="inline-flex items-center gap-2">
+              <ShieldAlert size={15} />
+              {blocking ? 'Blocking IP...' : 'Hard Ban Current IP'}
+            </span>
+          </button>
+          {sendMsg ? <div className="text-xs text-slate-500">{sendMsg}</div> : null}
+        </div>
+      </div>
+
+      {details?.notes ? (
+        <div className="space-y-3">
+          <h4 className="font-medium text-slate-300">Notes</h4>
+          <div className="rounded-2xl border border-white/8 bg-white/5 p-3 text-sm leading-6 text-slate-300 whitespace-pre-wrap">{details.notes}</div>
+        </div>
+      ) : null}
     </div>
   )
 }
