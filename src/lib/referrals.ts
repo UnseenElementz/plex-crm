@@ -34,6 +34,10 @@ function normalizeCode(value: unknown) {
   return String(value || '').trim().toUpperCase()
 }
 
+export function normalizeReferralCode(value: unknown) {
+  return normalizeCode(value)
+}
+
 function hasStartedPaidService(customer: CustomerRow | null | undefined) {
   if (!customer) return false
   if (customer.start_date || customer.next_payment_date) return true
@@ -68,6 +72,20 @@ export function buildReferralCode(email: string) {
   if (!normalized.includes('@')) return ''
   const hash = crypto.createHash('sha256').update(normalized).digest('hex').slice(0, 8).toUpperCase()
   return `SRU-${hash}`
+}
+
+export function createReferralCode(seed: string, attempt = 0) {
+  const normalized = String(seed || '').trim().toLowerCase()
+  if (!normalized) return ''
+  if (attempt === 0 && normalized.includes('@')) return buildReferralCode(normalized)
+  const hash = crypto.createHash('sha256').update(`${normalized}:${attempt}`).digest('hex').slice(0, 8).toUpperCase()
+  return `SRU-${hash}`
+}
+
+export function getReferralRewardAmount(totalEarned: unknown) {
+  const earned = Math.max(0, Number(totalEarned || 0))
+  if (!Number.isFinite(earned) || earned >= REFERRAL_CREDIT_CAP_GBP) return 0
+  return Math.min(REFERRAL_BONUS_GBP, REFERRAL_CREDIT_CAP_GBP - earned)
 }
 
 export async function findCustomerByReferralCode(code: string) {

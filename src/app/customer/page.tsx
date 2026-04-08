@@ -196,7 +196,7 @@ export default function CustomerPortal() {
             fullName: profile?.full_name || c.fullName,
             email: userEmail,
             startDate: new Date().toISOString(),
-            nextDueDate: calculateNextDue(current.plan, new Date()).toISOString(),
+            nextDueDate: calculateNextDue(c.plan, new Date()).toISOString(),
             subscriptionStatus: 'inactive',
           }))
           setHasSubscription(false)
@@ -401,16 +401,6 @@ export default function CustomerPortal() {
       }
     } catch {}
     setUpdateModal(null)
-  }
-
-  async function copyReferralValue(type: 'code' | 'link') {
-    const value = type === 'code' ? customer.referralCode || '' : inviteLink
-    if (!value) return
-    try {
-      await navigator.clipboard.writeText(value)
-      setCopiedState(type)
-      setTimeout(() => setCopiedState(null), 1800)
-    } catch {}
   }
 
   if (authState === 'unauth') {

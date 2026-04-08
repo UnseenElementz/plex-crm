@@ -33,7 +33,6 @@ export async function GET(){
     const safeNext = plan
       ? ((!d || isNaN(d.getTime()) || year < 2000 || year > 2100) ? calculateNextDue(plan, start).toISOString() : rawNext)
       : (rawNext || null)
-    const parsedNotes = parseCustomerNotes(c.notes)
     return {
       id: c.id,
       full_name: c.full_name ?? c.name,
@@ -118,9 +117,10 @@ export async function POST(request: Request){
     start_date: row.start_date,
     next_due_date: row.next_due_date ?? row.next_payment_date,
     notes: getVisibleCustomerNotes(row.notes),
-    plex_username: parseCustomerNotes(row.notes).plexUsername || undefined,
-    timezone: parseCustomerNotes(row.notes).timezone || undefined,
-    status: row.status ?? row.subscription_status
+    plex_username: parsedNotes.plexUsername || undefined,
+    timezone: parsedNotes.timezone || undefined,
+    status: row.status ?? row.subscription_status,
+    downloads: parsedNotes.downloads
   }) : null
   return NextResponse.json(mapped)
 }

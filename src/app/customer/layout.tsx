@@ -2,6 +2,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
+import CosmicBackdrop from '@/components/CosmicBackdrop'
 import { getSupabase } from '@/lib/supabaseClient'
 
 function isBanned(notes: unknown) {

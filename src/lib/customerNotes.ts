@@ -6,6 +6,7 @@ export type ReferralRewardHistoryEntry = {
 
 export type CustomerNoteState = {
   raw: string
+  plainNotes: string
   visibleNotes: string
   plexUsername: string
   timezone: string
@@ -93,6 +94,7 @@ export function parseCustomerNotes(value: unknown): CustomerNoteState {
   const visibleLines: string[] = []
   const state: CustomerNoteState = {
     raw,
+    plainNotes: '',
     visibleNotes: '',
     plexUsername: '',
     timezone: '',
@@ -157,7 +159,22 @@ export function parseCustomerNotes(value: unknown): CustomerNoteState {
   }
 
   state.visibleNotes = visibleLines.join('\n').trim()
+  state.plainNotes = state.visibleNotes
   return state
+}
+
+export function buildCustomerNotes(input: {
+  plainNotes?: string
+  plexUsername?: string
+  timezone?: string
+  downloads?: boolean
+}) {
+  return mergeCustomerNotes({
+    visibleNotes: input.plainNotes,
+    plexUsername: input.plexUsername,
+    timezone: input.timezone,
+    downloads: input.downloads,
+  })
 }
 
 export function mergeCustomerNotes(input: {
