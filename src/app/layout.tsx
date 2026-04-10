@@ -61,6 +61,16 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             });
           })();`}
         </Script>
+        <Script id="browser-flags" strategy="beforeInteractive">
+          {`(function(){
+            try{
+              var ua = navigator.userAgent || '';
+              if(/Edg\\//.test(ua)){
+                document.documentElement.setAttribute('data-browser', 'edge');
+              }
+            }catch{}
+          })();`}
+        </Script>
         
       </body>
     </html>

@@ -1600,6 +1600,58 @@
   }
 }
 
+html[data-browser="edge"] .app-shell::after,
+html[data-browser="edge"] .hero-echo__image,
+html[data-browser="edge"] .hero-echo__aurora,
+html[data-browser="edge"] .cosmos-universe,
+html[data-browser="edge"] .cosmos-universe__image,
+html[data-browser="edge"] .cosmos-universe__echo,
+html[data-browser="edge"] .cosmos-universe__core,
+html[data-browser="edge"] .cosmos-horizon,
+html[data-browser="edge"] .cosmos-nebula,
+html[data-browser="edge"] .cosmos-planet,
+html[data-browser="edge"] .cosmos-poster,
+html[data-browser="edge"] .shooting-star,
+html[data-browser="edge"] .twinkle-soft,
+html[data-browser="edge"] .drift-slower,
+html[data-browser="edge"] .float-slower,
+html[data-browser="edge"] .float-slow,
+html[data-browser="edge"] .shimmer::after,
+html[data-browser="edge"] .panel-lift::after,
+html[data-browser="edge"] .time-waster-scene__bg,
+html[data-browser="edge"] .time-waster-scene__veil,
+html[data-browser="edge"] .time-waster-scene__ring,
+html[data-browser="edge"] .time-waster-scene__flare {
+  animation: none !important;
+}
+
+html[data-browser="edge"] .app-shell::after,
+html[data-browser="edge"] .hero-echo__image,
+html[data-browser="edge"] .hero-echo__aurora,
+html[data-browser="edge"] .cosmos-universe__echo,
+html[data-browser="edge"] .cosmos-horizon,
+html[data-browser="edge"] .cosmos-nebula,
+html[data-browser="edge"] .time-waster-scene__flare {
+  filter: none !important;
+}
+
+html[data-browser="edge"] .glass,
+html[data-browser="edge"] .glass-strong,
+html[data-browser="edge"] .ticket-panel,
+html[data-browser="edge"] .chrono-card,
+html[data-browser="edge"] .modal-backdrop,
+html[data-browser="edge"] .customer-auth-card,
+html[data-browser="edge"] .time-waster-panel {
+  backdrop-filter: none !important;
+}
+
+html[data-browser="edge"] .hero-echo__image,
+html[data-browser="edge"] .cosmos-universe__echo,
+html[data-browser="edge"] .shooting-star,
+html[data-browser="edge"] .time-waster-scene__flare {
+  mix-blend-mode: normal !important;
+}
+
 @media (max-width: 1023px) {
   .page-section {
     padding-left: 1rem;

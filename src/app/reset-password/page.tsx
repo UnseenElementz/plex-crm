@@ -10,9 +10,9 @@ export default function ResetPasswordPage(){
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [isValidSession, setIsValidSession] = useState(false)
   const [checkingLink, setCheckingLink] = useState(true)
   const [recoveryAccessToken, setRecoveryAccessToken] = useState('')
+  const [recoveryRefreshToken, setRecoveryRefreshToken] = useState('')
   const [companyName, setCompanyName] = useState('Streamz R Us')
   const router = useRouter()
 
@@ -53,8 +53,9 @@ export default function ResetPasswordPage(){
           return
         }
         const sessionToken = data.session?.access_token || ''
+        const nextRefreshToken = data.session?.refresh_token || ''
         if (sessionToken) setRecoveryAccessToken(sessionToken)
-        setIsValidSession(true)
+        if (nextRefreshToken) setRecoveryRefreshToken(nextRefreshToken)
         if (typeof window !== 'undefined') {
           window.history.replaceState({}, document.title, '/reset-password')
         }
@@ -68,8 +69,9 @@ export default function ResetPasswordPage(){
           return
         }
         const sessionToken = data.session?.access_token || ''
+        const nextRefreshToken = data.session?.refresh_token || ''
         if (sessionToken) setRecoveryAccessToken(sessionToken)
-        setIsValidSession(true)
+        if (nextRefreshToken) setRecoveryRefreshToken(nextRefreshToken)
         if (typeof window !== 'undefined') {
           window.history.replaceState({}, document.title, '/reset-password')
         }
@@ -88,10 +90,20 @@ export default function ResetPasswordPage(){
           }
         }
         setRecoveryAccessToken(accessToken)
-        setIsValidSession(true)
+        if (refreshToken) setRecoveryRefreshToken(refreshToken)
         if (typeof window !== 'undefined') {
           window.history.replaceState({}, document.title, '/reset-password')
         }
+        return
+      }
+
+      const { data: sessionData } = await s.auth.getSession()
+      const sessionToken = sessionData.session?.access_token || ''
+      const nextRefreshToken = sessionData.session?.refresh_token || ''
+
+      if (sessionToken) {
+        setRecoveryAccessToken(sessionToken)
+        if (nextRefreshToken) setRecoveryRefreshToken(nextRefreshToken)
       } else {
         setError('Invalid or expired reset link. Please request a new password reset.')
       }
@@ -132,9 +144,13 @@ export default function ResetPasswordPage(){
       }
 
       let accessToken = recoveryAccessToken
+      let refreshToken = recoveryRefreshToken
       const { data: sessionData } = await s.auth.getSession()
       if (sessionData.session?.access_token) {
         accessToken = sessionData.session.access_token
+      }
+      if (sessionData.session?.refresh_token) {
+        refreshToken = sessionData.session.refresh_token
       }
 
       if (!accessToken) {
@@ -142,17 +158,24 @@ export default function ResetPasswordPage(){
         setLoading(false)
         return
       }
-      
-      const res = await fetch('/api/auth/update-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, accessToken })
-      })
-      
-      const data = await res.json()
-      
-      if (!res.ok) {
-        setError(data.error || 'Failed to update password')
+
+      if (!sessionData.session && refreshToken) {
+        const { error: restoreError } = await s.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        })
+
+        if (restoreError) {
+          setError(restoreError.message || 'Invalid reset link. Please request a new password reset.')
+          setLoading(false)
+          return
+        }
+      }
+
+      const { error: updateError } = await s.auth.updateUser({ password })
+
+      if (updateError) {
+        setError(updateError.message || 'Failed to update password')
       } else {
         await s.auth.signOut().catch(() => null)
         setMessage('Password has been reset successfully! Redirecting to login...')
