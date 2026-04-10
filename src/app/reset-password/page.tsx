@@ -11,11 +11,13 @@ export default function ResetPasswordPage(){
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [isValidSession, setIsValidSession] = useState(false)
+  const [checkingLink, setCheckingLink] = useState(true)
+  const [recoveryAccessToken, setRecoveryAccessToken] = useState('')
   const [companyName, setCompanyName] = useState('Streamz R Us')
   const router = useRouter()
 
   useEffect(() => {
-    checkSession()
+    void checkSession()
     ;(async () => {
       try {
         const res = await fetch('/api/admin/settings', { cache: 'no-store' })
@@ -35,18 +37,68 @@ export default function ResetPasswordPage(){
         return
       }
       
-      // Check if there's an access token in the URL
+      const query = new URLSearchParams(window.location.search)
       const hash = window.location.hash.substring(1)
-      const params = new URLSearchParams(hash)
-      const accessToken = params.get('access_token')
-      
-      if (accessToken) {
+      const hashParams = new URLSearchParams(hash)
+      const queryCode = query.get('code')
+      const tokenHash = query.get('token_hash')
+      const type = query.get('type')
+      const accessToken = hashParams.get('access_token')
+      const refreshToken = hashParams.get('refresh_token')
+
+      if (queryCode) {
+        const { error: exchangeError, data } = await s.auth.exchangeCodeForSession(queryCode)
+        if (exchangeError) {
+          setError('Invalid or expired reset link. Please request a new password reset.')
+          return
+        }
+        const sessionToken = data.session?.access_token || ''
+        if (sessionToken) setRecoveryAccessToken(sessionToken)
         setIsValidSession(true)
+        if (typeof window !== 'undefined') {
+          window.history.replaceState({}, document.title, '/reset-password')
+        }
+        return
+      }
+
+      if (tokenHash && type === 'recovery') {
+        const { error: verifyError, data } = await s.auth.verifyOtp({ token_hash: tokenHash, type: 'recovery' })
+        if (verifyError) {
+          setError('Invalid or expired reset link. Please request a new password reset.')
+          return
+        }
+        const sessionToken = data.session?.access_token || ''
+        if (sessionToken) setRecoveryAccessToken(sessionToken)
+        setIsValidSession(true)
+        if (typeof window !== 'undefined') {
+          window.history.replaceState({}, document.title, '/reset-password')
+        }
+        return
+      }
+
+      if (accessToken) {
+        if (refreshToken) {
+          const { error: sessionError } = await s.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          })
+          if (sessionError) {
+            setError('Invalid or expired reset link. Please request a new password reset.')
+            return
+          }
+        }
+        setRecoveryAccessToken(accessToken)
+        setIsValidSession(true)
+        if (typeof window !== 'undefined') {
+          window.history.replaceState({}, document.title, '/reset-password')
+        }
       } else {
         setError('Invalid or expired reset link. Please request a new password reset.')
       }
     } catch (e: any) {
       setError(e?.message || 'Failed to validate reset link')
+    } finally {
+      setCheckingLink(false)
     }
   }
 
@@ -72,11 +124,19 @@ export default function ResetPasswordPage(){
     setLoading(true)
     
     try {
-      // Get the access token from the URL hash
-      const hash = window.location.hash.substring(1)
-      const params = new URLSearchParams(hash)
-      const accessToken = params.get('access_token')
-      
+      const s = getSupabase()
+      if (!s) {
+        setError('Supabase not configured')
+        setLoading(false)
+        return
+      }
+
+      let accessToken = recoveryAccessToken
+      const { data: sessionData } = await s.auth.getSession()
+      if (sessionData.session?.access_token) {
+        accessToken = sessionData.session.access_token
+      }
+
       if (!accessToken) {
         setError('Invalid reset link. Please request a new password reset.')
         setLoading(false)
@@ -94,6 +154,7 @@ export default function ResetPasswordPage(){
       if (!res.ok) {
         setError(data.error || 'Failed to update password')
       } else {
+        await s.auth.signOut().catch(() => null)
         setMessage('Password has been reset successfully! Redirecting to login...')
         setTimeout(() => {
           router.push('/login')
@@ -112,7 +173,7 @@ export default function ResetPasswordPage(){
     }
   }
 
-  if (!isValidSession && !error) {
+  if (checkingLink) {
     return (
       <main className="p-6 flex items-center justify-center min-h-[80vh]">
         <div className="glass p-6 rounded-2xl w-full max-w-md text-center">

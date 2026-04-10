@@ -33,6 +33,15 @@ function Remove-NextArtifacts {
   }
 }
 
+function Ensure-LocalEnvFile {
+  $localEnvPath = Join-Path $projectRoot '.env.local'
+  $productionEnvPath = Join-Path $projectRoot '.env.production.local'
+
+  if ((-not (Test-Path $localEnvPath)) -and (Test-Path $productionEnvPath)) {
+    Copy-Item -LiteralPath $productionEnvPath -Destination $localEnvPath -Force
+  }
+}
+
 function Get-CssPathFromHtml {
   param(
     [string]$Html
@@ -123,6 +132,7 @@ function Wait-ForHealthyDevServer {
 for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
   Stop-ProjectDevProcesses
   Start-Sleep -Milliseconds 750
+  Ensure-LocalEnvFile
   Remove-NextArtifacts
 
   $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'

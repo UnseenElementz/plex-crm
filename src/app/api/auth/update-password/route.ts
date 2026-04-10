@@ -3,7 +3,10 @@ import { createClient } from '@supabase/supabase-js'
 
 export async function POST(request: Request) {
   try {
-    const { password, accessToken } = await request.json()
+    const { password, accessToken: bodyAccessToken } = await request.json()
+    const authHeader = request.headers.get('authorization') || ''
+    const headerAccessToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : ''
+    const accessToken = bodyAccessToken || headerAccessToken
     
     if (!password || !accessToken) {
       return NextResponse.json({ error: 'Password and access token are required' }, { status: 400 })
@@ -13,11 +16,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Password must be at least 6 characters long' }, { status: 400 })
     }
 
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+      return NextResponse.json({ error: 'Authentication service not configured' }, { status: 500 })
+    }
+
     // Create client with the access token
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+        },
         global: {
           headers: {
             Authorization: `Bearer ${accessToken}`

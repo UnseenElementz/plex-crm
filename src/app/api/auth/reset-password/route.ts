@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getSupabase } from '@/lib/supabaseClient'
+import { createServerAuthClient } from '@/lib/serverSupabase'
 
 export async function POST(request: Request) {
   try {
@@ -9,15 +9,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Email is required' }, { status: 400 })
     }
 
-    const supabase = getSupabase()
+    const supabase = createServerAuthClient()
     if (!supabase) {
       return NextResponse.json({ error: 'Authentication service not configured' }, { status: 500 })
     }
 
-    // Always request Supabase to send reset email; Supabase will handle existence silently
-    const host = process.env.NEXT_PUBLIC_CANONICAL_HOST || 'plex-crm.vercel.app'
-    const scheme = host.startsWith('http') ? '' : 'https://'
-    const redirectTo = `${scheme}${host}/reset-password`
+    // Always request Supabase to send reset email; Supabase handles account existence silently.
+    const configuredHost = String(process.env.NEXT_PUBLIC_CANONICAL_HOST || '').trim()
+    const origin = request.headers.get('origin') || ''
+    const host = configuredHost || origin || 'https://plex-crm.vercel.app'
+    const scheme = host.startsWith('http://') || host.startsWith('https://') ? '' : 'https://'
+    const redirectTo = `${scheme}${host.replace(/\/+$/, '')}/reset-password`
     const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
 
     if (error) {
