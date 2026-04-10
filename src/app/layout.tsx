@@ -1,6 +1,7 @@
 import './globals.css'
 import { ReactNode } from 'react'
 import Header from '@/components/Header'
+import AuthRecoveryRedirect from '@/components/AuthRecoveryRedirect'
 import dynamic from 'next/dynamic'
 import Script from 'next/script'
 
@@ -18,6 +19,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en" suppressHydrationWarning>
       <body className="app-shell min-h-screen overflow-x-hidden text-slate-100">
         <AppBackdrop />
+        <AuthRecoveryRedirect />
         <div className="relative z-10">
           <Header />
           <main>
