@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { type Plan } from '@/lib/pricing'
+import { type PayPalCheckoutMode } from '@/lib/payments'
 
 function buildHostingReference(plan?: Plan, servers?: number, downloads?: boolean) {
   const safePlan = plan || 'yearly'
@@ -17,6 +18,11 @@ function buildHostingReference(plan?: Plan, servers?: number, downloads?: boolea
   return `${duration} ${packageLabel} - ${serverLabel}${downloads ? ' + Downloads' : ''}`
 }
 
+function buildReference(mode?: PayPalCheckoutMode, plan?: Plan, servers?: number, downloads?: boolean) {
+  if (mode === 'downloads_addon') return 'Downloads Add-on'
+  return buildHostingReference(plan, servers, downloads)
+}
+
 export default function PayPalButton({
   amount,
   baseAmount,
@@ -26,6 +32,7 @@ export default function PayPalButton({
   plan,
   streams,
   downloads,
+  mode = 'renewal',
 }: {
   amount: number
   baseAmount?: number
@@ -35,19 +42,39 @@ export default function PayPalButton({
   plan?: Plan
   streams?: number
   downloads?: boolean
+  mode?: PayPalCheckoutMode
   onSuccess?: (orderId: string) => void
 }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const reference = useMemo(
-    () => buildHostingReference(plan, streams, downloads),
-    [downloads, plan, streams]
+    () => buildReference(mode, plan, streams, downloads),
+    [downloads, mode, plan, streams]
   )
 
   async function beginCheckout() {
     setError('')
     setLoading(true)
     try {
+      if (customerEmail) {
+        await fetch('/api/security/ip-log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: customerEmail,
+            source: 'customer-paypal-checkout',
+            details: {
+              mode,
+              amount,
+              currency,
+              plan,
+              streams,
+              downloads: Boolean(downloads),
+            },
+          }),
+        }).catch(() => null)
+      }
+
       const res = await fetch('/api/paypal/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -58,10 +85,15 @@ export default function PayPalButton({
           plan,
           streams,
           downloads,
+          mode,
         }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
+        if (data?.capacityReached && typeof window !== 'undefined') {
+          window.location.href = '/customer/banned?reason=server-full'
+          return
+        }
         setError(data?.error || 'Unable to start checkout.')
         return
       }
@@ -99,7 +131,9 @@ export default function PayPalButton({
         <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Reference sent to PayPal</div>
         <div className="mt-2 text-sm font-medium text-white">{reference}</div>
         <div className="mt-2 text-xs text-slate-400">
-          Payment records use hosting wording only and update your account automatically once PayPal confirms the order.
+          {mode === 'downloads_addon'
+            ? 'This payment only adds downloads to the current account. It does not change the renewal date or package.'
+            : 'Payment records use hosting wording only and update your account automatically once PayPal confirms the order.'}
         </div>
       </div>
 

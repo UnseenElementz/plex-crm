@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server'
 import paypal from '@paypal/checkout-server-sdk'
 import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
-import { applySuccessfulPayment, parsePayPalCustomId } from '@/lib/payments'
+import { getCommunityCheckoutEligibility } from '@/lib/communityGate'
+import { applyDownloadsAddonPurchase, applySuccessfulPayment, parsePayPalCustomId } from '@/lib/payments'
+import { recordPayPalLedgerEntry } from '@/lib/paymentLedger'
 import { type Plan } from '@/lib/pricing'
 const sanitize = (v?: string) => (v || '').trim().replace(/^['"]|['"]$/g, '')
 
@@ -20,6 +22,10 @@ function client() {
   return new paypal.core.PayPalHttpClient(env)
 }
 
+function extractCapture(result: any) {
+  return result?.purchase_units?.[0]?.payments?.captures?.[0] || null
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json()
@@ -33,6 +39,26 @@ export async function POST(request: Request) {
     
     if (!orderId || typeof orderId !== 'string') {
       return NextResponse.json({ error: 'Valid orderId required' }, { status: 400 })
+    }
+
+    const requestedEmail = String(customerEmail || '').trim().toLowerCase()
+    console.log('PayPal capture requested', {
+      orderId,
+      requestedEmail: requestedEmail || null,
+      requestedPlan: requestedPlan || null,
+      requestedStreams: requestedStreams || null,
+      requestedDownloads: typeof requestedDownloads === 'boolean' ? requestedDownloads : null,
+    })
+
+    if (requestedEmail) {
+      const preflightStatus = await getCommunityCheckoutEligibility(requestedEmail).catch(() => null)
+      if (preflightStatus?.newJoin && !preflightStatus.allowed) {
+        const message =
+          preflightStatus.reason === 'capacity_reached'
+            ? `The server is currently full at ${preflightStatus.activeCustomerCount}/${preflightStatus.customerLimit} active customers. New joins are paused until a slot opens.`
+            : 'This account does not currently have access to start a new membership.'
+        return NextResponse.json({ error: message, capacityReached: preflightStatus.reason === 'capacity_reached' }, { status: 403 })
+      }
     }
     
     // Enforce payment lock eligibility
@@ -51,16 +77,27 @@ export async function POST(request: Request) {
           if (settings && typeof settings.payment_lock === 'boolean') paymentLock = settings.payment_lock
         } catch {}
       }
-      if (paymentLock && customerEmail && s) {
-        const { data: customer } = await s.from('customers').select('id, next_payment_date, subscription_status').eq('email', customerEmail).single()
+      if (paymentLock && requestedEmail && s) {
+        const normalizedEmail = requestedEmail
+        const checkoutStatus = await getCommunityCheckoutEligibility(normalizedEmail).catch(() => null)
+        const { data: customer } = await s
+          .from('customers')
+          .select('id, next_payment_date, subscription_status')
+          .eq('email', normalizedEmail)
+          .maybeSingle()
         const due = customer?.next_payment_date ? new Date(customer.next_payment_date) : null
         const now = new Date()
         const isActive = (customer?.subscription_status || 'active') === 'active'
         const beforeDue = due ? now < due : false
-        const hasSubscription = Boolean(customer)
-        const eligible = hasSubscription && isActive && beforeDue
+        const existingEligible = Boolean(customer) && isActive && beforeDue
+        const pendingInviteEligible = Boolean(checkoutStatus?.newJoin && checkoutStatus?.allowed)
+        const eligible = existingEligible || pendingInviteEligible
         if (!eligible) {
-          return NextResponse.json({ error: 'Payments are locked for new or expired customers' }, { status: 403 })
+          const message =
+            checkoutStatus?.reason === 'capacity_reached'
+              ? `The server is currently full at ${checkoutStatus.activeCustomerCount}/${checkoutStatus.customerLimit} active customers. New joins are paused until a slot opens.`
+              : 'Payments are locked for new or expired customers'
+          return NextResponse.json({ error: message }, { status: 403 })
         }
       }
     } catch {}
@@ -129,6 +166,7 @@ export async function POST(request: Request) {
     
     const orderPurchaseUnit = res.result?.purchase_units?.[0] || {}
     const parsedCustomId = parsePayPalCustomId(orderPurchaseUnit?.custom_id)
+    const resolvedMode = parsedCustomId?.mode || 'renewal'
     const resolvedEmail = String(parsedCustomId?.email || customerEmail || '').trim().toLowerCase()
     const resolvedPlan = (parsedCustomId?.plan || requestedPlan || 'yearly') as Plan
     const resolvedStreams = Math.max(1, Number(parsedCustomId?.streams || requestedStreams || 1))
@@ -142,34 +180,89 @@ export async function POST(request: Request) {
       0
     )
 
-    // Persist payment and update next due date if we have customerEmail
-    try {
-      if (resolvedEmail) {
+    let paymentResult: Awaited<ReturnType<typeof applySuccessfulPayment>> | Awaited<ReturnType<typeof applyDownloadsAddonPurchase>> | null = null
+    if (resolvedEmail) {
+      try {
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string
         const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY as string
-        if (supabaseUrl && supabaseServiceKey) {
-          const s = createClient(supabaseUrl, supabaseServiceKey)
-          await applySuccessfulPayment({
+        if (!supabaseUrl || !supabaseServiceKey) {
+          throw new Error('Payment was captured, but local billing services are not configured.')
+        }
+
+        paymentResult = resolvedMode === 'downloads_addon'
+          ? await applyDownloadsAddonPurchase({
+              customerEmail: resolvedEmail,
+              amount,
+              paymentOrderId: orderId,
+            })
+          : await applySuccessfulPayment({
+              customerEmail: resolvedEmail,
+              plan: resolvedPlan,
+              streams: resolvedStreams,
+              downloads: resolvedDownloads,
+              amount,
+              creditUsed: resolvedCreditUsed,
+              paymentOrderId: orderId,
+            })
+
+        const capture = extractCapture(res.result)
+        if (capture?.id) {
+          await recordPayPalLedgerEntry({
+            paymentId: paymentResult?.paymentId || null,
+            customerId: paymentResult?.customerId || null,
             customerEmail: resolvedEmail,
+            amount,
+            currency: String(capture?.amount?.currency_code || orderPurchaseUnit?.amount?.currency_code || 'GBP').trim() || 'GBP',
+            paymentMethod: resolvedMode === 'downloads_addon' ? 'PayPal - Downloads Add-on' : 'PayPal',
+            status: 'completed',
+            createdAt: String(paymentResult?.paymentDate || capture?.create_time || new Date().toISOString()),
+            mode: resolvedMode,
             plan: resolvedPlan,
             streams: resolvedStreams,
             downloads: resolvedDownloads,
-            amount,
-            creditUsed: resolvedCreditUsed,
-            paymentOrderId: orderId,
-          })
+            orderId,
+            captureId: String(capture.id || '').trim(),
+            captureStatus: String(capture.status || res.result?.status || 'COMPLETED'),
+            capturedAt: String(capture.create_time || '').trim() || null,
+          }).catch(() => null)
         }
+        console.log('PayPal capture processed', {
+          orderId,
+          captureId: String(capture?.id || '').trim() || null,
+          resolvedEmail,
+          resolvedMode,
+          resolvedPlan,
+          resolvedStreams,
+          resolvedDownloads,
+          paymentId: paymentResult?.paymentId || null,
+        })
+      } catch (processingError: any) {
+        console.error('Post-capture payment processing error:', processingError)
+        return NextResponse.json(
+          {
+            error:
+              processingError?.message ||
+              'Payment was captured, but account activation did not complete automatically. Please do not pay again. Reload the portal or contact support.',
+            captured: true,
+            customerEmail: resolvedEmail,
+            mode: resolvedMode,
+            orderId,
+          },
+          { status: 500 }
+        )
       }
-    } catch {}
+    }
 
     return NextResponse.json({ 
       id: res.result.id,
       status: res.result.status,
+      mode: resolvedMode,
       customerEmail: resolvedEmail || null,
       plan: resolvedPlan,
       streams: resolvedStreams,
       downloads: resolvedDownloads,
       creditUsed: resolvedCreditUsed,
+      paymentResult,
       details: res.result
     })
     

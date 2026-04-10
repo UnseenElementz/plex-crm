@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import paypal from '@paypal/checkout-server-sdk'
 import { calculatePrice, type Plan } from '@/lib/pricing'
 import { createClient } from '@supabase/supabase-js'
-import { buildHostingReference, buildPayPalCustomId } from '@/lib/payments'
+import { getCommunityCheckoutEligibility } from '@/lib/communityGate'
+import { buildCheckoutReference, buildPayPalCustomId, type PayPalCheckoutMode } from '@/lib/payments'
 import { getReferralDiscountSnapshot } from '@/lib/referrals'
 export const runtime = 'nodejs'
 const sanitize = (v?: string) => (v || '').trim().replace(/^['"]|['"]$/g, '')
@@ -54,19 +55,69 @@ function resolveBaseUrl(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json()
+    const mode = String(body?.mode || 'renewal').trim() as PayPalCheckoutMode
     const normalizedEmail = String(body?.customerEmail || '').trim().toLowerCase()
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY as string
     let { amount, currency = 'GBP', plan, streams, downloads, customerEmail } = body || {}
     if (plan && typeof plan === 'string') {
       const p = plan as Plan
       const s = typeof streams === 'number' ? streams : 1
       const cfg = await readPricingConfig()
-      amount = calculatePrice(p, s, cfg, downloads)
+      amount =
+        mode === 'downloads_addon'
+          ? Number(cfg?.downloads_price) || 20
+          : calculatePrice(p, s, cfg, downloads)
     }
 
     const referralDiscount =
-      normalizedEmail && amount
+      mode === 'renewal' && normalizedEmail && amount
         ? await getReferralDiscountSnapshot(normalizedEmail, Number(amount || 0)).catch(() => null)
         : null
+
+    if (normalizedEmail) {
+      const checkoutStatus = await getCommunityCheckoutEligibility(normalizedEmail).catch(() => null)
+      if (checkoutStatus && checkoutStatus.newJoin && !checkoutStatus.allowed) {
+        const message =
+          checkoutStatus.reason === 'capacity_reached'
+            ? `The server is currently full at ${checkoutStatus.activeCustomerCount}/${checkoutStatus.customerLimit} active customers. New joins are paused until a slot opens.`
+            : 'This account does not currently have access to start a new membership.'
+        return NextResponse.json({ error: message, capacityReached: checkoutStatus.reason === 'capacity_reached' }, { status: 403 })
+      }
+
+      if (supabaseUrl && supabaseServiceKey) {
+        const s = createClient(supabaseUrl, supabaseServiceKey)
+        let paymentLock = false
+
+        try {
+          const { data: settings } = await s.from('admin_settings').select('payment_lock').single()
+          if (settings && typeof settings.payment_lock === 'boolean') {
+            paymentLock = settings.payment_lock
+          }
+        } catch {}
+
+        if (paymentLock) {
+          const { data: customer } = await s
+            .from('customers')
+            .select('id,next_payment_date,subscription_status')
+            .eq('email', normalizedEmail)
+            .maybeSingle()
+          const due = customer?.next_payment_date ? new Date(customer.next_payment_date) : null
+          const now = new Date()
+          const isActive = String(customer?.subscription_status || '').trim().toLowerCase() === 'active'
+          const beforeDue = due ? now < due : false
+          const existingEligible = Boolean(customer) && isActive && beforeDue
+          const pendingInviteEligible = Boolean(checkoutStatus?.newJoin && checkoutStatus?.allowed)
+
+          if (!existingEligible && !pendingInviteEligible) {
+            return NextResponse.json(
+              { error: 'Payments are locked for new or expired customers.' },
+              { status: 403 }
+            )
+          }
+        }
+      }
+    }
 
     if (referralDiscount) {
       amount = referralDiscount.payableAmount
@@ -84,15 +135,21 @@ export async function POST(request: Request) {
       const c = client()
       const order = new paypal.orders.OrdersCreateRequest()
       order.prefer('return=representation')
-      const description = buildHostingReference((plan as Plan) || 'yearly', Math.max(1, Number(streams || 1)), Boolean(downloads))
+      const description = buildCheckoutReference({
+        mode,
+        plan: (plan as Plan) || 'yearly',
+        screens: Math.max(1, Number(streams || 1)),
+        downloads: Boolean(downloads),
+      })
       const purchaseUnit: any = {
         description,
         custom_id: customerEmail ? buildPayPalCustomId({
           email: normalizedEmail,
           plan: (plan as Plan) || 'yearly',
           streams: Math.max(1, Number(streams || 1)),
-          downloads: Boolean(downloads),
+          downloads: mode === 'downloads_addon' ? true : Boolean(downloads),
           creditUsed: referralDiscount?.creditToUse || 0,
+          mode,
         }) : undefined,
         amount: { currency_code: currency, value: String(Number(amount).toFixed(2)) }
       }
@@ -105,6 +162,13 @@ export async function POST(request: Request) {
       const approveUrl = Array.isArray((res.result as any).links)
         ? (res.result as any).links.find((link: any) => link?.rel === 'approve')?.href || ''
         : ''
+      console.log('PayPal order created', {
+        orderId: res.result.id,
+        mode,
+        customerEmail: normalizedEmail || null,
+        amount: Number(amount || 0),
+        currency,
+      })
       return NextResponse.json({ id: res.result.id, status: res.result.status, approveUrl })
     } catch (sdkErr: any) {
       const clientId = sanitize(process.env.PAYPAL_CLIENT_ID as string)
@@ -116,13 +180,19 @@ export async function POST(request: Request) {
       const return_url = baseUrl ? `${baseUrl}/customer?paypal=success` : undefined
       const cancel_url = baseUrl ? `${baseUrl}/customer?paypal=cancelled` : undefined
       const purchase_units: any[] = [{
-        description: buildHostingReference((plan as Plan) || 'yearly', Math.max(1, Number(streams || 1)), Boolean(downloads)),
+        description: buildCheckoutReference({
+          mode,
+          plan: (plan as Plan) || 'yearly',
+          screens: Math.max(1, Number(streams || 1)),
+          downloads: Boolean(downloads),
+        }),
         custom_id: customerEmail ? buildPayPalCustomId({
           email: normalizedEmail,
           plan: (plan as Plan) || 'yearly',
           streams: Math.max(1, Number(streams || 1)),
-          downloads: Boolean(downloads),
+          downloads: mode === 'downloads_addon' ? true : Boolean(downloads),
           creditUsed: referralDiscount?.creditToUse || 0,
+          mode,
         }) : undefined,
         amount: { currency_code: currency, value: String(Number(amount).toFixed(2)) }
       }]

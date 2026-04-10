@@ -3,35 +3,40 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
+import { clearLocalAdminArtifacts } from '@/lib/localAdmin'
 import { getSupabase } from '@/lib/supabaseClient'
 
 export default function Header() {
   const [email, setEmail] = useState<string | null>(null)
   const [userRole, setUserRole] = useState<string | null>(null)
   const [companyName, setCompanyName] = useState('Streamz R Us')
+  const [now, setNow] = useState<Date | null>(null)
   const pathname = usePathname()
   const router = useRouter()
 
   useEffect(() => {
+    let active = true
+
     ;(async () => {
       try {
         const res = await fetch('/api/admin/settings', { cache: 'no-store' })
         if (res.ok) {
           const data = await res.json()
-          if (data.company_name) setCompanyName(data.company_name)
+          if (active && data.company_name) setCompanyName(data.company_name)
         }
       } catch {}
 
       const s = getSupabase()
-      const alias = (process.env.NEXT_PUBLIC_ADMIN_ALIAS_EMAIL || 'admin@streamzrus.local').toLowerCase()
-      const cookieStr = typeof document !== 'undefined' ? document.cookie || '' : ''
-      const isAdminCookie = cookieStr
-        .split(';')
-        .map((part) => part.trim())
-        .some((part) => part.startsWith('admin_session=1'))
+      const alias = String(process.env.NEXT_PUBLIC_ADMIN_ALIAS_EMAIL || 'admin@streamzrus.local').trim().toLowerCase()
+      let isAdminCookie = false
+
+      try {
+        const sessionRes = await fetch('/api/admin/auth/session', { cache: 'no-store' })
+        isAdminCookie = sessionRes.ok
+      } catch {}
 
       if (!s) {
-        if (isAdminCookie) {
+        if (active && isAdminCookie) {
           setEmail('Admin')
           setUserRole('admin')
         }
@@ -40,18 +45,58 @@ export default function Header() {
 
       const { data } = await s.auth.getUser()
       const userEmail = data.user?.email ?? null
+
+      if (!active) return
       setEmail(userEmail)
 
-      if (userEmail && (userEmail.toLowerCase() === alias || isAdminCookie)) {
+      if (!userEmail) {
+        if (isAdminCookie) {
+          setEmail('Admin')
+          setUserRole('admin')
+        } else {
+          setUserRole(null)
+        }
+        return
+      }
+
+      const normalizedEmail = userEmail.trim().toLowerCase()
+      if (normalizedEmail === alias) {
         setUserRole('admin')
         return
       }
 
-      if (userEmail) {
-        const { data: profile } = await s.from('profiles').select('role').eq('email', userEmail).single()
-        setUserRole(profile?.role || 'customer')
+      try {
+        const { data: profile } = await s.from('profiles').select('role').eq('email', userEmail).maybeSingle()
+        const resolvedRole = String(profile?.role || 'customer').trim().toLowerCase() === 'admin' ? 'admin' : 'customer'
+
+        if (resolvedRole !== 'admin' && isAdminCookie) {
+          await fetch('/api/admin/auth/session', { method: 'DELETE' }).catch(() => null)
+          clearLocalAdminArtifacts()
+        }
+
+        if (active) {
+          setUserRole(resolvedRole)
+        }
+      } catch {
+        if (isAdminCookie) {
+          await fetch('/api/admin/auth/session', { method: 'DELETE' }).catch(() => null)
+          clearLocalAdminArtifacts()
+        }
+        if (active) {
+          setUserRole('customer')
+        }
       }
     })()
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    setNow(new Date())
+    const tick = window.setInterval(() => setNow(new Date()), 30000)
+    return () => window.clearInterval(tick)
   }, [])
 
   const handleLogout = async (e: React.FormEvent) => {
@@ -62,6 +107,10 @@ export default function Header() {
         await s.auth.signOut({ scope: 'global' })
       } catch {}
     }
+    try {
+      await fetch('/api/admin/auth/session', { method: 'DELETE' })
+    } catch {}
+    clearLocalAdminArtifacts()
     setEmail(null)
     setUserRole(null)
     try {
@@ -76,7 +125,7 @@ export default function Header() {
       return [
         { href: '/admin', label: 'Live Support' },
         { href: '/admin/customers', label: 'Customers' },
-        { href: '/admin/plex-tools', label: 'Plex Tools' },
+        { href: '/admin/plex-tools', label: 'Hosting Tools' },
         { href: '/admin/settings', label: 'Settings' },
       ]
     }
@@ -84,6 +133,7 @@ export default function Header() {
     if (userRole === 'customer') {
       return [
         { href: '/customer', label: 'Portal' },
+        { href: '/customer/payments', label: 'Payments' },
         { href: '/customer/recommendations', label: 'Requests' },
         { href: '/customer/service-updates', label: 'Updates' },
         { href: '/customer/settings', label: 'Settings' },
@@ -93,6 +143,16 @@ export default function Header() {
     return []
   }, [userRole])
 
+  const timeLabel = useMemo(() => {
+    if (!now) return '--:--'
+    return now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  }, [now])
+
+  const dateLabel = useMemo(() => {
+    if (!now) return '--- -- --- ----'
+    return now.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })
+  }, [now])
+
   return (
     <header className="page-section pt-4">
       <div className="glass flex flex-wrap items-center justify-between gap-4 rounded-[28px] px-4 py-3 sm:px-5">
@@ -101,18 +161,22 @@ export default function Header() {
             {companyName}
           </Link>
           <div className="hidden h-8 w-px bg-white/10 sm:block" />
-          <div className="hidden text-xs uppercase tracking-[0.28em] text-slate-500 sm:block">Private Media Hosting</div>
+          <div className="hidden text-xs uppercase tracking-[0.28em] text-slate-500 sm:block">Invite-Only Media Hosting</div>
         </div>
 
         <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
+          <div className="chrono-card">
+            <div className="chrono-time">{timeLabel}</div>
+            <div className="chrono-date">{dateLabel}</div>
+          </div>
           {navLinks.map((item) => {
-            const active = pathname === item.href || pathname?.startsWith(`${item.href}/`)
+            const activeLink = pathname === item.href || pathname?.startsWith(`${item.href}/`)
             return (
               <Link
                 key={item.href}
                 href={item.href}
                 prefetch={false}
-                className={`rounded-2xl px-3 py-2 text-sm ${active ? 'bg-cyan-400/12 text-cyan-200 border border-cyan-400/25' : 'text-slate-400 hover:text-slate-100'}`}
+                className={`rounded-2xl px-3 py-2 text-sm ${activeLink ? 'bg-cyan-400/12 text-cyan-200 border border-cyan-400/25' : 'text-slate-400 hover:text-slate-100'}`}
               >
                 {item.label}
               </Link>
@@ -125,7 +189,7 @@ export default function Header() {
                 {email}
               </div>
               {userRole ? (
-                <div className={`tag ${userRole === 'admin' ? 'active' : ''} ${userRole === 'customer' ? '' : ''}`}>
+                <div className={`tag ${userRole === 'admin' ? 'active' : ''}`}>
                   {userRole}
                 </div>
               ) : null}

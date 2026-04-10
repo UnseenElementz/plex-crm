@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 
+const SYSTEM_SERVICE_UPDATE_PREFIX = '__SYSTEM__:'
+
 function getSupabaseSvc(){
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY as string
@@ -18,7 +20,8 @@ export async function GET(){
       .select('*')
       .order('created_at', { ascending: false })
     if (error) return NextResponse.json({ error: error.message || 'Failed to load updates' }, { status: 500 })
-    return NextResponse.json({ updates: data || [] })
+    const updates = (data || []).filter((row: any) => !String(row?.title || '').startsWith(SYSTEM_SERVICE_UPDATE_PREFIX))
+    return NextResponse.json({ updates })
   }catch(e:any){
     return NextResponse.json({ error: e?.message || 'Failed to load updates' }, { status: 500 })
   }

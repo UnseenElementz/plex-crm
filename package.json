@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3000",
+    "dev": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start-local-dev.ps1",
+    "dev:next": "next dev -p 3000",
+    "build:next": "next build",
+    "build:local": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-local.ps1",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",

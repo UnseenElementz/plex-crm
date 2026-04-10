@@ -155,7 +155,7 @@ export default function ChatWidget({
       {!isOpen && isAuthorized && (
         <button
           onClick={() => setIsOpen(true)}
-          className={`fixed ${positionClasses[position]} z-50 rounded-full border border-cyan-300/30 p-4 text-slate-950 shadow-[0_18px_40px_rgba(34,211,238,0.35)]`}
+          className={`fixed ${positionClasses[position]} z-50 rounded-full border border-cyan-300/30 p-4 text-slate-950 shadow-[0_18px_40px_rgba(34,211,238,0.35)] max-md:bottom-[calc(1rem+env(safe-area-inset-bottom))]`}
           style={{ background: `linear-gradient(135deg, ${primaryColor}, #60a5fa)` }}
           aria-label="Open live chat"
         >
@@ -166,10 +166,10 @@ export default function ChatWidget({
       {isOpen && isAuthorized && (
         <div
           className={`fixed ${positionClasses[position]} z-50 flex flex-col overflow-hidden border border-cyan-400/20 bg-slate-950/95 shadow-[0_30px_90px_rgba(8,145,178,0.35)] backdrop-blur-2xl ${
-            isMobile ? 'left-0 top-0 h-full w-full rounded-none' : 'h-[38rem] w-[25rem] rounded-[28px]'
+            isMobile ? 'left-0 top-0 h-[100dvh] w-full rounded-none' : 'h-[38rem] w-[25rem] rounded-[28px]'
           }`}
         >
-          <div className="border-b border-white/8 bg-[linear-gradient(135deg,rgba(34,211,238,0.14),rgba(15,23,42,0.72))] p-4">
+          <div className="border-b border-white/8 bg-[linear-gradient(135deg,rgba(34,211,238,0.14),rgba(15,23,42,0.72))] p-4 max-md:pt-[calc(1rem+env(safe-area-inset-top))]">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-[11px] uppercase tracking-[0.22em] text-cyan-300">Support online</div>
@@ -235,8 +235,8 @@ export default function ChatWidget({
             <div ref={messagesEndRef} />
           </div>
 
-          <form onSubmit={handleSendMessage} className="border-t border-white/8 bg-slate-950/90 p-4">
-            <div className="flex gap-2">
+          <form onSubmit={handleSendMessage} className="border-t border-white/8 bg-slate-950/90 p-4 max-md:pb-[calc(1rem+env(safe-area-inset-bottom))]">
+            <div className="flex gap-2 max-md:flex-wrap">
               <input
                 type="text"
                 value={message}
@@ -248,7 +248,7 @@ export default function ChatWidget({
                   }
                 }}
                 placeholder={chatOnline ? 'Type your message...' : 'Leave a message and your email'}
-                className="input flex-1"
+                className="input flex-1 max-md:min-w-0"
               />
               <FileUpload
                 conversationId={conversationId || undefined}

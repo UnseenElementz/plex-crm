@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import paypal from '@paypal/checkout-server-sdk'
-import { applySuccessfulPayment, parsePayPalCustomId } from '@/lib/payments'
+import { applyDownloadsAddonPurchase, applySuccessfulPayment, parsePayPalCustomId } from '@/lib/payments'
+import { recordPayPalLedgerEntry } from '@/lib/paymentLedger'
 import { type Plan } from '@/lib/pricing'
 
 const sanitize = (v?: string) => (v || '').trim().replace(/^['"]|['"]$/g, '')
@@ -28,6 +29,7 @@ export async function POST(request: Request) {
     const amount = Number(capture?.amount?.value || 0)
 
     let resolvedEmail = payerEmail
+    let resolvedMode = 'renewal'
     let resolvedPlan = 'yearly' as Plan
     let resolvedStreams = 1
     let resolvedDownloads = false
@@ -41,6 +43,7 @@ export async function POST(request: Request) {
       const parsed = parsePayPalCustomId(purchaseUnit?.custom_id)
       if (parsed) {
         resolvedEmail = parsed.email
+        resolvedMode = parsed.mode
         resolvedPlan = parsed.plan
         resolvedStreams = parsed.streams
         resolvedDownloads = parsed.downloads
@@ -52,15 +55,43 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'customer email missing' }, { status: 400 })
     }
 
-    await applySuccessfulPayment({
-      customerEmail: resolvedEmail,
-      plan: resolvedPlan,
-      streams: resolvedStreams,
-      downloads: resolvedDownloads,
-      amount,
-      creditUsed: resolvedCreditUsed,
-      paymentOrderId: orderId,
-    })
+    const paymentResult = resolvedMode === 'downloads_addon'
+      ? await applyDownloadsAddonPurchase({
+          customerEmail: resolvedEmail,
+          amount,
+          paymentOrderId: orderId,
+        })
+      : await applySuccessfulPayment({
+          customerEmail: resolvedEmail,
+          plan: resolvedPlan,
+          streams: resolvedStreams,
+          downloads: resolvedDownloads,
+          amount,
+          creditUsed: resolvedCreditUsed,
+          paymentOrderId: orderId,
+        })
+
+    const captureId = String(capture?.id || '').trim()
+    if (captureId) {
+      await recordPayPalLedgerEntry({
+        paymentId: paymentResult?.paymentId || null,
+        customerId: paymentResult?.customerId || null,
+        customerEmail: resolvedEmail,
+        amount,
+        currency: String(capture?.amount?.currency_code || 'GBP').trim() || 'GBP',
+        paymentMethod: resolvedMode === 'downloads_addon' ? 'PayPal - Downloads Add-on' : 'PayPal',
+        status: 'completed',
+        createdAt: String(paymentResult?.paymentDate || capture?.create_time || new Date().toISOString()),
+        mode: resolvedMode,
+        plan: resolvedPlan,
+        streams: resolvedStreams,
+        downloads: resolvedDownloads,
+        orderId,
+        captureId,
+        captureStatus: String(capture?.status || 'COMPLETED'),
+        capturedAt: String(capture?.create_time || '').trim() || null,
+      }).catch(() => null)
+    }
 
     return NextResponse.json({ ok: true })
   } catch (e: any) {

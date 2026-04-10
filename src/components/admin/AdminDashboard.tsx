@@ -14,8 +14,7 @@ import { shouldAutoWait } from '@/lib/chatIdle'
 export default function AdminDashboard() {
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
-  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'closed' | 'waiting'>('all')
-  const [showUnreadOnly, setShowUnreadOnly] = useState(true)
+  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'closed' | 'waiting'>('active')
   const [isMobile, setIsMobile] = useState(false)
   const [saving, setSaving] = useState(false)
   const [idleMinutes, setIdleMinutes] = useState(5)
@@ -238,7 +237,7 @@ export default function AdminDashboard() {
 
   return (
     <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)_320px]">
-      <section className={`${isMobile && selectedConversation ? 'hidden' : 'block'} panel overflow-hidden`}>
+      <section className={`${isMobile && selectedConversation ? 'hidden' : 'block'} panel panel-lift overflow-hidden`}>
         <div className="border-b border-white/8 p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -369,7 +368,7 @@ export default function AdminDashboard() {
         </div>
       </section>
 
-      <section className={`${isMobile && !selectedConversation ? 'hidden' : 'flex'} panel-strong min-h-[72vh] flex-col overflow-hidden`}>
+      <section className={`${isMobile && !selectedConversation ? 'hidden' : 'flex'} panel-strong panel-lift min-h-[72vh] flex-col overflow-hidden`}>
         {selectedConversation ? (
           <>
             <div className="border-b border-white/8 px-5 py-4">
@@ -407,11 +406,11 @@ export default function AdminDashboard() {
 
       {!isMobile ? (
         <aside className="space-y-6">
-          <div className="panel p-5">
+          <div className="panel panel-lift p-5">
             <DashboardStats conversations={filteredConversations} stats={stats} onOpenConversation={setSelectedConversation} />
           </div>
           {selectedConversation ? (
-            <div className="panel overflow-hidden">
+            <div className="panel panel-lift overflow-hidden">
               <CustomerInfo conversation={selectedConversation} />
             </div>
           ) : null}

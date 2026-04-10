@@ -2,6 +2,70 @@
 import { useEffect, useState } from 'react'
 import { format } from 'date-fns'
 import { getSupabase } from '@/lib/supabaseClient'
+import { applyUniformDiscount, inferUniformDiscountPercentage, STANDARD_PRICING_CONFIG } from '@/lib/pricing'
+
+function formatPriceInput(value: number) {
+  const rounded = Math.round(value * 100) / 100
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2)
+}
+
+function parsePriceInput(value: string, fallback: number) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function clampPercentage(value: string) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return null
+  return Math.min(100, Math.max(0, parsed))
+}
+
+function buildPricingFields(input: {
+  packageDiscount: string
+  settings: {
+    yearly_price: string
+    stream_yearly_price: string
+    movies_only_price: string
+    tv_only_price: string
+    downloads_price: string
+  }
+}) {
+  const percentageDiscount = clampPercentage(input.packageDiscount)
+  if (percentageDiscount !== null) {
+    const discounted = applyUniformDiscount(percentageDiscount)
+    return {
+      percentageDiscount,
+      pricing: discounted,
+      display: {
+        yearly_price: formatPriceInput(discounted.yearly_price),
+        stream_yearly_price: formatPriceInput(discounted.stream_yearly_price),
+        movies_only_price: formatPriceInput(discounted.movies_only_price),
+        tv_only_price: formatPriceInput(discounted.tv_only_price),
+        downloads_price: formatPriceInput(discounted.downloads_price ?? STANDARD_PRICING_CONFIG.downloads_price ?? 20),
+      },
+    }
+  }
+
+  const pricing = {
+    yearly_price: parsePriceInput(input.settings.yearly_price, STANDARD_PRICING_CONFIG.yearly_price),
+    stream_yearly_price: parsePriceInput(input.settings.stream_yearly_price, STANDARD_PRICING_CONFIG.stream_yearly_price),
+    movies_only_price: parsePriceInput(input.settings.movies_only_price, STANDARD_PRICING_CONFIG.movies_only_price),
+    tv_only_price: parsePriceInput(input.settings.tv_only_price, STANDARD_PRICING_CONFIG.tv_only_price),
+    downloads_price: parsePriceInput(input.settings.downloads_price, STANDARD_PRICING_CONFIG.downloads_price ?? 20),
+  }
+
+  return {
+    percentageDiscount: null,
+    pricing,
+    display: {
+      yearly_price: formatPriceInput(pricing.yearly_price),
+      stream_yearly_price: formatPriceInput(pricing.stream_yearly_price),
+      movies_only_price: formatPriceInput(pricing.movies_only_price),
+      tv_only_price: formatPriceInput(pricing.tv_only_price),
+      downloads_price: formatPriceInput(pricing.downloads_price),
+    },
+  }
+}
 
 export default function AdminSettingsPage() {
   const [settings, setSettings] = useState({
@@ -35,8 +99,12 @@ export default function AdminSettingsPage() {
     imap_pass: '',
     imap_secure: true,
     imap_mailbox: 'INBOX',
-    service_email_keywords: 'plex,stream,service,payment,renewal,buffer,login,support,subscription'
+    service_email_keywords: 'plex,stream,service,payment,renewal,buffer,login,support,subscription',
+    email_auto_reply_enabled: true,
+    email_auto_reply_subject: 'We got your message',
+    email_auto_reply_body: 'Hi {{first_name}},\n\nThank you for messaging Streamz R Us.\n\nA member of the team will be with you shortly.\n\nDue to high demand, please allow up to 24 hours for a reply, although it is usually much quicker.\n\nThanks,\nStreamz R Us'
   })
+  const [packageDiscount, setPackageDiscount] = useState('')
   const [imapConfigured, setImapConfigured] = useState(false)
   const [imapSource, setImapSource] = useState<'database' | 'env' | 'unavailable'>('unavailable')
   const [loading, setLoading] = useState(true) // Start as true to wait for loadSettings
@@ -208,8 +276,13 @@ export default function AdminSettingsPage() {
           imap_pass: data.imap_source === 'env' ? '' : (data.imap_pass ?? ''),
           imap_secure: data.imap_secure !== undefined ? Boolean(data.imap_secure) : true,
           imap_mailbox: data.imap_mailbox ?? 'INBOX',
-          service_email_keywords: data.service_email_keywords ?? 'plex,stream,service,payment,renewal,buffer,login,support,subscription'
+          service_email_keywords: data.service_email_keywords ?? 'plex,stream,service,payment,renewal,buffer,login,support,subscription',
+          email_auto_reply_enabled: data.email_auto_reply_enabled !== undefined ? Boolean(data.email_auto_reply_enabled) : true,
+          email_auto_reply_subject: data.email_auto_reply_subject ?? 'We got your message',
+          email_auto_reply_body: data.email_auto_reply_body ?? 'Hi {{first_name}},\n\nThank you for messaging Streamz R Us.\n\nA member of the team will be with you shortly.\n\nDue to high demand, please allow up to 24 hours for a reply, although it is usually much quicker.\n\nThanks,\nStreamz R Us'
         })
+        const inferredDiscount = inferUniformDiscountPercentage(data)
+        setPackageDiscount(inferredDiscount && inferredDiscount > 0 ? formatPriceInput(inferredDiscount) : '')
       }
     } catch (e) {
       console.error('Failed to load settings:', e)
@@ -259,13 +332,23 @@ export default function AdminSettingsPage() {
         }
       } catch {}
 
+      const pricingDraft = buildPricingFields({
+        packageDiscount,
+        settings: {
+          yearly_price: settings.yearly_price,
+          stream_yearly_price: settings.stream_yearly_price,
+          movies_only_price: settings.movies_only_price,
+          tv_only_price: settings.tv_only_price,
+          downloads_price: settings.downloads_price,
+        },
+      })
       const settingsData = {
         monthly_maintenance: parseFloat(settings.monthly_maintenance) || 140,
-        yearly_price: parseFloat(settings.yearly_price) || 85,
-        stream_yearly_price: parseFloat(settings.stream_yearly_price) || 20,
-        movies_only_price: parseFloat(settings.movies_only_price) || 60,
-        tv_only_price: parseFloat(settings.tv_only_price) || 60,
-        downloads_price: parseFloat(settings.downloads_price) || 20,
+        yearly_price: pricingDraft.pricing.yearly_price,
+        stream_yearly_price: pricingDraft.pricing.stream_yearly_price,
+        movies_only_price: pricingDraft.pricing.movies_only_price,
+        tv_only_price: pricingDraft.pricing.tv_only_price,
+        downloads_price: pricingDraft.pricing.downloads_price,
         smtp_host: settings.smtp_host,
         smtp_port: settings.smtp_port,
         smtp_user: settings.smtp_user,
@@ -290,7 +373,10 @@ export default function AdminSettingsPage() {
         imap_pass: settings.imap_pass,
         imap_secure: Boolean(settings.imap_secure),
         imap_mailbox: settings.imap_mailbox,
-        service_email_keywords: settings.service_email_keywords
+        service_email_keywords: settings.service_email_keywords,
+        email_auto_reply_enabled: Boolean(settings.email_auto_reply_enabled),
+        email_auto_reply_subject: settings.email_auto_reply_subject,
+        email_auto_reply_body: settings.email_auto_reply_body
       }
       const res = await fetch('/api/admin/settings', { method:'PUT', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(settingsData) })
       const body = await res.json().catch(()=>({}))
@@ -309,49 +395,50 @@ export default function AdminSettingsPage() {
         setSupabaseStatus('connected')
         setDbMode('database')
         setMessage('Settings saved successfully.')
-        
-        if (body.settings) {
-            // Update state with confirmed data from server
-            const s = body.settings
-            setSettings({
-                smtp_host: s.smtp_host ?? '',
-                smtp_port: s.smtp_port ?? '587',
-                smtp_user: s.smtp_user ?? '',
-                smtp_pass: s.smtp_pass ?? '',
-                smtp_from: s.smtp_from ?? '',
-                paypal_email: s.paypal_email ?? '',
-                payment_lock: s.payment_lock !== undefined ? Boolean(s.payment_lock) : false,
-                chat_online: s.chat_online !== undefined ? Boolean(s.chat_online) : true,
-                hero_image_url: s.hero_image_url ?? '',
-                admin_user: s.admin_user ?? 'Anfrax786',
-                admin_pass: s.admin_pass ?? 'Badaman1',
-                timezone: s.timezone ?? 'Europe/London',
-                monthly_maintenance: s.monthly_maintenance?.toString() ?? '140',
-                company_name: s.company_name ?? '',
-                yearly_price: s.yearly_price?.toString() ?? '85',
-                stream_yearly_price: s.stream_yearly_price?.toString() ?? '20',
-                movies_only_price: s.movies_only_price?.toString() ?? '60',
-                tv_only_price: s.tv_only_price?.toString() ?? '60',
-                downloads_price: s.downloads_price?.toString() ?? '20',
-                bg_music_url: s.bg_music_url ?? '',
-                bg_music_volume: s.bg_music_volume?.toString() ?? '0.1',
-                bg_music_enabled: s.bg_music_enabled !== undefined ? Boolean(s.bg_music_enabled) : true,
-                plex_token: s.plex_token ?? '',
-                plex_server_url: s.plex_server_url ?? 'https://plex.tv',
-                imap_host: s.imap_host ?? '',
-                imap_port: s.imap_port?.toString() ?? '993',
-                imap_user: s.imap_user ?? '',
-                imap_pass: s.imap_source === 'env' ? '' : (s.imap_pass ?? ''),
-                imap_secure: s.imap_secure !== undefined ? Boolean(s.imap_secure) : true,
-                imap_mailbox: s.imap_mailbox ?? 'INBOX',
-                service_email_keywords: s.service_email_keywords ?? 'plex,stream,service,payment,renewal,buffer,login,support,subscription'
-            })
-            setImapConfigured(Boolean(s.imap_configured ?? (s.imap_host && s.imap_user && s.imap_pass)))
-            setImapSource((s.imap_source as 'database' | 'env' | 'unavailable') || 'database')
-        }
+
+        const confirmedSettings = body.settings || settingsData
+        setSettings({
+          smtp_host: confirmedSettings.smtp_host ?? settings.smtp_host,
+          smtp_port: confirmedSettings.smtp_port?.toString() ?? settings.smtp_port,
+          smtp_user: confirmedSettings.smtp_user ?? settings.smtp_user,
+          smtp_pass: confirmedSettings.smtp_pass ?? settings.smtp_pass,
+          smtp_from: confirmedSettings.smtp_from ?? settings.smtp_from,
+          paypal_email: confirmedSettings.paypal_email ?? settings.paypal_email,
+          payment_lock: confirmedSettings.payment_lock !== undefined ? Boolean(confirmedSettings.payment_lock) : settings.payment_lock,
+          chat_online: confirmedSettings.chat_online !== undefined ? Boolean(confirmedSettings.chat_online) : settings.chat_online,
+          hero_image_url: confirmedSettings.hero_image_url ?? settings.hero_image_url,
+          admin_user: confirmedSettings.admin_user ?? settings.admin_user,
+          admin_pass: confirmedSettings.admin_pass ?? settings.admin_pass,
+          timezone: confirmedSettings.timezone ?? settings.timezone,
+          monthly_maintenance: confirmedSettings.monthly_maintenance?.toString() ?? settings.monthly_maintenance,
+          company_name: confirmedSettings.company_name ?? settings.company_name,
+          yearly_price: confirmedSettings.yearly_price?.toString() ?? pricingDraft.display.yearly_price,
+          stream_yearly_price: confirmedSettings.stream_yearly_price?.toString() ?? pricingDraft.display.stream_yearly_price,
+          movies_only_price: confirmedSettings.movies_only_price?.toString() ?? pricingDraft.display.movies_only_price,
+          tv_only_price: confirmedSettings.tv_only_price?.toString() ?? pricingDraft.display.tv_only_price,
+          downloads_price: confirmedSettings.downloads_price?.toString() ?? pricingDraft.display.downloads_price,
+          bg_music_url: confirmedSettings.bg_music_url ?? settings.bg_music_url,
+          bg_music_volume: confirmedSettings.bg_music_volume?.toString() ?? settings.bg_music_volume,
+          bg_music_enabled: confirmedSettings.bg_music_enabled !== undefined ? Boolean(confirmedSettings.bg_music_enabled) : settings.bg_music_enabled,
+          plex_token: confirmedSettings.plex_token ?? settings.plex_token,
+          plex_server_url: confirmedSettings.plex_server_url ?? settings.plex_server_url,
+          imap_host: confirmedSettings.imap_host ?? settings.imap_host,
+          imap_port: confirmedSettings.imap_port?.toString() ?? settings.imap_port,
+          imap_user: confirmedSettings.imap_user ?? settings.imap_user,
+          imap_pass: confirmedSettings.imap_source === 'env' ? '' : (confirmedSettings.imap_pass ?? settings.imap_pass),
+          imap_secure: confirmedSettings.imap_secure !== undefined ? Boolean(confirmedSettings.imap_secure) : settings.imap_secure,
+          imap_mailbox: confirmedSettings.imap_mailbox ?? settings.imap_mailbox,
+          service_email_keywords: confirmedSettings.service_email_keywords ?? settings.service_email_keywords,
+          email_auto_reply_enabled: confirmedSettings.email_auto_reply_enabled !== undefined ? Boolean(confirmedSettings.email_auto_reply_enabled) : settings.email_auto_reply_enabled,
+          email_auto_reply_subject: confirmedSettings.email_auto_reply_subject ?? settings.email_auto_reply_subject,
+          email_auto_reply_body: confirmedSettings.email_auto_reply_body ?? settings.email_auto_reply_body,
+        })
+        const inferredDiscount = inferUniformDiscountPercentage(confirmedSettings)
+        setPackageDiscount(inferredDiscount && inferredDiscount > 0 ? formatPriceInput(inferredDiscount) : '')
+        setImapConfigured(Boolean(confirmedSettings.imap_configured ?? (confirmedSettings.imap_host && confirmedSettings.imap_user && confirmedSettings.imap_pass)))
+        setImapSource((confirmedSettings.imap_source as 'database' | 'env' | 'unavailable') || imapSource)
 
         try{ await fetch('/api/admin/auth/upsert', { method:'POST' }) } catch{}
-        try{ await loadSettings() } catch {}
       }
     } catch (e: any) {
       setMessage('Error: ' + e.message)
@@ -366,12 +453,130 @@ export default function AdminSettingsPage() {
     }
   }
 
+  async function ensureAdminSession() {
+    try {
+      const check = await fetch('/api/admin/auth/session', { cache: 'no-store' })
+      if (check.ok) return true
+    } catch {}
+
+    const supabase = getSupabase()
+    const { data: { user } } = supabase ? await supabase.auth.getUser() : { data: { user: null } as any }
+    if (!user?.email) return false
+
+    try {
+      const hydrated = await fetch('/api/admin/auth/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: user.email }),
+      })
+      return hydrated.ok
+    } catch {
+      return false
+    }
+  }
+
+  async function persistPricing(pricing: {
+    yearly_price: number
+    stream_yearly_price: number
+    movies_only_price: number
+    tv_only_price: number
+    downloads_price: number
+  }) {
+    const hasSession = await ensureAdminSession()
+    if (!hasSession) {
+      setMessage('Unauthorized: admin session missing. Please log in again, then try the discount tool.')
+      return false
+    }
+
+    const res = await fetch('/api/admin/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(pricing),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      setMessage(body?.error || 'Failed to save pricing.')
+      return false
+    }
+    const confirmedSettings = body.settings || pricing
+    setSettings((current) => ({
+      ...current,
+      yearly_price: confirmedSettings.yearly_price?.toString() ?? current.yearly_price,
+      stream_yearly_price: confirmedSettings.stream_yearly_price?.toString() ?? current.stream_yearly_price,
+      movies_only_price: confirmedSettings.movies_only_price?.toString() ?? current.movies_only_price,
+      tv_only_price: confirmedSettings.tv_only_price?.toString() ?? current.tv_only_price,
+      downloads_price: confirmedSettings.downloads_price?.toString() ?? current.downloads_price,
+    }))
+    const inferredDiscount = inferUniformDiscountPercentage(confirmedSettings)
+    setPackageDiscount(inferredDiscount && inferredDiscount > 0 ? formatPriceInput(inferredDiscount) : '')
+    return true
+  }
+
+  async function applyPackageDiscount() {
+    const percentage = clampPercentage(packageDiscount)
+    if (percentage === null) {
+      setMessage('Enter a valid discount percentage between 0 and 100.')
+      return
+    }
+
+    const discounted = applyUniformDiscount(percentage)
+    const saved = await persistPricing({
+      yearly_price: discounted.yearly_price,
+      stream_yearly_price: discounted.stream_yearly_price,
+      movies_only_price: discounted.movies_only_price,
+      tv_only_price: discounted.tv_only_price,
+      downloads_price: discounted.downloads_price ?? STANDARD_PRICING_CONFIG.downloads_price ?? 20,
+    })
+    if (saved) {
+      setMessage(`${formatPriceInput(percentage)}% discount is now live for customers.`)
+    }
+  }
+
+  async function resetPackagePrices() {
+    const saved = await persistPricing({
+      yearly_price: STANDARD_PRICING_CONFIG.yearly_price,
+      stream_yearly_price: STANDARD_PRICING_CONFIG.stream_yearly_price,
+      movies_only_price: STANDARD_PRICING_CONFIG.movies_only_price,
+      tv_only_price: STANDARD_PRICING_CONFIG.tv_only_price,
+      downloads_price: STANDARD_PRICING_CONFIG.downloads_price ?? 20,
+    })
+    if (saved) {
+      setPackageDiscount('')
+      setMessage('Standard prices are live again. The customer discount banner is now removed.')
+    }
+  }
+
+  const pricingDraft = buildPricingFields({
+    packageDiscount,
+    settings: {
+      yearly_price: settings.yearly_price,
+      stream_yearly_price: settings.stream_yearly_price,
+      movies_only_price: settings.movies_only_price,
+      tv_only_price: settings.tv_only_price,
+      downloads_price: settings.downloads_price,
+    },
+  })
+  const discountPreview = pricingDraft.percentageDiscount
+  const previewPrices = pricingDraft.display
+
   if (authLoading) {
     return (
       <main className="p-6">
         <div className="max-w-4xl mx-auto">
           <div className="flex items-center justify-center h-64">
             <div className="text-slate-400">Checking authentication...</div>
+          </div>
+        </div>
+      </main>
+    )
+  }
+
+  if (loading) {
+    return (
+      <main className="p-6">
+        <div className="max-w-4xl mx-auto">
+          <div className="flex items-center justify-center h-64">
+            <div className="text-slate-400">Loading live settings...</div>
           </div>
         </div>
       </main>
@@ -564,6 +769,40 @@ export default function AdminSettingsPage() {
         </div>
 
         <div className="glass p-6 rounded-2xl mb-6">
+          <h2 className="text-xl font-semibold mb-4">Auto Reply</h2>
+          <div className="space-y-4">
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={settings.email_auto_reply_enabled}
+                onChange={e => setSettings({ ...settings, email_auto_reply_enabled: e.target.checked })}
+              />
+              <span className="text-sm text-slate-300">Send one automatic reply to each new matched inbox message</span>
+            </label>
+            <div>
+              <label className="label">Auto Reply Subject</label>
+              <input
+                className="input"
+                placeholder="We got your message"
+                value={settings.email_auto_reply_subject}
+                onChange={e => setSettings({ ...settings, email_auto_reply_subject: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="label">Auto Reply Body</label>
+              <textarea
+                className="input min-h-[12rem]"
+                value={settings.email_auto_reply_body}
+                onChange={e => setSettings({ ...settings, email_auto_reply_body: e.target.value })}
+              />
+              <div className="mt-2 text-xs text-slate-500">
+                Supports <code className="bg-slate-800 px-1 rounded">{'{{first_name}}'}</code>, <code className="bg-slate-800 px-1 rounded">{'{{full_name}}'}</code>, <code className="bg-slate-800 px-1 rounded">{'{{email}}'}</code>, and <code className="bg-slate-800 px-1 rounded">{'{{company_name}}'}</code>.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="glass p-6 rounded-2xl mb-6">
           <h2 className="text-xl font-semibold mb-4">Plex Configuration</h2>
           <div className="grid md:grid-cols-2 gap-4">
             <div>
@@ -611,7 +850,7 @@ export default function AdminSettingsPage() {
               <label className="label">Payment Lock</label>
               <label className="inline-flex items-center gap-2">
                 <input type="checkbox" checked={settings.payment_lock} onChange={e=> setSettings({ ...settings, payment_lock: e.target.checked })} />
-                <span className="text-xs text-slate-400">When enabled: new customers cannot pay; only active subscribers can extend before due date.</span>
+                <span className="text-xs text-slate-400">When enabled: the service stays closed to new member payments; only active subscribers can extend before their due date.</span>
               </label>
             </div>
           </div>
@@ -717,6 +956,39 @@ export default function AdminSettingsPage() {
 
         <div className="glass p-6 rounded-2xl mb-6">
           <h2 className="text-xl font-semibold mb-4">Pricing Configuration</h2>
+          <div className="mb-5 rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+              <div>
+                <label className="label">Reduce All Package Prices By (%)</label>
+                <input
+                  className="input"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  placeholder="50"
+                  value={packageDiscount}
+                  onChange={e => setPackageDiscount(e.target.value)}
+                />
+                <div className="mt-2 text-xs text-slate-400">
+                  Type a percentage like <span className="text-white">50</span> to make every package half price, then save settings.
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button className="btn-xs" type="button" onClick={applyPackageDiscount}>Apply Discount</button>
+                <button className="btn-xs-outline" type="button" onClick={resetPackagePrices}>Reset Standard Prices</button>
+              </div>
+            </div>
+            {discountPreview !== null ? (
+              <div className="mt-4 grid gap-2 text-sm text-slate-300 sm:grid-cols-2 xl:grid-cols-5">
+                <div className="rounded-xl border border-white/8 bg-black/15 px-3 py-2">Full Access: GBP {previewPrices.yearly_price}</div>
+                <div className="rounded-xl border border-white/8 bg-black/15 px-3 py-2">Extra Stream: GBP {previewPrices.stream_yearly_price}</div>
+                <div className="rounded-xl border border-white/8 bg-black/15 px-3 py-2">Movies Only: GBP {previewPrices.movies_only_price}</div>
+                <div className="rounded-xl border border-white/8 bg-black/15 px-3 py-2">TV Only: GBP {previewPrices.tv_only_price}</div>
+                <div className="rounded-xl border border-white/8 bg-black/15 px-3 py-2">Downloads: GBP {previewPrices.downloads_price}</div>
+              </div>
+            ) : null}
+          </div>
           <div className="grid md:grid-cols-2 gap-4">
             <div>
               <label className="label">Yearly Base Price (GBP)</label>
@@ -724,8 +996,11 @@ export default function AdminSettingsPage() {
                 className="input" 
                 type="number"
                 step="0.01"
-                value={settings.yearly_price}
-                onChange={e=>setSettings({...settings, yearly_price: e.target.value})}
+                value={pricingDraft.display.yearly_price}
+                onChange={e=>{
+                  setPackageDiscount('')
+                  setSettings({...settings, yearly_price: e.target.value})
+                }}
                 onKeyPress={handleKeyPress}
               />
             </div>
@@ -735,8 +1010,11 @@ export default function AdminSettingsPage() {
                 className="input" 
                 type="number"
                 step="0.01"
-                value={settings.stream_yearly_price}
-                onChange={e=>setSettings({...settings, stream_yearly_price: e.target.value})}
+                value={pricingDraft.display.stream_yearly_price}
+                onChange={e=>{
+                  setPackageDiscount('')
+                  setSettings({...settings, stream_yearly_price: e.target.value})
+                }}
                 onKeyPress={handleKeyPress}
               />
             </div>
@@ -746,8 +1024,11 @@ export default function AdminSettingsPage() {
                 className="input" 
                 type="number"
                 step="0.01"
-                value={settings.movies_only_price}
-                onChange={e=>setSettings({...settings, movies_only_price: e.target.value})}
+                value={pricingDraft.display.movies_only_price}
+                onChange={e=>{
+                  setPackageDiscount('')
+                  setSettings({...settings, movies_only_price: e.target.value})
+                }}
                 onKeyPress={handleKeyPress}
               />
             </div>
@@ -757,8 +1038,11 @@ export default function AdminSettingsPage() {
                 className="input" 
                 type="number"
                 step="0.01"
-                value={settings.tv_only_price}
-                onChange={e=>setSettings({...settings, tv_only_price: e.target.value})}
+                value={pricingDraft.display.tv_only_price}
+                onChange={e=>{
+                  setPackageDiscount('')
+                  setSettings({...settings, tv_only_price: e.target.value})
+                }}
                 onKeyPress={handleKeyPress}
               />
             </div>
@@ -768,8 +1052,11 @@ export default function AdminSettingsPage() {
                 className="input" 
                 type="number"
                 step="0.01"
-                value={settings.downloads_price}
-                onChange={e=>setSettings({...settings, downloads_price: e.target.value})}
+                value={pricingDraft.display.downloads_price}
+                onChange={e=>{
+                  setPackageDiscount('')
+                  setSettings({...settings, downloads_price: e.target.value})
+                }}
                 onKeyPress={handleKeyPress}
               />
             </div>
@@ -777,7 +1064,6 @@ export default function AdminSettingsPage() {
           <div className="text-xs text-slate-400 mt-2">These prices update the customer portal totals immediately. In demo mode, they save locally; with Supabase configured, they persist to the database.</div>
         </div>
 
-        {/* Configuration Status */}
         <div className="glass p-6 rounded-2xl mb-6">
           <h2 className="text-xl font-semibold mb-4">Configuration Status</h2>
           {supabaseStatus === 'error' && (

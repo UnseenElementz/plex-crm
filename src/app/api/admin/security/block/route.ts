@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { addAuditLog, getSecurityOverview } from '@/lib/moderation'
+import { addAuditLog, getSecurityOverview, persistBlockedIpsSnapshot } from '@/lib/moderation'
 
 export async function POST(request: Request) {
   try {
@@ -17,6 +17,7 @@ export async function POST(request: Request) {
     })
 
     const overview = await getSecurityOverview()
+    await persistBlockedIpsSnapshot(overview.blockedIps)
     return NextResponse.json({ ok: true, blocked_ips: overview.blockedIps })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'failed' }, { status: 500 })
@@ -38,6 +39,7 @@ export async function DELETE(request: Request) {
     })
 
     const overview = await getSecurityOverview()
+    await persistBlockedIpsSnapshot(overview.blockedIps)
     return NextResponse.json({ ok: true, blocked_ips: overview.blockedIps })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'failed' }, { status: 500 })

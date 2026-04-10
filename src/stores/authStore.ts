@@ -26,6 +26,48 @@ export interface AuthState {
   checkAuth: () => Promise<void>
 }
 
+function getAdminAliasEmail() {
+  return String(process.env.NEXT_PUBLIC_ADMIN_ALIAS_EMAIL || 'admin@streamzrus.local').trim().toLowerCase()
+}
+
+function mapAdminUser(user: {
+  id: string
+  email?: string | null
+  created_at: string
+  user_metadata?: Record<string, any>
+}): AdminUser {
+  return {
+    id: user.id,
+    email: user.email || '',
+    name: user.user_metadata?.name || 'Admin User',
+    permissions: {},
+    created_at: user.created_at,
+  }
+}
+
+async function resolveAdminUser(user: {
+  id: string
+  email?: string | null
+  created_at: string
+  user_metadata?: Record<string, any>
+}) {
+  const email = String(user.email || '').trim().toLowerCase()
+  if (!email) return null
+  if (email === getAdminAliasEmail()) return mapAdminUser(user)
+
+  const supabase = getSupabase()
+  if (!supabase) return null
+
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('email', email)
+    .maybeSingle()
+
+  if (error || profile?.role !== 'admin') return null
+  return mapAdminUser(user)
+}
+
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   isLoading: false,
@@ -45,12 +87,10 @@ export const useAuthStore = create<AuthState>((set) => ({
       if (error) throw new Error(error.message)
       const u = data.user
       if (!u) throw new Error('No user returned')
-      const admin: AdminUser = {
-        id: u.id,
-        email: u.email || email,
-        name: u.user_metadata?.name || 'Admin User',
-        permissions: {},
-        created_at: u.created_at
+      const admin = await resolveAdminUser(u)
+      if (!admin) {
+        await s.auth.signOut().catch(() => null)
+        throw new Error('Admin access required')
       }
       set({ user: admin, isAuthenticated: true, isLoading: false })
       return true
@@ -85,14 +125,12 @@ export const useAuthStore = create<AuthState>((set) => ({
       const { data } = await s.auth.getUser()
       const u = data.user
       if (u) {
-        const admin: AdminUser = {
-          id: u.id,
-          email: u.email || '',
-          name: u.user_metadata?.name || 'Admin User',
-          permissions: {},
-          created_at: u.created_at
+        const admin = await resolveAdminUser(u)
+        if (admin) {
+          set({ user: admin, isAuthenticated: true, isLoading: false, error: null })
+        } else {
+          set({ user: null, isAuthenticated: false, isLoading: false, error: null })
         }
-        set({ user: admin, isAuthenticated: true, isLoading: false })
       } else {
         set({ user: null, isAuthenticated: false, isLoading: false })
       }

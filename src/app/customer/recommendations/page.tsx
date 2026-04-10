@@ -7,17 +7,27 @@ import { getStatus } from '@/lib/pricing'
 import RequestHistory from '@/components/customer/RequestHistory'
 
 type PreviewMeta = { title: string; description: string; image?: string }
+type SearchResult = {
+  id: string
+  title: string
+  type: string
+  year: string
+  subtitle: string
+  image?: string
+  url: string
+  description: string
+}
 
 const modeContent = {
   request: {
     title: 'Request a film or series',
-    subtitle: 'Paste an IMDb link, review the match, and send it straight to the request desk.',
+    subtitle: 'Search for the title, pick the right match, and send it straight to the request desk.',
     cta: 'Send request',
     icon: Film,
   },
   issue: {
     title: 'Report a playback issue',
-    subtitle: 'Use the IMDb link plus a quick note so the team can fix the right item faster.',
+    subtitle: 'Search the title first, then add a quick note so the team can fix the right item faster.',
     cta: 'Report issue',
     icon: LifeBuoy,
   },
@@ -25,6 +35,10 @@ const modeContent = {
 
 export default function RecommendationsPage(){
   const [mode, setMode] = useState<'request'|'issue'>('request')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([])
+  const [searching, setSearching] = useState(false)
+  const [searchLocked, setSearchLocked] = useState(false)
   const [url, setUrl] = useState('')
   const [preview, setPreview] = useState<PreviewMeta | null>(null)
   const [details, setDetails] = useState('')
@@ -71,6 +85,37 @@ export default function RecommendationsPage(){
     })()
   }, [])
 
+  useEffect(() => {
+    if (searchLocked) return
+
+    const query = searchQuery.trim()
+    if (query.length < 2) {
+      setSearchResults([])
+      setSearching(false)
+      return
+    }
+
+    let cancelled = false
+    const timeoutId = window.setTimeout(async () => {
+      setSearching(true)
+      try {
+        const res = await fetch(`/api/recommendations/search?q=${encodeURIComponent(query)}`)
+        const data = await res.json().catch(() => ({ items: [] }))
+        if (cancelled) return
+        setSearchResults(res.ok ? data.items || [] : [])
+      } catch {
+        if (!cancelled) setSearchResults([])
+      } finally {
+        if (!cancelled) setSearching(false)
+      }
+    }, 280)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeoutId)
+    }
+  }, [searchLocked, searchQuery])
+
   async function fetchPreview(retryCount = 0){
     setLoading(true)
     setError('')
@@ -114,7 +159,7 @@ export default function RecommendationsPage(){
     }
 
     if (!url.trim()) {
-      setError('Please add an IMDb link first.')
+      setError('Please select a title or add a direct link first.')
       return
     }
 
@@ -157,6 +202,9 @@ export default function RecommendationsPage(){
       }
 
       setMsg(mode === 'issue' ? 'Issue report sent. The board will update when the team responds.' : 'Request sent. You will see progress updates in the live board below.')
+      setSearchQuery('')
+      setSearchResults([])
+      setSearchLocked(false)
       setUrl('')
       setPreview(null)
       setDetails('')
@@ -175,7 +223,7 @@ export default function RecommendationsPage(){
   const helperCards = useMemo(() => [
     {
       title: 'Fast triage',
-      text: 'IMDb links, issue notes, and support replies stay together so nothing gets lost.',
+      text: 'Search matches, links, issue notes, and support replies stay together so nothing gets lost.',
     },
     {
       title: 'Live progress',
@@ -186,6 +234,20 @@ export default function RecommendationsPage(){
       text: 'When the status changes, the same thread shows what moved and when it happened.',
     },
   ], [])
+
+  function selectSearchResult(item: SearchResult) {
+    setSearchLocked(true)
+    setSearchQuery(item.year ? `${item.title} (${item.year})` : item.title)
+    setSearchResults([])
+    setUrl(item.url)
+    setPreview({
+      title: item.title,
+      description: item.description || item.subtitle || 'No description was returned for this title.',
+      image: item.image,
+    })
+    setError('')
+    setMsg('')
+  }
 
   return (
     <main className="page-section py-8">
@@ -237,9 +299,61 @@ export default function RecommendationsPage(){
             </div>
 
             <div className="mt-6 space-y-4">
+              <div className="space-y-3">
+                <input
+                  className="input"
+                  placeholder={mode === 'issue' ? 'Search film or series title' : 'Search film or series title'}
+                  value={searchQuery}
+                  onChange={(e) => {
+                    setSearchLocked(false)
+                    setSearchQuery(e.target.value)
+                    setError('')
+                    setMsg('')
+                  }}
+                />
+                {searching ? (
+                  <div className="rounded-[24px] border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-400">
+                    Searching titles...
+                  </div>
+                ) : null}
+                {!searching && searchQuery.trim().length >= 2 && searchResults.length ? (
+                  <div className="overflow-hidden rounded-[24px] border border-white/10 bg-slate-950/55">
+                    {searchResults.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className="flex w-full items-center gap-3 border-b border-white/5 px-4 py-3 text-left transition last:border-b-0 hover:bg-white/5"
+                        onClick={() => selectSearchResult(item)}
+                      >
+                        {item.image ? (
+                          <img src={item.image} alt={item.title} className="h-16 w-12 rounded-[14px] object-cover" />
+                        ) : (
+                          <div className="flex h-16 w-12 items-center justify-center rounded-[14px] border border-white/10 bg-white/5 text-[10px] uppercase tracking-[0.3em] text-slate-500">
+                            Title
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-semibold text-white">
+                            {item.title}
+                            {item.year ? ` (${item.year})` : ''}
+                          </div>
+                          <div className="mt-1 text-xs uppercase tracking-[0.28em] text-cyan-200/75">
+                            {[item.type, item.subtitle].filter(Boolean).join(' • ')}
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {!searching && searchQuery.trim().length >= 2 && !searchResults.length ? (
+                  <div className="rounded-[24px] border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-400">
+                    No title matches found. Paste a direct link below if needed.
+                  </div>
+                ) : null}
+              </div>
               <input
                 className="input"
-                placeholder="Paste IMDb link"
+                placeholder="Or paste a direct title link"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
               />
@@ -263,7 +377,16 @@ export default function RecommendationsPage(){
                   {content.cta}
                 </button>
                 {preview ? (
-                  <button className="btn-xs-outline" onClick={() => { setPreview(null); setUrl('') }}>
+                  <button
+                    className="btn-xs-outline"
+                    onClick={() => {
+                      setPreview(null)
+                      setUrl('')
+                      setSearchQuery('')
+                      setSearchResults([])
+                      setSearchLocked(false)
+                    }}
+                  >
                     Clear preview
                   </button>
                 ) : null}

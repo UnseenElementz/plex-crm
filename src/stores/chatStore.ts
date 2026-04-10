@@ -65,17 +65,6 @@ function computeStats(conversations: Conversation[]) {
   return { waiting, active }
 }
 
-function clearUnreadState(conversation: Conversation) {
-  return {
-    ...conversation,
-    metadata: {
-      ...(conversation.metadata || {}),
-      unread_customer_count: 0,
-      has_unread_customer_message: false,
-    },
-  }
-}
-
 export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
   currentConversation: null,
@@ -140,20 +129,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (!res.ok) return
       const data: Conversation[] = await res.json()
       const prev = get().conversations
-      const prevSig = JSON.stringify(prev.map(c=>({
-        id: c.id,
-        updated_at: c.updated_at,
-        status: c.status,
-        unread: Number((c.metadata as any)?.unread_customer_count || 0),
-        hasUnread: Boolean((c.metadata as any)?.has_unread_customer_message),
-      })))
-      const nextSig = JSON.stringify((data||[]).map(c=>({
-        id: c.id,
-        updated_at: c.updated_at,
-        status: c.status,
-        unread: Number((c.metadata as any)?.unread_customer_count || 0),
-        hasUnread: Boolean((c.metadata as any)?.has_unread_customer_message),
-      })))
+      const prevSig = JSON.stringify(prev.map(c=>({ id: c.id, updated_at: c.updated_at, status: c.status })))
+      const nextSig = JSON.stringify((data||[]).map(c=>({ id: c.id, updated_at: c.updated_at, status: c.status })))
       if (prevSig !== nextSig) {
         set({ conversations: data || [], stats: computeStats(data || []) })
       }
@@ -242,19 +219,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const j = await res.json().catch(()=>({}))
         throw new Error(j?.error || `HTTP ${res.status}`)
       }
-      const { conversations, currentConversation } = get()
-      const updatedConversations = conversations.map(conversation =>
-        conversation.id === conversationId ? clearUnreadState(conversation) : conversation
-      )
-      const updatedCurrentConversation =
-        currentConversation && currentConversation.id === conversationId
-          ? clearUnreadState(currentConversation)
-          : currentConversation
-      set({
-        conversations: updatedConversations,
-        currentConversation: updatedCurrentConversation,
-        stats: computeStats(updatedConversations),
-      })
     } catch (error) {
       set({ error: (error as Error).message })
     }

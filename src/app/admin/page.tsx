@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import AdminDashboard from '@/components/admin/AdminDashboard'
+import AdminCommandCenter from '@/components/admin/AdminCommandCenter'
 import { useAuthStore } from '@/stores/authStore'
 
 export default function AdminPage() {
@@ -66,5 +66,5 @@ export default function AdminPage() {
     )
   }
 
-  return <AdminDashboard />
+  return <AdminCommandCenter />
 }

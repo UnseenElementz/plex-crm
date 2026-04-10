@@ -1,6 +1,14 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
+import { unstable_noStore as noStore } from 'next/cache'
+
+const noStoreFetch: typeof fetch = (input, init) =>
+  fetch(input, {
+    ...init,
+    cache: 'no-store',
+    next: { revalidate: 0 },
+  } as RequestInit & { next: { revalidate: number } })
 
 function svc(){
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -10,12 +18,16 @@ function svc(){
     return null
   }
   return createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    global: { fetch: noStoreFetch },
   })
 }
 
 function envString(key: string) {
-  return String(process.env[key] || '').trim()
+  return String(process.env[key] || '')
+    .replace(/\\r\\n/g, '')
+    .replace(/[\r\n]+/g, '')
+    .trim()
 }
 
 function envBool(key: string, fallback = false) {
@@ -46,6 +58,7 @@ function getEnvInboxSettings() {
 }
 
 export async function GET(){
+  noStore()
   const supabase = svc()
   let dbStatus = 'init'
   try{
@@ -62,7 +75,6 @@ export async function GET(){
     dbStatus = error ? 'error' : (data ? 'found' : 'empty')
     if (error) console.error('Supabase DB Error:', error)
     const envInbox = getEnvInboxSettings()
-
     if (envInbox.configured) {
       data = {
         ...(data || {}),
@@ -87,13 +99,14 @@ export async function GET(){
     if (!data && error) return NextResponse.json({ error: error.message }, { status: 404, headers: { 'X-DB-Status': dbStatus } })
     
     const safe: any = {}
-    const allow = ['company_name','yearly_price','stream_yearly_price','movies_only_price','tv_only_price','downloads_price','payment_lock','chat_online','chat_availability','chat_idle_timeout_minutes','canonical_host','hero_image_url','bg_music_url','bg_music_volume','bg_music_enabled','plex_token','plex_server_url','imap_host','imap_port','imap_user','imap_secure','imap_mailbox','service_email_keywords','imap_source','imap_configured']
+    const allow = ['company_name','yearly_price','stream_yearly_price','movies_only_price','tv_only_price','downloads_price','payment_lock','chat_online','chat_availability','chat_idle_timeout_minutes','canonical_host','hero_image_url','bg_music_url','bg_music_volume','bg_music_enabled','plex_token','plex_server_url','imap_host','imap_port','imap_user','imap_secure','imap_mailbox','service_email_keywords','imap_source','imap_configured','email_auto_reply_enabled','email_auto_reply_subject','email_auto_reply_body']
     for (const k of allow){ if (data && data[k] !== undefined) safe[k] = data[k] }
     
     return NextResponse.json(isAdmin ? (data || {}) : safe, { 
         headers: {
             'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate', 
-            'X-DB-Status': dbStatus 
+            'X-DB-Status': dbStatus,
+            'X-Settings-Read-Mode': 'supabase-no-store',
         } 
     })
   }catch(e: any){
@@ -103,6 +116,7 @@ export async function GET(){
 }
 
 export async function PUT(request: Request){
+  noStore()
   const supabase = svc()
   try{
     const isAdmin = cookies().get('admin_session')?.value === '1'
@@ -117,7 +131,8 @@ export async function PUT(request: Request){
       'downloads_price', 'payment_lock', 'chat_online', 'chat_availability', 'chat_idle_timeout_minutes', 'hero_image_url',
       'admin_user', 'admin_pass', 'plex_token', 'plex_server_url',
       'bg_music_url', 'bg_music_volume', 'bg_music_enabled',
-      'imap_host', 'imap_port', 'imap_user', 'imap_pass', 'imap_secure', 'imap_mailbox', 'service_email_keywords'
+      'imap_host', 'imap_port', 'imap_user', 'imap_pass', 'imap_secure', 'imap_mailbox', 'service_email_keywords',
+      'email_auto_reply_enabled', 'email_auto_reply_subject', 'email_auto_reply_body'
     ]
     
     const row: any = { id: 1 }
@@ -150,6 +165,9 @@ export async function PUT(request: Request){
     const supportsInboxColumns = existing
       ? ['imap_host', 'imap_port', 'imap_user', 'imap_pass', 'imap_secure', 'imap_mailbox', 'service_email_keywords'].every((key) => Object.prototype.hasOwnProperty.call(existing, key))
       : false
+    const supportsAutoReplyColumns = existing
+      ? ['email_auto_reply_enabled', 'email_auto_reply_subject', 'email_auto_reply_body'].every((key) => Object.prototype.hasOwnProperty.call(existing, key))
+      : false
     if (!supportsInboxColumns) {
       delete row.imap_host
       delete row.imap_port
@@ -160,6 +178,11 @@ export async function PUT(request: Request){
       delete row.service_email_keywords
     } else if (envInbox.configured && row.imap_pass === '__ENV_CONFIGURED__') {
       delete row.imap_pass
+    }
+    if (!supportsAutoReplyColumns) {
+      delete row.email_auto_reply_enabled
+      delete row.email_auto_reply_subject
+      delete row.email_auto_reply_body
     }
     
     if (!existing) {
@@ -206,9 +229,17 @@ export async function PUT(request: Request){
       row.imap_source = supportsInboxColumns ? 'database' : 'unavailable'
       row.imap_configured = Boolean(row.imap_host && row.imap_user && row.imap_pass)
     }
+    if (!supportsAutoReplyColumns) {
+      row.email_auto_reply_enabled = false
+      row.email_auto_reply_subject = row.email_auto_reply_subject ?? 'We got your message'
+      row.email_auto_reply_body = row.email_auto_reply_body ?? 'Hi {{first_name}},\n\nThank you for messaging Streamz R Us.\n\nA member of the team will be with you shortly.\n\nDue to high demand, please allow up to 24 hours for a reply, although it is usually much quicker.\n\nThanks,\nStreamz R Us'
+    }
 
     return NextResponse.json({ ok: true, dbOk, dbError, settings: row }, { 
-        headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate' } 
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+          'X-Settings-Write-Mode': 'supabase-no-store',
+        } 
     })
   }catch(e: any){
     return NextResponse.json({ error: e?.message || 'Unknown error' }, { status: 500, headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate' } })
@@ -217,3 +248,5 @@ export async function PUT(request: Request){
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
+export const revalidate = 0

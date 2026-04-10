@@ -5,6 +5,9 @@ import { createClient } from '@supabase/supabase-js'
 import { CustomerCreateSchema, formatZodError } from '@/lib/validation'
 import { calculateNextDue } from '@/lib/pricing'
 import { getVisibleCustomerNotes, mergeCustomerNotes, parseCustomerNotes } from '@/lib/customerNotes'
+import { buildReferralCode, REFERRAL_LINK_LIMIT } from '@/lib/referrals'
+import { getActivePlexUsernameMap } from '@/lib/plex'
+import { isSystemCustomerEmail } from '@/lib/systemCustomers'
 
 function mem(){
   const g = globalThis as any
@@ -23,8 +26,24 @@ export async function GET(){
   const client = (svc || supabase)!
   const { data, error } = await client.from('customers').select('*')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  const mapped = (data || []).map((c: any) => {
-    const parsedNotes = parseCustomerNotes(c.notes)
+  const visibleCustomers = (data || []).filter((row: any) => !isSystemCustomerEmail(row?.email))
+  const livePlexUsernames = await getActivePlexUsernameMap().catch(() => new Map<string, string>())
+  const referralCounts = new Map<string, number>()
+  for (const row of visibleCustomers) {
+    const email = String((row as any).email || '').trim().toLowerCase()
+    if (!email) continue
+    referralCounts.set(email, 0)
+  }
+  for (const row of visibleCustomers) {
+    const parsedNotes = parseCustomerNotes((row as any).notes)
+    const referredBy = String(parsedNotes.referredBy || '').trim().toUpperCase()
+    if (!referredBy) continue
+    const referrer = visibleCustomers.find((candidate: any) => buildReferralCode(String(candidate.email || '').trim().toLowerCase()) === referredBy)
+    const referrerEmail = String(referrer?.email || '').trim().toLowerCase()
+    if (!referrerEmail) continue
+    referralCounts.set(referrerEmail, Number(referralCounts.get(referrerEmail) || 0) + 1)
+  }
+  const mapped = visibleCustomers.map((c: any) => {
     const plan: any = (c.plan ?? c.subscription_type)
     const rawNext = c.next_due_date ?? c.next_payment_date
     const d = rawNext ? new Date(rawNext) : null
@@ -33,6 +52,11 @@ export async function GET(){
     const safeNext = plan
       ? ((!d || isNaN(d.getTime()) || year < 2000 || year > 2100) ? calculateNextDue(plan, start).toISOString() : rawNext)
       : (rawNext || null)
+    const parsedNotes = parseCustomerNotes(c.notes)
+    const livePlexUsername = livePlexUsernames.get(String(c.email || '').trim().toLowerCase()) || ''
+    const savedPlexUsername = parsedNotes.plexUsername || undefined
+    const resolvedPlexUsername = livePlexUsername || savedPlexUsername
+    const plexUsernameSource = livePlexUsername ? 'live' : savedPlexUsername ? 'saved' : null
     return {
       id: c.id,
       full_name: c.full_name ?? c.name,
@@ -42,10 +66,19 @@ export async function GET(){
       start_date: c.start_date,
       next_due_date: safeNext,
       notes: getVisibleCustomerNotes(c.notes),
-      plex_username: parsedNotes.plexUsername || undefined,
+      plex_username: resolvedPlexUsername,
+      plex_username_source: plexUsernameSource,
       timezone: parsedNotes.timezone || undefined,
       status: c.status ?? c.subscription_status,
-      downloads: parsedNotes.downloads
+      downloads: parsedNotes.downloads,
+      terminate_at_plan_end: parsedNotes.terminateAtPlanEnd,
+      termination_scheduled_at: parsedNotes.terminationScheduledAt,
+      referral_code: buildReferralCode(String(c.email || '')),
+      referral_credit: Number(parsedNotes.referralCredit || 0),
+      referred_by: parsedNotes.referredBy || null,
+      referral_count: Number(referralCounts.get(String(c.email || '').trim().toLowerCase()) || 0),
+      referral_slots_used: Number(referralCounts.get(String(c.email || '').trim().toLowerCase()) || 0),
+      referral_slots_max: REFERRAL_LINK_LIMIT,
     }
   })
   return NextResponse.json(mapped)
@@ -107,7 +140,6 @@ export async function POST(request: Request){
   const { data, error } = await client.from('customers').insert(dbPayload).select('*')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   const row = data?.[0]
-  const parsedNotes = parseCustomerNotes(row?.notes)
   const mapped = row ? ({
     id: row.id,
     full_name: row.full_name ?? row.name,
@@ -117,10 +149,19 @@ export async function POST(request: Request){
     start_date: row.start_date,
     next_due_date: row.next_due_date ?? row.next_payment_date,
     notes: getVisibleCustomerNotes(row.notes),
-    plex_username: parsedNotes.plexUsername || undefined,
-    timezone: parsedNotes.timezone || undefined,
+    plex_username: parseCustomerNotes(row.notes).plexUsername || undefined,
+    plex_username_source: parseCustomerNotes(row.notes).plexUsername ? 'saved' : null,
+    timezone: parseCustomerNotes(row.notes).timezone || undefined,
     status: row.status ?? row.subscription_status,
-    downloads: parsedNotes.downloads
+    downloads: parseCustomerNotes(row.notes).downloads,
+    terminate_at_plan_end: parseCustomerNotes(row.notes).terminateAtPlanEnd,
+    termination_scheduled_at: parseCustomerNotes(row.notes).terminationScheduledAt,
+    referral_code: buildReferralCode(String(row.email || '')),
+    referral_credit: Number(parseCustomerNotes(row.notes).referralCredit || 0),
+    referred_by: parseCustomerNotes(row.notes).referredBy || null,
+    referral_count: 0,
+    referral_slots_used: 0,
+    referral_slots_max: REFERRAL_LINK_LIMIT,
   }) : null
   return NextResponse.json(mapped)
 }

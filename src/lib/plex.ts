@@ -123,6 +123,26 @@ export async function getAllPlexUsers(token: string): Promise<PlexFriend[]> {
   return Array.from(usersMap.values())
 }
 
+export async function getActivePlexUsernameMap(): Promise<Map<string, string>> {
+  const supabase = svc()
+  if (!supabase) return new Map()
+
+  const { data: settings } = await supabase.from('admin_settings').select('plex_token').eq('id', 1).maybeSingle()
+  const token = String(settings?.plex_token || '').trim()
+  if (!token) return new Map()
+
+  const friends = await getAllPlexUsers(token)
+  const usernames = new Map<string, string>()
+  for (const friend of friends) {
+    const email = String(friend.email || '').trim().toLowerCase()
+    const username = String(friend.username || friend.title || '').trim()
+    if (!email || !username) continue
+    usernames.set(email, username)
+  }
+
+  return usernames
+}
+
 export interface PlexLibrary {
   id: string
   title: string
@@ -389,6 +409,67 @@ export async function getOwnedServers(token: string): Promise<PlexServerInfo[]> 
     console.error('Plex servers error:', e)
     return []
   }
+}
+
+export async function removePlexSharesByEmail(token: string, email: string) {
+  const target = String(email || '').trim().toLowerCase()
+  if (!token || !target) {
+    return {
+      removed: [] as Array<{ server_machine_id: string; share_id: string }>,
+      failures: [] as Array<{ server_machine_id: string; share_id?: string; status?: number; error: string }>,
+    }
+  }
+
+  const removed: Array<{ server_machine_id: string; share_id: string }> = []
+  const failures: Array<{ server_machine_id: string; share_id?: string; status?: number; error: string }> = []
+  const servers = await getOwnedServers(token)
+
+  for (const server of servers) {
+    const listResponse = await fetch(`https://plex.tv/api/servers/${server.machineIdentifier}/shared_servers`, {
+      headers: plexHeaders(token),
+      cache: 'no-store',
+    })
+
+    if (!listResponse.ok) {
+      failures.push({
+        server_machine_id: server.machineIdentifier,
+        status: listResponse.status,
+        error: 'Failed to fetch shared_servers',
+      })
+      continue
+    }
+
+    const xml = await listResponse.text()
+    const matches = [...xml.matchAll(/<SharedServer\s+([^>]+)>/g)].map((match) => match[1])
+
+    for (const attrs of matches) {
+      const shareEmail = attrs.match(/email="([^"]+)"/)?.[1] || ''
+      if (String(shareEmail).trim().toLowerCase() !== target) continue
+
+      const shareId = attrs.match(/id="([^"]+)"/)?.[1] || ''
+      if (!shareId) continue
+
+      const deleteResponse = await fetch(`https://plex.tv/api/servers/${server.machineIdentifier}/shared_servers/${shareId}`, {
+        method: 'DELETE',
+        headers: plexHeaders(token),
+        cache: 'no-store',
+      })
+
+      if (deleteResponse.ok) {
+        removed.push({ server_machine_id: server.machineIdentifier, share_id: shareId })
+        continue
+      }
+
+      failures.push({
+        server_machine_id: server.machineIdentifier,
+        share_id: shareId,
+        status: deleteResponse.status,
+        error: 'Delete failed',
+      })
+    }
+  }
+
+  return { removed, failures }
 }
 
 export async function getPreferredServerUri(token: string): Promise<string> {

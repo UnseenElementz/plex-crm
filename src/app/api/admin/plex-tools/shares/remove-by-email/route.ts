@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createClient } from '@supabase/supabase-js'
+import { syncCustomerDownloads } from '@/lib/moderation'
 
 function svc(){
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
@@ -91,6 +92,10 @@ export async function POST(request: Request){
           failures.push({ server_machine_id: srv.machine, share_id: shareId, status: del.status, error: 'Delete failed' })
         }
       }
+    }
+
+    if (removed.length) {
+      await syncCustomerDownloads(email, false)
     }
 
     return NextResponse.json({ ok: true, removed, failures })

@@ -2,5 +2,19 @@
   "buildCommand": "next build",
   "framework": "nextjs",
   "ignoreCommand": "",
-  "env": {}
+  "env": {},
+  "crons": [
+    {
+      "path": "/api/cron/email-inbox",
+      "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/admin/plex/scan",
+      "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/admin/community/cleanup-overdue",
+      "schedule": "0 3 * * *"
+    }
+  ]
 }

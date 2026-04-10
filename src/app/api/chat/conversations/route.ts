@@ -1,20 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-function withUnreadMetadata(conversations: any[], unreadCounts: Record<string, number>) {
-  return (conversations || []).map((conversation) => {
-    const unreadCount = Number(unreadCounts[conversation.id] || 0)
-    return {
-      ...conversation,
-      metadata: {
-        ...(conversation.metadata || {}),
-        unread_customer_count: unreadCount,
-        has_unread_customer_message: unreadCount > 0,
-      },
-    }
-  })
-}
-
 export async function GET(){
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY as string
@@ -23,17 +9,7 @@ export async function GET(){
       const { cookies } = await import('next/headers')
       const raw = cookies().get('admin_conversations')?.value
       const list = raw ? JSON.parse(decodeURIComponent(raw)) : []
-      const unreadCounts = Object.fromEntries(
-        (Array.isArray(list) ? list : []).map((conversation: any) => {
-          const messagesRaw = cookies().get(`admin_messages_${conversation.id}`)?.value
-          const messages = messagesRaw ? JSON.parse(decodeURIComponent(messagesRaw)) : []
-          const unreadCount = (Array.isArray(messages) ? messages : []).filter(
-            (message: any) => message?.sender_type === 'customer' && !message?.is_read
-          ).length
-          return [conversation.id, unreadCount]
-        })
-      )
-      return NextResponse.json(withUnreadMetadata(Array.isArray(list) ? list : [], unreadCounts))
+      return NextResponse.json(Array.isArray(list) ? list : [])
     } catch { return NextResponse.json([]) }
   }
   const supabase = createClient(url, key)
@@ -43,26 +19,7 @@ export async function GET(){
       .select('*')
       .order('updated_at', { ascending: false })
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-    const conversationIds = (data || []).map((conversation: any) => conversation.id)
-    let unreadCounts: Record<string, number> = {}
-
-    if (conversationIds.length > 0) {
-      const { data: unreadMessages } = await supabase
-        .from('messages')
-        .select('conversation_id')
-        .in('conversation_id', conversationIds)
-        .eq('sender_type', 'customer')
-        .eq('is_read', false)
-
-      unreadCounts = (unreadMessages || []).reduce((acc: Record<string, number>, row: any) => {
-        const key = String(row.conversation_id || '')
-        if (!key) return acc
-        acc[key] = Number(acc[key] || 0) + 1
-        return acc
-      }, {})
-    }
-
-    return NextResponse.json(withUnreadMetadata(data || [], unreadCounts))
+    return NextResponse.json(data || [])
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Unknown error' }, { status: 500 })
   }
@@ -75,15 +32,7 @@ export async function POST(request: Request){
     try{
       const body = await request.json()
       const { customer_ip, metadata } = body || {}
-      const row = {
-        id: crypto.randomUUID(),
-        status: 'waiting',
-        customer_ip: customer_ip || null,
-        metadata: { ...(metadata || {}), unread_customer_count: 0, has_unread_customer_message: false },
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        closed_at: null,
-      }
+      const row = { id: crypto.randomUUID(), status: 'waiting', customer_ip: customer_ip || null, metadata: metadata || {}, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), closed_at: null }
       const { cookies } = await import('next/headers')
       const jar = cookies()
       const raw = jar.get('admin_conversations')?.value
@@ -100,11 +49,7 @@ export async function POST(request: Request){
     const { customer_ip, metadata } = body || {}
     
     // Auto-enrich with customer data if email is present
-    let enrichedMetadata = {
-      ...metadata,
-      unread_customer_count: 0,
-      has_unread_customer_message: false,
-    }
+    let enrichedMetadata = { ...metadata }
     if (metadata?.email) {
       const { data: customer } = await supabase
         .from('customers')

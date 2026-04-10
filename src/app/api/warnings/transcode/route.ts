@@ -2,9 +2,13 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { sendTranscodeWarning } from '@/lib/email'
+import { addAuditLog, syncCustomerTranscodeNotice } from '@/lib/moderation'
 
 export async function POST(request: Request){
-  const { email } = await request.json()
+  const body = await request.json().catch(() => ({}))
+  const email = String(body.email || '').trim().toLowerCase()
+  const user = String(body.user || '').trim()
+  const ip = String(body.ip || '').trim()
   if (!email) return NextResponse.json({ error: 'email required' }, { status: 400 })
   try{
     const supabase = createClient(
@@ -40,6 +44,15 @@ export async function POST(request: Request){
     process.env.SMTP_FROM = settings.smtp_from || settings.smtp_user
     try{
       await sendTranscodeWarning(email)
+      await syncCustomerTranscodeNotice(email)
+      await addAuditLog({
+        action: 'customer_transcode_warning',
+        email,
+        details: {
+          user,
+          ip,
+        },
+      })
       return NextResponse.json({ ok: true })
     } finally {
       Object.entries(originalEnv).forEach(([k,v])=>{ if (v !== undefined) (process.env as any)[k] = v as string; else delete (process.env as any)[k] })

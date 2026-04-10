@@ -61,7 +61,7 @@ export default function ChatArea({ conversation }: ChatAreaProps) {
             return (
               <div key={message.id} className={`flex ${message.sender_type === 'admin' ? 'justify-end' : 'justify-start'}`}>
                 <div
-                  className={`max-w-[80%] rounded-[24px] px-4 py-3 ${
+                  className={`max-w-[90%] rounded-[24px] px-4 py-3 sm:max-w-[80%] ${
                     message.sender_type === 'admin'
                       ? 'bg-[linear-gradient(135deg,#67e8f9,#38bdf8)] text-slate-950'
                       : 'border border-white/10 bg-white/5 text-slate-100'
@@ -91,17 +91,17 @@ export default function ChatArea({ conversation }: ChatAreaProps) {
       </div>
 
       <div className="border-t border-white/8 bg-slate-950/65 p-5">
-        <form onSubmit={handleSendMessage} className="flex flex-wrap gap-3">
+        <form onSubmit={handleSendMessage} className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
           <input
             type="text"
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
             placeholder="Reply to the customer..."
-            className="input min-w-[240px] flex-1"
+            className="input min-w-0 flex-1 sm:min-w-[240px]"
             disabled={isLoading}
             spellCheck
           />
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               className="btn-outline px-4 py-3"

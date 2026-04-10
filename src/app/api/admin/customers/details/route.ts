@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { getVisibleCustomerNotes, parseCustomerNotes } from '@/lib/customerNotes'
 import { buildReferralCode } from '@/lib/referrals'
+import { getSecurityOverview } from '@/lib/moderation'
+import { getActivePlexUsernameMap } from '@/lib/plex'
 
 export async function GET(request: Request){
   if (cookies().get('admin_session')?.value !== '1') {
@@ -35,26 +37,32 @@ export async function GET(request: Request){
 
   const notes = String((data as any).notes || '')
   const parsedNotes = parseCustomerNotes(notes)
-  let ipLogs: Record<string, string[]> = {}
+  const livePlexUsernames = await getActivePlexUsernameMap().catch(() => new Map<string, string>())
+  const livePlexUsername = livePlexUsernames.get(String(email).trim().toLowerCase()) || ''
+  let ipLogs: string[] = []
   let blockedIps: string[] = []
   try {
-    const { data: settings } = await supabase.from('admin_settings').select('ip_logs,blocked_ips').eq('id', 1).maybeSingle()
-    ipLogs = (settings?.ip_logs || {}) as Record<string, string[]>
-    blockedIps = Array.isArray(settings?.blocked_ips) ? settings?.blocked_ips : []
+    const overview = await getSecurityOverview()
+    const tracked = Array.isArray(overview.trackedCustomers)
+      ? overview.trackedCustomers.find((entry) => entry.email === String(email).trim().toLowerCase())
+      : null
+    ipLogs = Array.isArray(tracked?.ips) ? tracked.ips.map((entry) => entry.ip) : []
+    blockedIps = Array.isArray(overview.blockedIps) ? overview.blockedIps : []
   } catch {}
-  const customerIps = Array.isArray(ipLogs[email]) ? ipLogs[email] : []
   return NextResponse.json({
-    plex_username: parsedNotes.plexUsername,
+    plex_username: livePlexUsername || parsedNotes.plexUsername,
+    plex_username_source: livePlexUsername ? 'live' : parsedNotes.plexUsername ? 'saved' : null,
     full_name: (data as any).name || '',
     status: (data as any).subscription_status || 'inactive',
     subscription_type: (data as any).subscription_type || '',
     streams: (data as any).streams || 1,
     next_payment_date: (data as any).next_payment_date || null,
     notes: getVisibleCustomerNotes(notes),
+    downloads: parsedNotes.downloads,
     referral_code: buildReferralCode(String((data as any).email || email)),
     referral_credit: parsedNotes.referralCredit,
     referred_by: parsedNotes.referredBy || null,
-    ip_history: customerIps,
+    ip_history: ipLogs,
     blocked_ips: blockedIps
   })
 }

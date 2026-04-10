@@ -54,7 +54,7 @@ export async function POST(req: Request){
     
     if (!r.ok) {
       console.error(`Preview fetch failed: ${r.status} ${r.statusText} for ${url}`)
-      return NextResponse.json({ error: `Could not reach IMDb (Error ${r.status}). Please try again or submit without preview.` }, { status: 400 })
+      return NextResponse.json({ error: `Could not reach that title page (Error ${r.status}). Please try again or submit without preview.` }, { status: 400 })
     }
 
     const html = await r.text()

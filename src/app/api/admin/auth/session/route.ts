@@ -1,13 +1,27 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { cookies } from 'next/headers'
+
+function adminCookieOptions(maxAge: number) {
+  return {
+    httpOnly: true,
+    path: '/',
+    maxAge,
+    sameSite: 'lax' as const,
+    secure: process.env.NODE_ENV === 'production',
+  }
+}
 
 export async function POST(request: Request){
   try{
     const { email, mode, username, password } = await request.json().catch(()=>({}))
     if (mode === 'local'){
+      if (process.env.NODE_ENV === 'production') {
+        return NextResponse.json({ error: 'Local admin mode is disabled in production' }, { status: 403 })
+      }
       if (!username || !password) return NextResponse.json({ error: 'credentials required' }, { status: 400 })
       try{
-        const jar = (await import('next/headers')).cookies()
+        const jar = cookies()
         const raw = jar.get('admin_settings')?.value
         const settings = raw ? JSON.parse(decodeURIComponent(raw)) : null
         const envUser = process.env.NEXT_PUBLIC_ADMIN_USER || ''
@@ -19,7 +33,7 @@ export async function POST(request: Request){
         const ok = expectUser.toLowerCase() === String(username).trim().toLowerCase() && expectPass === String(password).trim()
         if (!ok) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
         const res = NextResponse.json({ ok: true, local: true })
-        res.cookies.set('admin_session', '1', { httpOnly: true, path: '/', maxAge: 60*60*24 })
+        res.cookies.set('admin_session', '1', adminCookieOptions(60 * 60 * 24))
         return res
       } catch(e:any){ return NextResponse.json({ error: e?.message || 'error' }, { status: 500 }) }
     }
@@ -27,7 +41,7 @@ export async function POST(request: Request){
   const alias = (process.env.NEXT_PUBLIC_ADMIN_ALIAS_EMAIL || 'admin@streamzrus.local').toLowerCase()
     if (email.toLowerCase() === alias && process.env.NODE_ENV !== 'production'){
       const res = NextResponse.json({ ok: true, alias: true })
-      res.cookies.set('admin_session', '1', { httpOnly: true, path: '/', maxAge: 60*60*24 })
+      res.cookies.set('admin_session', '1', adminCookieOptions(60 * 60 * 24))
       return res
     }
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
@@ -38,14 +52,12 @@ export async function POST(request: Request){
     const role = data?.[0]?.role || null
     if (role !== 'admin') return NextResponse.json({ error: 'forbidden' }, { status: 403 })
     const res = NextResponse.json({ ok: true })
-    res.cookies.set('admin_session', '1', { httpOnly: true, path: '/', maxAge: 60*60*24 })
+    res.cookies.set('admin_session', '1', adminCookieOptions(60 * 60 * 24))
     return res
   }catch(e:any){
     return NextResponse.json({ error: e?.message || 'error' }, { status: 500 })
   }
 }
-
-import { cookies } from 'next/headers'
 
 export async function GET(){
   try{
@@ -59,6 +71,6 @@ export async function GET(){
 
 export async function DELETE(){
   const res = NextResponse.json({ ok: true })
-  res.cookies.set('admin_session', '', { httpOnly: true, path: '/', maxAge: 0 })
+  res.cookies.set('admin_session', '', adminCookieOptions(0))
   return res
 }

@@ -95,7 +95,7 @@ Ideal for travelling and saving mobile data
 You can check your renewal date, payment instructions, and manage your account directly on our website:
 http://plex-crm.vercel.app
 
-Simply register or log in if you already have an account.
+Existing customers can log in with their current portal access. New members now need a private invite link or member code before portal access can be created.
 
 If you do not wish to renew, please let us know. Our slots are limited, and we currently have people waiting to join.
 
@@ -147,7 +147,7 @@ Ideal for travelling and saving mobile data
 You can manage your account directly on our website:
 http://plex-crm.vercel.app
 
-Simply register or log in if you already have an account.
+Existing customers can log in with their current portal access. New members now need a private invite link or member code before portal access can be created.
 
 If you do not wish to renew, please let us know so we can remove your account to free up space.
 

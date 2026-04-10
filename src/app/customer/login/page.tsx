@@ -1,11 +1,47 @@
 "use client"
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { getSupabase } from '@/lib/supabaseClient'
+import { parseCustomerNotes } from '@/lib/customerNotes'
+import { CLOSED_COMMUNITY_BAN_HREF, getBannedHref, isPlanEndTerminationDue, shouldAutoBlockBanAttempt } from '@/lib/customerBan'
+import { clearLocalAdminArtifacts } from '@/lib/localAdmin'
+
+const inviteOnlyMessage =
+  'This portal is now a closed community. Existing customers can sign in with the email already on their account. New members need a valid invite link or code from a current customer.'
 
 function isBanned(notes: unknown) {
-  return /Access:\s*Banned/i.test(String(notes || ''))
+  return parseCustomerNotes(notes).banned
+}
+
+async function trackBlockedAttempt(email: string, notes: unknown) {
+  try {
+    await fetch('/api/security/ip-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        source: 'customer-login-banned',
+        block: shouldAutoBlockBanAttempt(notes),
+        reason: 'Banned customer login attempt',
+      }),
+    })
+  } catch {}
+}
+
+async function trackInactiveAttempt(email: string) {
+  try {
+    await fetch('/api/security/ip-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        source: 'customer-login-inactive',
+        block: false,
+        reason: 'Inactive customer login attempt',
+      }),
+    })
+  } catch {}
 }
 
 export default function CustomerLoginPage() {
@@ -15,6 +51,12 @@ export default function CustomerLoginPage() {
   const [loading, setLoading] = useState(false)
   const searchParams = useSearchParams()
   const success = searchParams?.get('registered')
+  const inviteOnlyReason = searchParams?.get('reason') === 'invite-only'
+
+  useEffect(() => {
+    clearLocalAdminArtifacts()
+    fetch('/api/admin/auth/session', { method: 'DELETE' }).catch(() => null)
+  }, [])
 
   async function login() {
     setError('')
@@ -43,6 +85,9 @@ export default function CustomerLoginPage() {
       return
     }
 
+    clearLocalAdminArtifacts()
+    await fetch('/api/admin/auth/session', { method: 'DELETE' }).catch(() => null)
+
     try {
       const fullName = String(user.user_metadata?.fullName || user.user_metadata?.full_name || '').trim()
       const plexUsername = String(user.user_metadata?.plexUsername || user.user_metadata?.plex_username || '').trim()
@@ -59,23 +104,32 @@ export default function CustomerLoginPage() {
 
       const { data: existingCustomer } = await s
         .from('customers')
-        .select('id,name,notes,subscription_status')
+        .select('id,name,notes,start_date,next_payment_date,subscription_status')
         .eq('email', user.email)
         .maybeSingle()
 
       if (!existingCustomer) {
-        await s.from('customers').insert({
-          name: fullName || user.email,
-          email: user.email,
-          subscription_type: 'yearly',
-          streams: 1,
-          subscription_status: 'inactive',
-          notes: plexUsername ? `Plex: ${plexUsername}` : '',
-        })
+        await s.auth.signOut().catch(() => {})
+        setError(inviteOnlyMessage)
+        setLoading(false)
+        return
       } else if (isBanned((existingCustomer as any).notes)) {
+        await trackBlockedAttempt(user.email, (existingCustomer as any).notes)
         await s.auth.signOut().catch(() => {})
         if (typeof window !== 'undefined') {
-          window.location.href = '/customer/banned'
+          window.location.href = getBannedHref((existingCustomer as any).notes)
+        }
+        return
+      } else if (isPlanEndTerminationDue({
+        notes: (existingCustomer as any).notes,
+        startDate: (existingCustomer as any).start_date,
+        nextPaymentDate: (existingCustomer as any).next_payment_date,
+        subscriptionStatus: (existingCustomer as any).subscription_status,
+      })) {
+        await trackInactiveAttempt(user.email)
+        await s.auth.signOut().catch(() => {})
+        if (typeof window !== 'undefined') {
+          window.location.href = CLOSED_COMMUNITY_BAN_HREF
         }
         return
       } else if (fullName || plexUsername) {
@@ -92,6 +146,14 @@ export default function CustomerLoginPage() {
       }
     } catch {}
 
+    try {
+      await fetch('/api/security/ip-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: user.email, source: 'customer-login' }),
+      })
+    } catch {}
+
     if (typeof window !== 'undefined') {
       window.location.href = '/customer'
     }
@@ -104,11 +166,11 @@ export default function CustomerLoginPage() {
   }
 
   return (
-    <main className="page-section flex min-h-screen items-center justify-center py-10">
-      <div className="glass w-full max-w-md rounded-[32px] p-6">
+    <main className="page-section customer-auth-shell flex min-h-screen items-center justify-center py-10">
+      <div className="glass customer-auth-card w-full max-w-md rounded-[32px] p-6">
         <div className="text-center mb-6">
-          <h1 className="text-2xl font-bold mb-2 text-white">Customer Portal</h1>
-          <p className="text-slate-400">Sign in with the same email your customer account uses in the system.</p>
+          <h1 className="text-2xl font-bold mb-2 text-white">Member Login</h1>
+          <p className="text-slate-400">Existing customers sign in here. New access now happens through private member invites only.</p>
         </div>
 
         <div className="space-y-4">
@@ -116,6 +178,7 @@ export default function CustomerLoginPage() {
           <input className="input w-full" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyPress={handleKeyPress} />
 
           {success ? <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-sm text-emerald-300">Account created. You can sign in now.</div> : null}
+          {inviteOnlyReason ? <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-100">{inviteOnlyMessage}</div> : null}
           {error ? <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 p-3 text-sm text-rose-300">{error}</div> : null}
 
           <button className="btn w-full" onClick={login} disabled={!email || !password || loading}>
@@ -124,15 +187,15 @@ export default function CustomerLoginPage() {
         </div>
 
         <div className="mt-4 rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-4">
-          <div className="text-cyan-200 font-semibold mb-1">Important</div>
-          <p className="text-sm text-cyan-100/80">If your details already exist in the CRM, register with that exact customer email once and the portal will attach to your existing account data.</p>
+          <div className="text-cyan-200 font-semibold mb-1">Closed Community</div>
+          <p className="text-sm text-cyan-100/80">{inviteOnlyMessage}</p>
         </div>
 
         <div className="mt-6 text-center text-sm text-slate-400 space-y-2">
           <div>
-            Don&rsquo;t have an account?{' '}
+            Need portal access from an invite?{' '}
             <Link className="text-brand hover:text-cyan-300 transition-colors" href="/customer/register" prefetch={false}>
-              Create Account
+              Use Invite Link
             </Link>
           </div>
           <div>

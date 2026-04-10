@@ -1,7 +1,15 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
-import { renderTemplate, sendCustomEmail } from '@/lib/email'
+import {
+  EmailAttachment,
+  getSmtpConfigFromEnv,
+  getSmtpConfigFromSettings,
+  isLikelySmtpAuthError,
+  renderTemplate,
+  sendCustomEmail,
+  smtpConfigsMatch,
+} from '@/lib/email'
 
 function svc(){
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
@@ -23,11 +31,49 @@ function getFirstName(fullName?: string, email?: string, plexUsername?: string) 
 export async function POST(request: Request){
   try{
     if (cookies().get('admin_session')?.value !== '1') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    const body = await request.json().catch(()=>({}))
-    const subject = String(body?.subject || '').trim()
-    const message = String(body?.body || '').trim()
-    const mode = String(body?.mode || 'list')
-    const list = Array.isArray(body?.recipients) ? body.recipients.filter((x: any)=> typeof x === 'string') : []
+    const contentType = request.headers.get('content-type') || ''
+    let subject = ''
+    let message = ''
+    let mode = 'list'
+    let list: string[] = []
+    let attachments: EmailAttachment[] = []
+
+    if (contentType.includes('multipart/form-data')) {
+      const form = await request.formData()
+      subject = String(form.get('subject') || '').trim()
+      message = String(form.get('body') || '').trim()
+      mode = String(form.get('mode') || 'list')
+      list = form.getAll('recipients').map((entry) => String(entry || '').trim()).filter(Boolean)
+
+      const files = form.getAll('attachments')
+      const MAX_ATTACHMENTS = 3
+      const MAX_SIZE = 4 * 1024 * 1024
+      if (files.length > MAX_ATTACHMENTS) {
+        return NextResponse.json({ error: `Max ${MAX_ATTACHMENTS} attachments allowed.` }, { status: 400 })
+      }
+
+      for (const [index, file] of files.entries()) {
+        if (!(file instanceof File)) continue
+        if (!file.type.startsWith('image/')) {
+          return NextResponse.json({ error: 'Only image attachments are supported.' }, { status: 400 })
+        }
+        if (file.size > MAX_SIZE) {
+          return NextResponse.json({ error: 'Image attachment is too large (max 4MB).' }, { status: 400 })
+        }
+        const buffer = Buffer.from(await file.arrayBuffer())
+        attachments.push({
+          filename: file.name || `attachment-${index + 1}.png`,
+          content: buffer,
+          contentType: file.type || 'image/png',
+        })
+      }
+    } else {
+      const body = await request.json().catch(()=>({}))
+      subject = String(body?.subject || '').trim()
+      message = String(body?.body || '').trim()
+      mode = String(body?.mode || 'list')
+      list = Array.isArray(body?.recipients) ? body.recipients.filter((x: any)=> typeof x === 'string') : []
+    }
     if (!subject || !message) return NextResponse.json({ error: 'subject and body required' }, { status: 400 })
 
     const supabase = svc()
@@ -72,68 +118,99 @@ export async function POST(request: Request){
       const raw = jar.get('admin_settings')?.value
       settings = raw ? JSON.parse(decodeURIComponent(raw)) : null
     }
-    if (!settings || !settings.smtp_host || !settings.smtp_user || !settings.smtp_pass){
+    const dbConfig = getSmtpConfigFromSettings(settings)
+    const envConfig = getSmtpConfigFromEnv()
+    const fallbackConfig = envConfig && (!dbConfig || !smtpConfigsMatch(dbConfig, envConfig)) ? envConfig : null
+    if (!dbConfig && !envConfig){
       return NextResponse.json({ error: 'SMTP not configured' }, { status: 400 })
     }
+    const subjectFor = (recipient: string) => {
+      const key = String(recipient || '').trim().toLowerCase()
+      const c = customersByEmail.get(key)
+      const fullName = c?.full_name ?? c?.name ?? ''
+      const notes = String(c?.notes || '')
+      const plexUsername = notes.match(/Plex:\s*(.+)/i)?.[1]?.trim() || ''
+      const firstName = getFirstName(fullName, recipient, plexUsername)
+      const vars: Record<string, unknown> = {
+        first_name: firstName,
+        full_name: String(fullName || '').trim(),
+        email: recipient,
+        plex_username: plexUsername,
+        username: plexUsername || firstName,
+        plan: (c?.plan ?? c?.subscription_type ?? ''),
+        streams: (c?.streams ?? ''),
+        next_due_date: (c?.next_due_date ?? c?.next_payment_date ?? '')
+      }
+      return renderTemplate(subject, vars)
+    }
+    const bodyFor = (recipient: string) => {
+      const key = String(recipient || '').trim().toLowerCase()
+      const c = customersByEmail.get(key)
+      const fullName = c?.full_name ?? c?.name ?? ''
+      const notes = String(c?.notes || '')
+      const plexUsername = notes.match(/Plex:\s*(.+)/i)?.[1]?.trim() || ''
+      const firstName = getFirstName(fullName, recipient, plexUsername)
+      const vars: Record<string, unknown> = {
+        first_name: firstName,
+        full_name: String(fullName || '').trim(),
+        email: recipient,
+        plex_username: plexUsername,
+        username: plexUsername || firstName,
+        plan: (c?.plan ?? c?.subscription_type ?? ''),
+        streams: (c?.streams ?? ''),
+        next_due_date: (c?.next_due_date ?? c?.next_payment_date ?? '')
+      }
+      return renderTemplate(message, vars)
+    }
 
-    const originalEnv = {
-      SMTP_HOST: process.env.SMTP_HOST,
-      SMTP_PORT: process.env.SMTP_PORT,
-      SMTP_USER: process.env.SMTP_USER,
-      SMTP_PASS: process.env.SMTP_PASS,
-      SMTP_FROM: process.env.SMTP_FROM
+    let usedFallback = false
+    let result = await sendCustomEmail(emails, subjectFor, bodyFor, attachments, dbConfig || envConfig || undefined)
+    const firstError = result.failures[0]?.error || ''
+
+    if (result.sent === 0 && dbConfig && fallbackConfig && isLikelySmtpAuthError(firstError)) {
+      const fallbackResult = await sendCustomEmail(emails, subjectFor, bodyFor, attachments, fallbackConfig)
+      if (fallbackResult.sent > 0) {
+        result = fallbackResult
+        usedFallback = true
+        try {
+          await supabase?.from('admin_settings').update({
+            smtp_host: fallbackConfig.host,
+            smtp_port: String(fallbackConfig.port || 465),
+            smtp_user: fallbackConfig.user,
+            smtp_pass: fallbackConfig.pass,
+            smtp_from: fallbackConfig.from || fallbackConfig.user,
+          }).eq('id', 1)
+        } catch {}
+      }
+    } else if (!dbConfig && envConfig) {
+      usedFallback = true
+      try {
+        await supabase?.from('admin_settings').update({
+          smtp_host: envConfig.host,
+          smtp_port: String(envConfig.port || 465),
+          smtp_user: envConfig.user,
+          smtp_pass: envConfig.pass,
+          smtp_from: envConfig.from || envConfig.user,
+        }).eq('id', 1)
+      } catch {}
     }
-    process.env.SMTP_HOST = settings.smtp_host
-    process.env.SMTP_PORT = settings.smtp_port || '587'
-    process.env.SMTP_USER = settings.smtp_user
-    process.env.SMTP_PASS = String(settings.smtp_pass || '').replace(/\s+/g, '')
-    process.env.SMTP_FROM = settings.smtp_from || settings.smtp_user
-    try{
-      await sendCustomEmail(
-        emails,
-        (recipient) => {
-          const key = String(recipient || '').trim().toLowerCase()
-          const c = customersByEmail.get(key)
-          const fullName = c?.full_name ?? c?.name ?? ''
-          const notes = String(c?.notes || '')
-          const plexUsername = notes.match(/Plex:\s*(.+)/i)?.[1]?.trim() || ''
-          const firstName = getFirstName(fullName, recipient, plexUsername)
-          const vars: Record<string, unknown> = {
-            first_name: firstName,
-            full_name: String(fullName || '').trim(),
-            email: recipient,
-            plex_username: plexUsername,
-            username: plexUsername || firstName,
-            plan: (c?.plan ?? c?.subscription_type ?? ''),
-            streams: (c?.streams ?? ''),
-            next_due_date: (c?.next_due_date ?? c?.next_payment_date ?? '')
-          }
-          return renderTemplate(subject, vars)
-        },
-        (recipient) => {
-          const key = String(recipient || '').trim().toLowerCase()
-          const c = customersByEmail.get(key)
-          const fullName = c?.full_name ?? c?.name ?? ''
-          const notes = String(c?.notes || '')
-          const plexUsername = notes.match(/Plex:\s*(.+)/i)?.[1]?.trim() || ''
-          const firstName = getFirstName(fullName, recipient, plexUsername)
-          const vars: Record<string, unknown> = {
-            first_name: firstName,
-            full_name: String(fullName || '').trim(),
-            email: recipient,
-            plex_username: plexUsername,
-            username: plexUsername || firstName,
-            plan: (c?.plan ?? c?.subscription_type ?? ''),
-            streams: (c?.streams ?? ''),
-            next_due_date: (c?.next_due_date ?? c?.next_payment_date ?? '')
-          }
-          return renderTemplate(message, vars)
-        }
-      )
-      return NextResponse.json({ ok: true, count: emails.length })
-    } finally {
-      Object.entries(originalEnv).forEach(([k,v])=>{ if (v !== undefined) (process.env as any)[k] = v as string; else delete (process.env as any)[k] })
+
+    if (result.sent === 0) {
+      return NextResponse.json({ error: firstError || 'Mass email send failed.', count: 0, failed: result.failed }, { status: 500 })
     }
+    const warnings = [
+      result.failed ? `${result.failed} recipient${result.failed === 1 ? '' : 's'} failed.` : '',
+      usedFallback ? 'SMTP settings were refreshed from secure server configuration.' : '',
+    ].filter(Boolean).join(' ')
+    return NextResponse.json(
+      {
+        ok: true,
+        count: result.sent,
+        failed: result.failed,
+        warning: warnings,
+      },
+      { status: result.failed ? 207 : 200 }
+    )
   } catch(e: any){
     return NextResponse.json({ error: e?.message || 'Failed to send' }, { status: 500 })
   }

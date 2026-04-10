@@ -93,7 +93,7 @@ export default function LoginPage(){
         <div className="mt-3 text-sm text-slate-400">
           <div className="flex justify-between items-center">
             <Link className="text-brand hover:text-cyan-300 transition-colors" href="/forgot-password" prefetch={false}>Forgot password?</Link>
-            <Link className="text-brand hover:text-cyan-300 transition-colors" href="/register" prefetch={false}>Register</Link>
+            <Link className="text-brand hover:text-cyan-300 transition-colors" href="/customer/register" prefetch={false}>Use Invite</Link>
           </div>
           <div className="text-center mt-2">
             <Link className="text-slate-400 hover:text-cyan-300 transition-colors" href="/customer/login" prefetch={false}>Customer Login</Link>

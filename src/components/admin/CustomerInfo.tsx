@@ -1,6 +1,6 @@
 'use client'
 
-import { Calendar, Globe, Info, ShieldAlert, User } from 'lucide-react'
+import { Ban, Calendar, Globe, Info, ShieldAlert, User } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { format } from 'date-fns'
 import { Conversation, useChatStore } from '@/stores/chatStore'
@@ -15,6 +15,7 @@ type DetailState = {
   status?: string
   subscription_type?: string
   streams?: number
+  downloads?: boolean
   next_payment_date?: string | null
   notes?: string
   ip_history?: string[]
@@ -27,6 +28,7 @@ export default function CustomerInfo({ conversation }: CustomerInfoProps) {
   const [sendMsg, setSendMsg] = useState('')
   const [details, setDetails] = useState<DetailState | null>(null)
   const [blocking, setBlocking] = useState(false)
+  const [banningTimeWaster, setBanningTimeWaster] = useState(false)
 
   useEffect(() => {
     const email = (conversation as any).metadata?.email
@@ -102,6 +104,52 @@ export default function CustomerInfo({ conversation }: CustomerInfoProps) {
     }
   }
 
+  const banTimeWaster = async () => {
+    const email = String((conversation as any).metadata?.email || '').trim().toLowerCase()
+    if (!email || !email.includes('@')) {
+      setSendMsg('No email found for this enquiry')
+      return
+    }
+    if (!confirm(`Ban ${email} from the website and customer portal as a time waster?`)) return
+
+    setBanningTimeWaster(true)
+    setSendMsg('')
+    try {
+      const res = await fetch('/api/admin/moderation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'time_waster_ban',
+          customerEmail: email,
+          customerName: (conversation as any).metadata?.full_name || (conversation as any).metadata?.name || '',
+          ip: currentIp,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSendMsg(data?.error || 'Failed to ban time waster')
+        return
+      }
+
+      setDetails((current) => ({
+        ...(current || {}),
+        status: 'inactive',
+      }))
+      await updateConversationMetadata(conversation.id, {
+        time_waster_banned: true,
+        moderation_status: 'time-waster',
+        blocked_email: email,
+      }).catch(() => null)
+      await updateConversationStatus(conversation.id, 'closed').catch(() => null)
+      setSendMsg('Time waster banned from the site and portal')
+    } catch (e: any) {
+      setSendMsg(e?.message || 'Failed to ban time waster')
+    } finally {
+      setBanningTimeWaster(false)
+      setTimeout(() => setSendMsg(''), 5000)
+    }
+  }
+
   return (
     <div className="space-y-6 p-5">
       <div>
@@ -156,6 +204,9 @@ export default function CustomerInfo({ conversation }: CustomerInfoProps) {
           <div className="rounded-2xl border border-white/8 bg-white/5 px-3 py-2 text-sm text-slate-300">
             Streams: <span className="text-slate-100">{details?.streams ?? '-'}</span>
           </div>
+          <div className="rounded-2xl border border-white/8 bg-white/5 px-3 py-2 text-sm text-slate-300">
+            Downloads: <span className="text-slate-100">{details?.downloads ? 'Enabled' : 'Off'}</span>
+          </div>
           {details?.next_payment_date ? (
             <div className="rounded-2xl border border-white/8 bg-white/5 px-3 py-2 text-sm text-slate-300">
               Next payment: <span className="text-slate-100">{details.next_payment_date}</span>
@@ -186,6 +237,16 @@ export default function CustomerInfo({ conversation }: CustomerInfoProps) {
           <button onClick={transferChat} className="btn-outline w-full">Transfer Chat</button>
           <button onClick={resolve} className="btn-outline w-full">Mark Waiting</button>
           <button onClick={close} className="btn-outline w-full">Close Conversation</button>
+          <button
+            onClick={banTimeWaster}
+            disabled={banningTimeWaster}
+            className="w-full rounded-2xl border border-fuchsia-400/30 bg-fuchsia-500/12 px-4 py-3 text-sm font-semibold text-fuchsia-100 disabled:opacity-50"
+          >
+            <span className="inline-flex items-center gap-2">
+              <Ban size={15} />
+              {banningTimeWaster ? 'Banning Time Waster...' : 'Ban Time Waster'}
+            </span>
+          </button>
           <button onClick={hardBanIp} disabled={!currentIp || blocking} className="w-full rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm font-semibold text-rose-200 disabled:opacity-50">
             <span className="inline-flex items-center gap-2">
               <ShieldAlert size={15} />

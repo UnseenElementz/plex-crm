@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createClient } from '@supabase/supabase-js'
+import { syncCustomerDownloads } from '@/lib/moderation'
 
 function svc(){
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
@@ -30,6 +31,7 @@ export async function POST(request: Request){
     const body = await request.json().catch(()=>({}))
     const machineIdentifier = String(body?.server_machine_id || '').trim()
     const shareId = String(body?.share_id || '').trim()
+    const email = String(body?.email || '').trim().toLowerCase()
     if (!machineIdentifier) return NextResponse.json({ error: 'server_machine_id required' }, { status: 400 })
     if (!shareId) return NextResponse.json({ error: 'share_id required' }, { status: 400 })
 
@@ -43,6 +45,9 @@ export async function POST(request: Request){
     const txt = await res.text().catch(()=> '')
     const ok = res.status >= 200 && res.status < 300
     if (!ok) return NextResponse.json({ error: `Remove failed: ${res.status}`, response: txt }, { status: 400 })
+    if (email) {
+      await syncCustomerDownloads(email, false)
+    }
     try{
       await supabase.from('plex_audit_logs').insert({
         id: crypto.randomUUID(),

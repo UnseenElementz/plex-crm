@@ -1,13 +1,65 @@
 "use client"
-
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { getSupabase } from '@/lib/supabaseClient'
 import { mergeCustomerNotes, parseCustomerNotes } from '@/lib/customerNotes'
+import { getSupabase } from '@/lib/supabaseClient'
+import { SERVER_FULL_BAN_HREF, getBannedHref, shouldAutoBlockBanAttempt } from '@/lib/customerBan'
+
+type InviteStatus =
+  | {
+      ok: true
+      mode: 'existing-customer' | 'invite-only' | 'community-access'
+      customerEmail: string | null
+      referralCode: string
+      referrerEmail: string | null
+      referrerName: string | null
+      message: string
+      grantsDiscount: boolean
+      communityCode: string | null
+      lockedEmail: string | null
+    }
+  | {
+      ok: false
+      reason: string
+      message: string
+    }
+
+const closedCommunityMessage =
+  'This is now a closed community. Existing customers can attach portal access with the email already on their account. New members need either a referral invite from a current customer or a one-time private access code from admin.'
 
 function isBanned(notes: unknown) {
   return parseCustomerNotes(notes).banned
+}
+
+async function trackBlockedAttempt(email: string, notes: unknown) {
+  try {
+    await fetch('/api/security/ip-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        source: 'customer-register-banned',
+        block: shouldAutoBlockBanAttempt(notes),
+        reason: 'Banned customer registration attempt',
+      }),
+    })
+  } catch {}
+}
+
+async function fetchInviteStatus(input: { email?: string; referralCode?: string }) {
+  const response = await fetch('/api/customer/invite-status', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: String(input.email || '').trim().toLowerCase(),
+      referralCode: String(input.referralCode || '').trim().toUpperCase(),
+    }),
+  })
+
+  const payload = await response.json().catch(() => ({ message: 'Invite access could not be checked.' }))
+  if (!response.ok) return payload as InviteStatus
+  return payload as InviteStatus
 }
 
 export default function CustomerRegisterPage() {
@@ -18,6 +70,8 @@ export default function CustomerRegisterPage() {
   const [referralCode, setReferralCode] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [inviteHint, setInviteHint] = useState('')
+  const [inviteReady, setInviteReady] = useState<InviteStatus | null>(null)
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -25,6 +79,35 @@ export default function CustomerRegisterPage() {
     const ref = String(searchParams?.get('ref') || '').trim().toUpperCase()
     if (ref) setReferralCode(ref)
   }, [searchParams])
+
+  useEffect(() => {
+    const code = referralCode.trim().toUpperCase()
+    if (code.length < 4) {
+      setInviteHint('')
+      setInviteReady(null)
+      return
+    }
+
+    let cancelled = false
+    ;(async () => {
+      const result = await fetchInviteStatus({ referralCode: code })
+      if (cancelled) return
+      setInviteReady(result)
+      if (result.ok && result.mode === 'invite-only') {
+        setInviteHint(result.referrerName ? `Private invite ready from ${result.referrerName}.` : 'Private invite ready.')
+        return
+      }
+      if (result.ok && result.mode === 'community-access') {
+        setInviteHint(result.message)
+        return
+      }
+      setInviteHint(result.message || '')
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [referralCode])
 
   async function register() {
     setError('')
@@ -34,6 +117,7 @@ export default function CustomerRegisterPage() {
     const normalizedEmail = email.trim().toLowerCase()
     const trimmedName = fullName.trim()
     const trimmedPlex = plexUsername.trim()
+    const normalizedCode = referralCode.trim().toUpperCase()
 
     if (!s) {
       setError('Customer registration requires Supabase to be configured correctly.')
@@ -42,6 +126,27 @@ export default function CustomerRegisterPage() {
     }
 
     try {
+      const inviteStatus = await fetchInviteStatus({
+        email: normalizedEmail,
+        referralCode: normalizedCode,
+      })
+
+      setInviteReady(inviteStatus)
+
+      if (!inviteStatus.ok) {
+        if (inviteStatus.reason === 'capacity_reached') {
+          router.push(SERVER_FULL_BAN_HREF)
+          setLoading(false)
+          return
+        }
+        setError(inviteStatus.message || closedCommunityMessage)
+        setLoading(false)
+        return
+      }
+
+      const referralToStore = inviteStatus.grantsDiscount ? inviteStatus.referralCode || '' : ''
+      const claimTimestamp = referralToStore ? new Date().toISOString() : null
+
       const { data, error } = await s.auth.signUp({
         email: normalizedEmail,
         password,
@@ -85,13 +190,25 @@ export default function CustomerRegisterPage() {
 
       if (existingCustomer) {
         if (isBanned((existingCustomer as any).notes)) {
+          await trackBlockedAttempt(normalizedEmail, (existingCustomer as any).notes)
           await s.auth.signOut().catch(() => {})
-          router.push('/customer/banned')
+          router.push(getBannedHref((existingCustomer as any).notes))
           return
         }
+        const parsedNotes = parseCustomerNotes((existingCustomer as any).notes || '')
         const nextNotes = mergeCustomerNotes({
           existing: (existingCustomer as any).notes || '',
           plexUsername: trimmedPlex,
+          joinAccessMode:
+            inviteStatus.mode !== 'existing-customer'
+              ? inviteStatus.mode
+              : parsedNotes.joinAccessMode,
+          joinAccessGrantedAt:
+            inviteStatus.mode !== 'existing-customer'
+              ? parsedNotes.joinAccessGrantedAt || new Date().toISOString()
+              : parsedNotes.joinAccessGrantedAt,
+          referredBy: parsedNotes.referredBy || referralToStore,
+          referralClaimedAt: parsedNotes.referralClaimedAt || claimTimestamp,
         })
         await s
           .from('customers')
@@ -112,22 +229,30 @@ export default function CustomerRegisterPage() {
           notes: mergeCustomerNotes({
             existing: '',
             plexUsername: trimmedPlex,
+            joinAccessMode: inviteStatus.mode !== 'existing-customer' ? inviteStatus.mode : '',
+            joinAccessGrantedAt: inviteStatus.mode !== 'existing-customer' ? new Date().toISOString() : null,
+            referredBy: referralToStore,
+            referralClaimedAt: claimTimestamp,
           }),
         })
       }
 
-      if (referralCode.trim()) {
-        const session = await s.auth.getSession()
-        const token = session.data.session?.access_token
-        await fetch('/api/referrals/me', {
+      if (inviteStatus.communityCode) {
+        await fetch('/api/customer/community-access-code/consume', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({ referralCode: referralCode.trim().toUpperCase() }),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code: inviteStatus.communityCode,
+            email: normalizedEmail,
+          }),
         }).catch(() => null)
       }
+
+      await fetch('/api/security/ip-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: normalizedEmail, source: 'customer-register' }),
+      }).catch(() => null)
 
       router.push('/customer/login?registered=1')
     } catch (e: any) {
@@ -145,29 +270,46 @@ export default function CustomerRegisterPage() {
 
   return (
     <main className="page-section flex min-h-screen items-center justify-center py-10">
-      <div className="glass w-full max-w-md rounded-[32px] p-6">
+      <div className="glass customer-auth-card w-full max-w-xl rounded-[32px] p-6">
         <div className="text-center mb-6">
-          <h1 className="text-2xl font-bold mb-2 text-white">Customer Registration</h1>
-          <p className="text-slate-400">Use the same email that exists in your customer record so your portal details stay synced.</p>
+          <div className="eyebrow mx-auto">Invite Only</div>
+          <h1 className="mt-4 text-2xl font-bold mb-2 text-white">Member Access Registration</h1>
+          <p className="text-slate-400">{closedCommunityMessage}</p>
         </div>
+
+        <div className="mb-5 rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-4 text-sm text-cyan-100/85">
+          Existing customers can activate portal access with the same email already stored on their account. Brand-new members need a valid referral invite or a one-time private access code before signup will go through. Private access codes unlock signup only and do not add referral credit.
+        </div>
+
+        {inviteHint ? (
+          <div className={`mb-4 rounded-2xl border p-3 text-sm ${inviteReady?.ok ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-100' : 'border-amber-500/20 bg-amber-500/10 text-amber-100'}`}>
+            {inviteHint}
+          </div>
+        ) : null}
 
         <div className="space-y-4">
           <input className="input w-full" placeholder="Full Name" value={fullName} onChange={(e) => setFullName(e.target.value)} onKeyPress={handleKeyPress} />
           <input className="input w-full" placeholder="Plex Username" value={plexUsername} onChange={(e) => setPlexUsername(e.target.value)} onKeyPress={handleKeyPress} />
-          <input className="input w-full" placeholder="Referral Code (Optional)" value={referralCode} onChange={(e) => setReferralCode(e.target.value.toUpperCase())} onKeyPress={handleKeyPress} />
+          <input
+            className="input w-full"
+            placeholder="Invite Code"
+            value={referralCode}
+            onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+            onKeyPress={handleKeyPress}
+          />
           <input className="input w-full" placeholder="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} onKeyPress={handleKeyPress} />
           <input className="input w-full" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyPress={handleKeyPress} />
 
           {error ? <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 p-3 text-sm text-rose-300">{error}</div> : null}
 
           <button className="btn w-full" onClick={register} disabled={!email || !password || !fullName || loading}>
-            {loading ? 'Creating Account...' : 'Create Account'}
+            {loading ? 'Creating Access...' : 'Create Portal Access'}
           </button>
         </div>
 
         <div className="mt-6 text-center text-sm text-slate-400 space-y-2">
           <div>
-            Already have an account?{' '}
+            Already have access?{' '}
             <Link className="text-brand hover:text-cyan-300 transition-colors" href="/customer/login" prefetch={false}>
               Sign In
             </Link>

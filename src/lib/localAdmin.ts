@@ -1,9 +1,11 @@
 export function isLocalAdmin(){
   if (typeof window === 'undefined') return false
+  if (process.env.NODE_ENV === 'production') return false
   return !!localStorage.getItem('localAdmin')
 }
 
 export function loginLocalAdmin(user: string, pass: string){
+  if (process.env.NODE_ENV === 'production') return false
   const inUser = (user || '').trim()
   const inPass = (pass || '').trim()
   const envUser = process.env.NEXT_PUBLIC_ADMIN_USER || ''
@@ -80,6 +82,23 @@ export function loginLocalAdmin(user: string, pass: string){
   return false
 }
 
+export function clearLocalAdminArtifacts(){
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.removeItem('localAdmin')
+    localStorage.removeItem('localAdminUser')
+    localStorage.removeItem('localAdminPass')
+    localStorage.removeItem('admin_settings')
+  } catch {}
+
+  try {
+    document.cookie = 'admin_settings=; path=/; max-age=0'
+    document.cookie = 'localAdmin=; path=/; max-age=0'
+    document.cookie = 'localAdminUser=; path=/; max-age=0'
+    document.cookie = 'localAdminPass=; path=/; max-age=0'
+  } catch {}
+}
+
 export function logoutLocalAdmin(){
-  if (typeof window !== 'undefined') localStorage.removeItem('localAdmin')
+  clearLocalAdminArtifacts()
 }
