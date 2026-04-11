@@ -650,29 +650,29 @@ export default function GlobalPulse() {
           <div className="glass-strong mt-3 max-h-[min(78vh,42rem)] w-[22rem] max-w-[calc(100vw-1.5rem)] overflow-y-auto overflow-x-hidden rounded-[28px] border border-cyan-400/16 p-4 shadow-[0_28px_90px_rgba(2,132,199,0.24)] sm:w-[25rem]">
             {adminSummary ? (
               <div className="space-y-4">
-                <div className="grid grid-cols-6 gap-2">
-                  <div className="rounded-[20px] border border-white/8 bg-white/[0.04] p-3">
-                    <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Online</div>
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+                  <div className="rounded-[20px] border border-white/8 bg-white/[0.04] p-3 text-center">
+                    <div className="whitespace-nowrap text-[10px] uppercase tracking-[0.16em] text-slate-500">Online</div>
                     <div className="mt-2 text-lg font-semibold text-white">{adminSummary.counts.onlineNow}</div>
                   </div>
-                  <div className="rounded-[20px] border border-white/8 bg-white/[0.04] p-3">
-                    <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Buys</div>
+                  <div className="rounded-[20px] border border-white/8 bg-white/[0.04] p-3 text-center">
+                    <div className="whitespace-nowrap text-[10px] uppercase tracking-[0.16em] text-slate-500">Buys</div>
                     <div className="mt-2 text-lg font-semibold text-white">{adminSummary.counts.recentPurchases}</div>
                   </div>
-                  <div className="rounded-[20px] border border-white/8 bg-white/[0.04] p-3">
-                    <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Checkout</div>
+                  <div className="rounded-[20px] border border-white/8 bg-white/[0.04] p-3 text-center">
+                    <div className="whitespace-nowrap text-[10px] uppercase tracking-[0.12em] text-slate-500">Checkout</div>
                     <div className="mt-2 text-lg font-semibold text-white">{adminSummary.counts.checkoutStarts}</div>
                   </div>
-                  <div className="rounded-[20px] border border-white/8 bg-white/[0.04] p-3">
-                    <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Mail</div>
+                  <div className="rounded-[20px] border border-white/8 bg-white/[0.04] p-3 text-center">
+                    <div className="whitespace-nowrap text-[10px] uppercase tracking-[0.16em] text-slate-500">Mail</div>
                     <div className="mt-2 text-lg font-semibold text-white">{adminSummary.counts.unreadMail}</div>
                   </div>
-                  <div className="rounded-[20px] border border-white/8 bg-white/[0.04] p-3">
-                    <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Chat</div>
+                  <div className="rounded-[20px] border border-white/8 bg-white/[0.04] p-3 text-center">
+                    <div className="whitespace-nowrap text-[10px] uppercase tracking-[0.16em] text-slate-500">Chat</div>
                     <div className="mt-2 text-lg font-semibold text-white">{adminSummary.counts.waitingChats}</div>
                   </div>
-                  <div className="rounded-[20px] border border-white/8 bg-white/[0.04] p-3">
-                    <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Plex</div>
+                  <div className="rounded-[20px] border border-white/8 bg-white/[0.04] p-3 text-center">
+                    <div className="whitespace-nowrap text-[10px] uppercase tracking-[0.16em] text-slate-500">Plex</div>
                     <div className="mt-2 text-lg font-semibold text-white">{adminSummary.counts.flaggedStreams + adminSummary.counts.transcoding}</div>
                   </div>
                 </div>

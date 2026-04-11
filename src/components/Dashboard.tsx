@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { format } from 'date-fns'
 import { Ban } from 'lucide-react'
 import CustomerForm from '@/components/CustomerForm'
-import { calculatePrice, getStatus } from '@/lib/pricing'
+import { calculatePrice } from '@/lib/pricing'
 
 type Plan = 'monthly' | 'yearly'
 type SortKey = 'due-asc' | 'due-desc' | 'price-desc' | 'price-asc' | 'streams-desc' | 'streams-asc' | 'name-asc' | 'status'
@@ -41,6 +41,32 @@ const demo: Customer[] = [
   { id: '3', fullName: 'Carol', email: 'carol@example.com', plan: 'monthly', streams: 3, startDate: new Date().toISOString(), nextDueDate: new Date(new Date().setDate(new Date().getDate() - 3)).toISOString() },
 ]
 
+const DASHBOARD_DUE_SOON_WINDOW_MONTHS = 2
+
+function startOfLocalDay(date: Date) {
+  const copy = new Date(date)
+  copy.setHours(0, 0, 0, 0)
+  return copy
+}
+
+function getDashboardRenewalState(customer: Customer) {
+  const dueDateRaw = getCustomerDueDate(customer)
+  const customerStatus = String(customer.status || '').trim().toLowerCase()
+  if (!dueDateRaw || customerStatus === 'inactive') return null
+
+  const dueDate = startOfLocalDay(new Date(dueDateRaw))
+  if (Number.isNaN(dueDate.getTime())) return null
+
+  const today = startOfLocalDay(new Date())
+  const windowEnd = startOfLocalDay(new Date(today))
+  windowEnd.setMonth(windowEnd.getMonth() + DASHBOARD_DUE_SOON_WINDOW_MONTHS)
+
+  if (dueDate < today) return 'Overdue' as const
+  if (dueDate.getTime() === today.getTime()) return 'Due Today' as const
+  if (dueDate <= windowEnd) return 'Due Soon' as const
+  return 'Active' as const
+}
+
 function getCustomerName(customer: Customer) {
   return customer.full_name || customer.fullName || customer.email
 }
@@ -57,8 +83,9 @@ function getCustomerDueTime(customer: Customer) {
 }
 
 function getCustomerStatus(customer: Customer) {
-  const dueDate = getCustomerDueDate(customer)
-  return customer.status === 'inactive' ? 'Inactive' : dueDate ? getStatus(new Date(dueDate)) : 'Registered'
+  if (String(customer.status || '').trim().toLowerCase() === 'inactive') return 'Inactive'
+  const renewalState = getDashboardRenewalState(customer)
+  return renewalState || 'Registered'
 }
 
 function getStatusRank(status: string) {
@@ -407,14 +434,11 @@ export default function Dashboard() {
           return searched.filter((customer) => Number(customer.streams) >= 3)
         case 'overdue':
           return searched.filter((customer) => {
-            const due = getCustomerDueDate(customer)
-            return due && getStatus(new Date(due)) === 'Overdue'
+            return getDashboardRenewalState(customer) === 'Overdue'
           })
         case 'due-soon':
           return searched.filter((customer) => {
-            const due = getCustomerDueDate(customer)
-            if (!due) return false
-            const status = getStatus(new Date(due))
+            const status = getDashboardRenewalState(customer)
             return status === 'Due Soon' || status === 'Due Today'
           })
         default:
@@ -491,18 +515,14 @@ export default function Dashboard() {
     const totalStreams = customers.reduce((sum, customer) => sum + Number(customer.streams || 0), 0)
     const revenue = customers.reduce((sum, customer) => sum + calculatePrice(customer.plan, Number(customer.streams || 1), pricingConfig, customer.downloads), 0)
     const dueSoon = customers.filter((customer) => {
-      const due = getCustomerDueDate(customer)
-      if (!due) return false
-      const status = getStatus(new Date(due))
+      const status = getDashboardRenewalState(customer)
       return status === 'Due Soon' || status === 'Due Today'
     }).length
     const dueToday = customers.filter((customer) => {
-      const due = getCustomerDueDate(customer)
-      return due && getStatus(new Date(due)) === 'Due Today'
+      return getDashboardRenewalState(customer) === 'Due Today'
     }).length
     const overdue = customers.filter((customer) => {
-      const due = getCustomerDueDate(customer)
-      return due && getStatus(new Date(due)) === 'Overdue'
+      return getDashboardRenewalState(customer) === 'Overdue'
     }).length
 
     const monthlyRevenue = customers.filter((customer) => customer.plan === 'monthly').reduce((sum, customer) => sum + calculatePrice(customer.plan, Number(customer.streams || 1), pricingConfig, customer.downloads), 0)
