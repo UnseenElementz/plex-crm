@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { addAuditLog, getRequestIpContext, getSecurityOverview, persistBlockedIpsSnapshot } from '@/lib/moderation'
+import { addAuditLog, getRequestIpContext, getSecurityOverview, persistBlockedIpsSnapshot, syncCustomerPortalPresence } from '@/lib/moderation'
 
 export async function POST(request: Request) {
   try {
@@ -34,6 +34,10 @@ export async function POST(request: Request) {
         ...extraDetails,
       },
     })
+
+    if (source.startsWith('customer-')) {
+      await syncCustomerPortalPresence(email, context.source)
+    }
 
     if (shouldBlock && context.ip !== 'unknown') {
       await addAuditLog({

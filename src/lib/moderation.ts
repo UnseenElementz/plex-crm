@@ -324,6 +324,21 @@ export async function syncCustomerDownloads(email: string, downloads: boolean) {
   } catch {}
 }
 
+export async function syncCustomerPortalPresence(email: string, source: string, seenAt?: string | null) {
+  const supabase = svc()
+  if (!supabase || !email) return
+  try {
+    const current = await findCustomerByEmail(supabase, email)
+    if (!current?.id) return
+    const nextNotes = mergeCustomerNotes({
+      existing: current.notes || '',
+      lastPortalSeenAt: String(seenAt || new Date().toISOString()).trim(),
+      lastPortalSource: String(source || 'customer-portal').trim(),
+    })
+    await supabase.from('customers').update({ notes: nextNotes }).eq('id', current.id)
+  } catch {}
+}
+
 export async function syncCustomerTranscodeNotice(email: string, sentAt?: string | null) {
   const supabase = svc()
   if (!supabase || !email) return

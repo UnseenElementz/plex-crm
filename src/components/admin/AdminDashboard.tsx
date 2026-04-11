@@ -12,6 +12,7 @@ import DashboardStats from './DashboardStats'
 import { shouldAutoWait } from '@/lib/chatIdle'
 
 export default function AdminDashboard() {
+  const creatingConversationRef = useRef(false)
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'closed' | 'waiting'>('active')
@@ -116,6 +117,37 @@ export default function AdminDashboard() {
     const c = conversations.find((conv) => conv.id === openId)
     if (c) setSelectedConversation(c)
   }, [conversations, searchParams])
+
+  useEffect(() => {
+    const startChatEmail = String(searchParams?.get('startChat') || '').trim().toLowerCase()
+    if (!startChatEmail) return
+
+    const existing = conversations.find((conversation) => {
+      const email = String((conversation.metadata as any)?.email || '').trim().toLowerCase()
+      return email === startChatEmail
+    })
+
+    if (existing) {
+      setSelectedConversation(existing)
+      return
+    }
+
+    if (creatingConversationRef.current) return
+    creatingConversationRef.current = true
+
+    void (async () => {
+      try {
+        const name = String(searchParams?.get('name') || '').trim()
+        const created = await createConversation(undefined, {
+          email: startChatEmail,
+          full_name: name || startChatEmail,
+        })
+        if (created) setSelectedConversation(created)
+      } finally {
+        creatingConversationRef.current = false
+      }
+    })()
+  }, [conversations, createConversation, searchParams])
 
   useEffect(() => {
     if (selectedConversation) return

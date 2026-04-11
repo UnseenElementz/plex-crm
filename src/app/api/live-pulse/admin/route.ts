@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createClient } from '@supabase/supabase-js'
 import { fetchInboxMessages, type MailboxConfig } from '@/lib/mailInbox'
+import { parseCustomerNotes } from '@/lib/customerNotes'
 import { listPayPalLedgerEntries } from '@/lib/paymentLedger'
 import { scanPlexSessions } from '@/lib/plexSessionMonitor'
 import { getRequester } from '@/lib/serverSupabase'
@@ -252,7 +253,7 @@ export async function GET(request: Request) {
       .select('id,status,updated_at,metadata')
       .order('updated_at', { ascending: false })
       .limit(40)
-    const customersPromise = supabase.from('customers').select('id,name,email')
+    const customersPromise = supabase.from('customers').select('id,name,email,notes')
     const paymentsPromise = supabase
       .from('payments')
       .select('id,customer_id,amount,currency,payment_date,payment_method,status')
@@ -298,19 +299,29 @@ export async function GET(request: Request) {
 
     const waitingChats = (conversations || []).filter((row: any) => row.status === 'waiting')
     const activeChats = (conversations || []).filter((row: any) => row.status === 'active')
-    const customersById = new Map<string, { name: string; email: string }>()
-    const customersByEmail = new Map<string, { name: string; email: string }>()
+    const customersById = new Map<string, { name: string; email: string; notes: string }>()
+    const customersByEmail = new Map<string, { name: string; email: string; notes: string }>()
     for (const row of customers || []) {
       const customerId = String((row as any)?.id || '').trim()
       const customerEmail = String((row as any)?.email || '').trim().toLowerCase()
       const customerName = String((row as any)?.name || '').trim()
+      const customerNotes = String((row as any)?.notes || '')
       if (!customerId) continue
       const entry = {
         name: customerName,
         email: customerEmail,
+        notes: customerNotes,
       }
       customersById.set(customerId, entry)
       if (customerEmail) customersByEmail.set(customerEmail, entry)
+    }
+
+    const conversationIdByEmail = new Map<string, string>()
+    for (const row of conversations || []) {
+      const email = String((row as any)?.metadata?.email || '').trim().toLowerCase()
+      const id = String((row as any)?.id || '').trim()
+      if (!email || !id || conversationIdByEmail.has(email)) continue
+      conversationIdByEmail.set(email, id)
     }
 
     const ledgerByPaymentId = new Map<string, any>()
@@ -412,6 +423,7 @@ export async function GET(request: Request) {
         email: string
         source: string
         seenAt: string
+        href: string
       }
     >()
 
@@ -420,6 +432,56 @@ export async function GET(request: Request) {
     const sinceSeenVisitors = new Set<string>()
     const checkoutEventsRaw: Array<{ id: string; email: string; name: string; createdAt: string; source: string; details: Record<string, unknown> }> = []
     const recentVisitHistoryMap = new Map<string, PulseHistoryEvent>()
+
+    const registerVisit = (input: {
+      id: string
+      email: string
+      name: string
+      source: string
+      createdAt: string
+    }) => {
+      const email = String(input.email || '').trim().toLowerCase()
+      const createdAt = String(input.createdAt || '').trim()
+      const source = normalizeSource(input.source)
+      if (!email || !createdAt || isIgnoredPulseSource(source)) return
+
+      const customer = customersByEmail.get(email)
+      const name = String(input.name || customer?.name || email).trim() || email
+      const createdAtMs = toTimestamp(createdAt)
+      const uniqueVisitKey = email
+
+      visitor7d.add(uniqueVisitKey)
+      if (createdAtMs >= toTimestamp(history24hCutoff)) visitor24h.add(uniqueVisitKey)
+      if (seenAtMs > 0 && createdAtMs > seenAtMs) sinceSeenVisitors.add(uniqueVisitKey)
+
+      const existingOnline = visitorMap.get(email)
+      if (isFresh(createdAt, 6 * 60 * 1000) && (!existingOnline || toTimestamp(existingOnline.seenAt) < createdAtMs)) {
+        visitorMap.set(email, {
+          id: `visitor:${email}`,
+          name,
+          email,
+          source: source || 'site',
+          seenAt: createdAt,
+          href: conversationIdByEmail.has(email)
+            ? `/admin?open=${encodeURIComponent(String(conversationIdByEmail.get(email) || ''))}`
+            : `/admin?startChat=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`,
+        })
+      }
+
+      const existingHistory = recentVisitHistoryMap.get(email)
+      if (!existingHistory || toTimestamp(existingHistory.createdAt) < createdAtMs) {
+        recentVisitHistoryMap.set(email, {
+          id: input.id || `visit:${email}:${createdAt}`,
+          kind: 'visit' as const,
+          title: 'Website visit',
+          body: `${name} opened ${getVisitSourceLabel(source)}.`,
+          href: conversationIdByEmail.has(email)
+            ? `/admin?open=${encodeURIComponent(String(conversationIdByEmail.get(email) || ''))}`
+            : `/admin?startChat=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`,
+          createdAt,
+        })
+      }
+    }
 
     for (const row of auditHistoryRows || []) {
       const email = String((row as any)?.email || '').trim().toLowerCase()
@@ -431,21 +493,6 @@ export async function GET(request: Request) {
       const customer = customersByEmail.get(email)
       const name = customer?.name || String(details.name || email).trim() || email
       const createdAtMs = new Date(createdAt).getTime()
-      const uniqueVisitKey = email
-
-      visitor7d.add(uniqueVisitKey)
-      if (createdAt >= history24hCutoff) visitor24h.add(uniqueVisitKey)
-      if (seenAtMs > 0 && createdAtMs > seenAtMs) sinceSeenVisitors.add(uniqueVisitKey)
-
-      if (isFresh(createdAt, 6 * 60 * 1000) && !visitorMap.has(email)) {
-        visitorMap.set(email, {
-          id: `visitor:${email}`,
-          name,
-          email,
-          source: source || 'site',
-          seenAt: createdAt,
-        })
-      }
 
       if (isCheckoutSource(source)) {
         checkoutEventsRaw.push({
@@ -459,16 +506,27 @@ export async function GET(request: Request) {
         continue
       }
 
-      if (!recentVisitHistoryMap.has(email)) {
-        recentVisitHistoryMap.set(email, {
-          id: `visit:${email}:${createdAt}`,
-          kind: 'visit' as const,
-          title: 'Website visit',
-          body: `${name} opened ${getVisitSourceLabel(source)}.`,
-          href: '/admin',
-          createdAt,
-        })
-      }
+      registerVisit({
+        id: `visit:${email}:${createdAt}`,
+        email,
+        name,
+        source,
+        createdAt,
+      })
+    }
+
+    for (const customer of customersByEmail.values()) {
+      const parsedNotes = parseCustomerNotes(customer.notes)
+      const lastPortalSeenAt = String(parsedNotes.lastPortalSeenAt || '').trim()
+      const lastPortalSource = String(parsedNotes.lastPortalSource || 'customer-portal').trim()
+      if (!lastPortalSeenAt) continue
+      registerVisit({
+        id: `customer-note:${customer.email}:${lastPortalSeenAt}`,
+        email: customer.email,
+        name: customer.name || customer.email,
+        source: lastPortalSource,
+        createdAt: lastPortalSeenAt,
+      })
     }
 
     const onlineUsers = Array.from(visitorMap.values()).slice(0, 6)

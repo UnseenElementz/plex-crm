@@ -20,6 +20,8 @@ export type CustomerNoteState = {
   joinAccessMode: string
   joinAccessGrantedAt: string | null
   downloads: boolean
+  lastPortalSeenAt: string | null
+  lastPortalSource: string
   terminateAtPlanEnd: boolean
   terminationScheduledAt: string | null
   transcodeNoticeSentAt: string | null
@@ -44,6 +46,8 @@ const MANAGED_LABELS = [
   'Join Access Mode',
   'Join Access Granted At',
   'Downloads',
+  'Last Portal Seen At',
+  'Last Portal Source',
   'Terminate At Plan End',
   'Termination Scheduled At',
   'Transcode Notice Sent At',
@@ -158,6 +162,8 @@ export function parseCustomerNotes(value: unknown): CustomerNoteState {
     joinAccessMode: '',
     joinAccessGrantedAt: null,
     downloads: false,
+    lastPortalSeenAt: null,
+    lastPortalSource: '',
     terminateAtPlanEnd: false,
     terminationScheduledAt: null,
     transcodeNoticeSentAt: null,
@@ -196,6 +202,12 @@ export function parseCustomerNotes(value: unknown): CustomerNoteState {
         break
       case 'downloads':
         state.downloads = content.toLowerCase() === 'yes'
+        break
+      case 'last portal seen at':
+        state.lastPortalSeenAt = content || null
+        break
+      case 'last portal source':
+        state.lastPortalSource = content || ''
         break
       case 'terminate at plan end':
         state.terminateAtPlanEnd = content.toLowerCase() === 'yes'
@@ -263,6 +275,8 @@ export function mergeCustomerNotes(input: {
   joinAccessMode?: string
   joinAccessGrantedAt?: string | null
   downloads?: boolean
+  lastPortalSeenAt?: string | null
+  lastPortalSource?: string
   terminateAtPlanEnd?: boolean
   terminationScheduledAt?: string | null
   transcodeNoticeSentAt?: string | null
@@ -290,6 +304,8 @@ export function mergeCustomerNotes(input: {
     joinAccessMode: input.joinAccessMode !== undefined ? String(input.joinAccessMode || '').trim() : current.joinAccessMode,
     joinAccessGrantedAt: input.joinAccessGrantedAt !== undefined ? input.joinAccessGrantedAt : current.joinAccessGrantedAt,
     downloads: input.downloads !== undefined ? Boolean(input.downloads) : current.downloads,
+    lastPortalSeenAt: input.lastPortalSeenAt !== undefined ? input.lastPortalSeenAt : current.lastPortalSeenAt,
+    lastPortalSource: input.lastPortalSource !== undefined ? String(input.lastPortalSource || '').trim() : current.lastPortalSource,
     terminateAtPlanEnd: input.terminateAtPlanEnd !== undefined ? Boolean(input.terminateAtPlanEnd) : current.terminateAtPlanEnd,
     terminationScheduledAt: input.terminationScheduledAt !== undefined ? input.terminationScheduledAt : current.terminationScheduledAt,
     transcodeNoticeSentAt: input.transcodeNoticeSentAt !== undefined ? input.transcodeNoticeSentAt : current.transcodeNoticeSentAt,
@@ -316,6 +332,8 @@ export function mergeCustomerNotes(input: {
     next.joinAccessMode ? `Join Access Mode: ${next.joinAccessMode}` : undefined,
     next.joinAccessGrantedAt ? `Join Access Granted At: ${next.joinAccessGrantedAt}` : undefined,
     next.downloads ? 'Downloads: Yes' : undefined,
+    next.lastPortalSeenAt ? `Last Portal Seen At: ${next.lastPortalSeenAt}` : undefined,
+    next.lastPortalSource ? `Last Portal Source: ${next.lastPortalSource}` : undefined,
     next.terminateAtPlanEnd ? 'Terminate At Plan End: Yes' : undefined,
     next.terminationScheduledAt ? `Termination Scheduled At: ${next.terminationScheduledAt}` : undefined,
     next.transcodeNoticeSentAt ? `Transcode Notice Sent At: ${next.transcodeNoticeSentAt}` : undefined,

@@ -70,6 +70,7 @@ type AdminPulse = {
     email: string
     source: string
     seenAt: string
+    href?: string
   }>
   alerts: Array<{
     id: string
@@ -793,13 +794,19 @@ export default function GlobalPulse() {
                       </div>
                     ) : (
                       adminSummary.onlineUsers.map((user) => (
-                        <div key={user.id} className="flex items-center justify-between rounded-[22px] border border-white/8 bg-white/[0.03] px-3 py-3">
+                        <Link
+                          key={user.id}
+                          href={user.href || '/admin'}
+                          className="flex items-center justify-between gap-3 rounded-[22px] border border-white/8 bg-white/[0.03] px-3 py-3 hover:border-cyan-400/25 hover:bg-cyan-400/[0.06]"
+                        >
                           <div className="min-w-0">
                             <div className="truncate text-sm font-semibold text-white">{user.name || user.email}</div>
-                            <div className="mt-1 text-xs capitalize text-slate-400">{formatPulseSource(user.source)}</div>
+                            <div className="mt-1 text-xs capitalize text-slate-400">
+                              {formatPulseSource(user.source)} • click to open chat
+                            </div>
                           </div>
                           <div className="text-xs text-slate-500">{formatAge(user.seenAt)}</div>
-                        </div>
+                        </Link>
                       ))
                     )}
                   </div>
