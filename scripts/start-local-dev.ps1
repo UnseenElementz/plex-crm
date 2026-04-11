@@ -42,17 +42,22 @@ function Ensure-LocalEnvFile {
   }
 }
 
-function Get-CssPathFromHtml {
+function Get-StylesheetPathsFromHtml {
   param(
     [string]$Html
   )
 
-  $match = [regex]::Match($Html, '/_next/static/css/app/layout\.css[^"\''< ]*')
-  if ($match.Success) {
-    return $match.Value
+  $matches = [regex]::Matches($Html, '<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+  $paths = @()
+  foreach ($match in $matches) {
+    if ($match.Groups.Count -gt 1) {
+      $href = [string]$match.Groups[1].Value
+      if ($href.StartsWith('/')) {
+        $paths += $href
+      }
+    }
   }
-
-  return $null
+  return @($paths | Select-Object -Unique)
 }
 
 function Start-NextDev {
@@ -67,6 +72,23 @@ function Start-NextDev {
       '-ExecutionPolicy', 'Bypass',
       '-Command',
       "Set-Location '$projectRoot'; npm.cmd run dev:next *>> '$LogPath'"
+    ) `
+    -PassThru `
+    -WindowStyle Hidden
+}
+
+function Start-NextProd {
+  param(
+    [string]$LogPath
+  )
+
+  return Start-Process `
+    -FilePath 'powershell.exe' `
+    -ArgumentList @(
+      '-NoProfile',
+      '-ExecutionPolicy', 'Bypass',
+      '-Command',
+      "Set-Location '$projectRoot'; npm.cmd run start -- -p $port *>> '$LogPath'"
     ) `
     -PassThru `
     -WindowStyle Hidden
@@ -103,7 +125,8 @@ function Ensure-DevWatchdog {
 function Wait-ForHealthyDevServer {
   param(
     [System.Diagnostics.Process]$Process,
-    [string]$LogPath
+    [string]$LogPath,
+    [string]$Path = '/admin/dashboard'
   )
 
   for ($i = 0; $i -lt 60; $i++) {
@@ -112,11 +135,21 @@ function Wait-ForHealthyDevServer {
     }
 
     try {
-      $html = Invoke-WebRequest -Uri "http://localhost:$port/admin/dashboard" -UseBasicParsing -TimeoutSec 5
-      $cssPath = Get-CssPathFromHtml -Html $html.Content
-      if ($html.StatusCode -eq 200 -and $cssPath) {
-        $css = Invoke-WebRequest -Uri "http://localhost:$port$cssPath" -UseBasicParsing -TimeoutSec 5
-        if ($css.StatusCode -eq 200) {
+      $html = Invoke-WebRequest -Uri "http://localhost:$port$Path" -UseBasicParsing -TimeoutSec 5
+      $stylesheets = Get-StylesheetPathsFromHtml -Html $html.Content
+      if ($html.StatusCode -eq 200) {
+        if (-not $stylesheets -or $stylesheets.Count -eq 0) {
+          return
+        }
+        $allStylesHealthy = $true
+        foreach ($stylesheet in $stylesheets) {
+          $css = Invoke-WebRequest -Uri "http://localhost:$port$stylesheet" -UseBasicParsing -TimeoutSec 5
+          if ($css.StatusCode -ne 200) {
+            $allStylesHealthy = $false
+            break
+          }
+        }
+        if ($allStylesHealthy) {
           return
         }
       }
@@ -127,6 +160,26 @@ function Wait-ForHealthyDevServer {
   }
 
   throw "Dev server did not become healthy in time. Check $LogPath"
+}
+
+function Start-StableLocalServer {
+  Stop-ProjectDevProcesses
+  Start-Sleep -Milliseconds 750
+
+  $buildLogPath = Join-Path $projectRoot ("local-build-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + ".log")
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-Location '$projectRoot'; npm.cmd run build:next *>> '$buildLogPath'"
+  if ($LASTEXITCODE -ne 0) {
+    throw "Local build failed. Check $buildLogPath"
+  }
+
+  $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+  $logPath = Join-Path $projectRoot "local-dev-$timestamp.log"
+  $process = Start-NextProd -LogPath $logPath
+  Wait-ForHealthyDevServer -Process $process -LogPath $logPath -Path '/'
+  Write-Output "Local dev ready on http://localhost:$port"
+  Write-Output "Log: $logPath"
+  Write-Output "Mode: stable-local-start"
+  exit 0
 }
 
 for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
@@ -159,3 +212,5 @@ for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
     }
   }
 }
+
+Start-StableLocalServer

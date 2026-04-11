@@ -7,7 +7,7 @@ import { enableDownloadsForCustomerEmail } from '@/lib/plexDownloadsAccess'
 import { provisionPlexMembershipForCustomer } from '@/lib/plexProvisioning'
 import { findPayPalLedgerEntry, recordPayPalLedgerEntry } from '@/lib/paymentLedger'
 
-export type PayPalCheckoutMode = 'renewal' | 'downloads_addon'
+export type PayPalCheckoutMode = 'renewal' | 'downloads_addon' | 'streams_addon'
 
 export function isFullPriceReferralRewardEligible(input: {
   plan: Plan
@@ -47,15 +47,33 @@ function isValidDate(value: unknown) {
   return !Number.isNaN(date.getTime())
 }
 
+function buildMissingPaymentOrderFilter(paymentOrderId: string) {
+  const safeOrderId = String(paymentOrderId || '').trim()
+  if (!safeOrderId) return null
+  return `notes.is.null,notes.not.ilike.%${safeOrderId}%`
+}
+
+export function resolveMembershipExtensionBaseDate(nextPaymentDate: unknown, now = new Date()) {
+  if (isValidDate(nextPaymentDate)) {
+    const existingDueDate = new Date(String(nextPaymentDate))
+    if (existingDueDate > now) return existingDueDate
+  }
+  return now
+}
+
+export function calculateMembershipExtensionDate(plan: Plan, nextPaymentDate: unknown, now = new Date()) {
+  return calculateNextDue(plan, resolveMembershipExtensionBaseDate(nextPaymentDate, now))
+}
+
 export function buildHostingReference(plan: Plan, screens: number, downloads?: boolean) {
-  const duration = plan === 'monthly' ? '1 Month' : '1 Year'
+  const duration = plan === 'monthly' ? '1 Month' : '12 Months'
   const packageLabel =
     plan === 'movies_only'
-      ? 'Movie Hosting'
+      ? 'Movies Only'
       : plan === 'tv_only'
-        ? 'TV Hosting'
-        : 'Hosting'
-  const serverLabel = `${screens} ${screens === 1 ? 'Server' : 'Servers'}`
+        ? 'TV Shows Only'
+        : 'Full Access'
+  const serverLabel = `${screens} ${screens === 1 ? 'Stream' : 'Streams'}`
   return `${duration} ${packageLabel} - ${serverLabel}${downloads ? ' + Downloads' : ''}`
 }
 
@@ -68,7 +86,51 @@ export function buildCheckoutReference(input: {
   if (input.mode === 'downloads_addon') {
     return 'Downloads Add-on'
   }
+  if (input.mode === 'streams_addon') {
+    return `Extra Stream Add-on - ${Math.max(1, Number(input.screens || 1))} Total ${Math.max(1, Number(input.screens || 1)) === 1 ? 'Stream' : 'Streams'}`
+  }
   return buildHostingReference(input.plan, input.screens, input.downloads)
+}
+
+function buildPlanLabel(plan: Plan) {
+  if (plan === 'movies_only') return 'Movies Only'
+  if (plan === 'tv_only') return 'TV Shows Only'
+  if (plan === 'monthly') return 'Monthly Legacy'
+  return 'Full Access'
+}
+
+function buildEndsLabel(nextDue?: string | null) {
+  const raw = String(nextDue || '').trim()
+  if (!raw || !isValidDate(raw)) return ''
+  return new Date(raw).toLocaleDateString('en-GB')
+}
+
+export function buildPaymentHistoryNote(input: {
+  mode?: PayPalCheckoutMode
+  plan: Plan
+  streams: number
+  downloads?: boolean
+  nextDue?: string | null
+}) {
+  const endsLabel = buildEndsLabel(input.nextDue)
+  if (input.mode === 'downloads_addon') {
+    return endsLabel
+      ? `Downloads add-on | Downloads enabled until ${endsLabel}`
+      : 'Downloads add-on | Downloads enabled for the current plan'
+  }
+  if (input.mode === 'streams_addon') {
+    const streamLabel = `${Math.max(1, Number(input.streams || 1))} total ${Math.max(1, Number(input.streams || 1)) === 1 ? 'stream' : 'streams'}`
+    return endsLabel
+      ? `Extra stream add-on | ${streamLabel} | Ends ${endsLabel}`
+      : `Extra stream add-on | ${streamLabel}`
+  }
+  const parts = [
+    `12-month ${buildPlanLabel(input.plan)} renewal`,
+    `${Math.max(1, Number(input.streams || 1))} ${Math.max(1, Number(input.streams || 1)) === 1 ? 'stream' : 'streams'}`,
+    input.downloads ? 'Downloads included' : '',
+    endsLabel ? `Plan ends ${endsLabel}` : '',
+  ].filter(Boolean)
+  return parts.join(' | ')
 }
 
 export function buildPayPalCustomId(input: {
@@ -133,6 +195,21 @@ export async function applySuccessfulPayment(input: {
   const paymentMethod = String(input.paymentMethod || 'PayPal').trim() || 'PayPal'
   const paymentOrderId = String(input.paymentOrderId || '').trim()
   if (!email) throw new Error('Customer email is required')
+  if (paymentOrderId) {
+    const existingLedgerEntry = await findPayPalLedgerEntry({ orderId: paymentOrderId }).catch(() => null)
+    if (existingLedgerEntry) {
+      const { data: existingCustomer } = await supabase
+        .from('customers')
+        .select('id,next_payment_date')
+        .eq('email', email)
+        .maybeSingle()
+      return {
+        mode: 'duplicate',
+        customerId: existingCustomer?.id || existingLedgerEntry.customerId || null,
+        nextDue: existingCustomer?.next_payment_date || null,
+      }
+    }
+  }
   const referralRewardEligible = isFullPriceReferralRewardEligible({
     plan,
     streams,
@@ -154,13 +231,7 @@ export async function applySuccessfulPayment(input: {
     }
   }
 
-  const existingNextDue = existing?.next_payment_date
-  const activeBase =
-    existing && existing.subscription_status === 'active' && isValidDate(existingNextDue) && new Date(existingNextDue) > now
-      ? new Date(existingNextDue)
-      : now
-
-  const nextDue = calculateNextDue(plan, activeBase)
+  const nextDue = calculateMembershipExtensionDate(plan, existing?.next_payment_date, now)
   const nextNotes = mergeStoredCustomerNotes({
     existing: existing?.notes || '',
     joinAccessMode: '',
@@ -174,7 +245,7 @@ export async function applySuccessfulPayment(input: {
   const customerName = String(existing?.name || profile?.full_name || email).trim()
 
   if (existing?.id) {
-    await supabase
+    let updateQuery = supabase
       .from('customers')
       .update({
         name: customerName,
@@ -186,6 +257,26 @@ export async function applySuccessfulPayment(input: {
         notes: nextNotes,
       })
       .eq('id', existing.id)
+    const paymentOrderFilter = buildMissingPaymentOrderFilter(paymentOrderId)
+    if (paymentOrderFilter) {
+      updateQuery = updateQuery.or(paymentOrderFilter)
+    }
+    const { data: updatedCustomer, error: updateError } = await updateQuery.select('id,next_payment_date').maybeSingle()
+    if (updateError) {
+      throw new Error(updateError.message)
+    }
+    if (!updatedCustomer?.id) {
+      const { data: latestCustomer } = await supabase
+        .from('customers')
+        .select('id,next_payment_date')
+        .eq('email', email)
+        .maybeSingle()
+      return {
+        mode: 'duplicate',
+        customerId: latestCustomer?.id || existing.id,
+        nextDue: latestCustomer?.next_payment_date || existing?.next_payment_date || null,
+      }
+    }
 
     const { data: insertedPayment, error: insertedPaymentError } = await supabase.from('payments').insert({
       customer_id: existing.id,
@@ -381,7 +472,29 @@ export async function applyDownloadsAddonPurchase(input: {
       : currentNotesState.paymentOrders,
   })
 
-  await supabase.from('customers').update({ notes: nextNotes }).eq('id', existing.id)
+  let updateQuery = supabase.from('customers').update({ notes: nextNotes }).eq('id', existing.id)
+  const paymentOrderFilter = buildMissingPaymentOrderFilter(paymentOrderId)
+  if (paymentOrderFilter) {
+    updateQuery = updateQuery.or(paymentOrderFilter)
+  }
+  const { data: updatedCustomer, error: updateError } = await updateQuery.select('id,next_payment_date').maybeSingle()
+  if (updateError) {
+    throw new Error(updateError.message)
+  }
+  if (!updatedCustomer?.id) {
+    const { data: latestCustomer } = await supabase
+      .from('customers')
+      .select('id,next_payment_date,notes')
+      .eq('email', email)
+      .maybeSingle()
+    return {
+      mode: 'duplicate',
+      customerId: latestCustomer?.id || existing.id,
+      downloadsEnabled: parseCustomerNotes(latestCustomer?.notes || '').downloads,
+      nextDue: latestCustomer?.next_payment_date || existing.next_payment_date || null,
+    }
+  }
+
   const { data: insertedPayment, error: insertedPaymentError } = await supabase.from('payments').insert({
     customer_id: existing.id,
     amount,
@@ -412,6 +525,113 @@ export async function applyDownloadsAddonPurchase(input: {
     paymentId: String(insertedPayment?.id || '').trim() || null,
     paymentDate: insertedPayment?.payment_date || null,
     plex: plexResult,
+  }
+}
+
+export async function applyStreamsAddonPurchase(input: {
+  customerEmail: string
+  streams: number
+  amount: number
+  paymentMethod?: string
+  paymentOrderId?: string
+}) {
+  const supabase = svc()
+  if (!supabase) throw new Error('Supabase not configured')
+
+  const email = String(input.customerEmail || '').trim().toLowerCase()
+  const targetStreams = Math.max(1, Number(input.streams || 1))
+  const amount = Number(input.amount || 0)
+  const paymentMethod = String(input.paymentMethod || 'PayPal').trim() || 'PayPal'
+  const paymentOrderId = String(input.paymentOrderId || '').trim()
+  if (!email) throw new Error('Customer email is required')
+
+  const { data: existing } = await supabase.from('customers').select('*').eq('email', email).maybeSingle()
+  if (!existing?.id) {
+    throw new Error('Customer account not found for stream add-on')
+  }
+
+  const currentStreams = Math.max(1, Number(existing.streams || 1))
+  const currentNotesState = parseCustomerNotes(existing?.notes || '')
+  if (paymentOrderId && currentNotesState.paymentOrders.includes(paymentOrderId)) {
+    return {
+      mode: 'duplicate',
+      customerId: existing.id,
+      streams: currentStreams,
+      nextDue: existing.next_payment_date || null,
+    }
+  }
+
+  if (targetStreams <= currentStreams) {
+    return {
+      mode: 'streams_addon',
+      customerId: existing.id,
+      streams: currentStreams,
+      addedStreams: 0,
+      nextDue: existing.next_payment_date || null,
+    }
+  }
+
+  const nextNotes = mergeStoredCustomerNotes({
+    existing: existing?.notes || '',
+    paymentOrders: paymentOrderId
+      ? Array.from(new Set([...currentNotesState.paymentOrders, paymentOrderId])).slice(-12)
+      : currentNotesState.paymentOrders,
+  })
+
+  let updateQuery = supabase
+    .from('customers')
+    .update({
+      streams: targetStreams,
+      notes: nextNotes,
+    })
+    .eq('id', existing.id)
+
+  const paymentOrderFilter = buildMissingPaymentOrderFilter(paymentOrderId)
+  if (paymentOrderFilter) {
+    updateQuery = updateQuery.or(paymentOrderFilter)
+  }
+
+  const { data: updatedCustomer, error: updateError } = await updateQuery.select('id,next_payment_date,streams').maybeSingle()
+  if (updateError) {
+    throw new Error(updateError.message)
+  }
+  if (!updatedCustomer?.id) {
+    const { data: latestCustomer } = await supabase
+      .from('customers')
+      .select('id,next_payment_date,streams')
+      .eq('email', email)
+      .maybeSingle()
+    return {
+      mode: 'duplicate',
+      customerId: latestCustomer?.id || existing.id,
+      streams: Math.max(1, Number(latestCustomer?.streams || currentStreams)),
+      nextDue: latestCustomer?.next_payment_date || existing.next_payment_date || null,
+    }
+  }
+
+  const { data: insertedPayment, error: insertedPaymentError } = await supabase.from('payments').insert({
+    customer_id: existing.id,
+    amount,
+    status: 'completed',
+    payment_method: `${paymentMethod} - Streams Add-on`,
+  }).select('id,payment_date').single()
+  if (insertedPaymentError) {
+    console.error('Failed to insert payment row for streams add-on payment', {
+      email,
+      paymentMethod,
+      paymentOrderId,
+      error: insertedPaymentError.message,
+    })
+  }
+
+  return {
+    mode: 'streams_addon',
+    customerId: existing.id,
+    streams: targetStreams,
+    addedStreams: targetStreams - currentStreams,
+    nextDue: existing.next_payment_date || null,
+    paymentId: String(insertedPayment?.id || '').trim() || null,
+    paymentDate: insertedPayment?.payment_date || null,
   }
 }
 

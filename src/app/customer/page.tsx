@@ -26,6 +26,13 @@ type Customer = {
   terminationScheduledAt?: string | null
 }
 
+type ActiveMembership = {
+  plan: Plan
+  streams: number
+  nextDueDate: string
+  downloads: boolean
+}
+
 type ReferralDashboard = {
   code: string
   shareUrl: string
@@ -64,9 +71,9 @@ type PaymentHistoryRow = {
 }
 
 const planCards: Array<{ id: Plan; title: string; subtitle: string }> = [
-  { id: 'yearly', title: 'Full Access', subtitle: 'The complete hosted media package.' },
-  { id: 'movies_only', title: 'Movies Only', subtitle: 'Film-first access with the same clean account tools.' },
-  { id: 'tv_only', title: 'TV Shows Only', subtitle: 'Series-focused access with the same support and billing flow.' },
+  { id: 'yearly', title: 'Full Access', subtitle: '12-month full media access.' },
+  { id: 'movies_only', title: 'Movies Only', subtitle: '12-month film-first access.' },
+  { id: 'tv_only', title: 'TV Shows Only', subtitle: '12-month series-focused access.' },
 ]
 
 function hasPaidPortalMembership(row: {
@@ -79,6 +86,13 @@ function hasPaidPortalMembership(row: {
   return Boolean(String(row.start_date || '').trim() || String(row.next_payment_date || '').trim())
 }
 
+function getRenewalPreviewDate(plan: Plan, currentNextDueDate: string) {
+  const now = new Date()
+  const currentDue = new Date(currentNextDueDate)
+  const base = !Number.isNaN(currentDue.getTime()) && currentDue > now ? currentDue : now
+  return calculateNextDue(plan, base)
+}
+
 export default function CustomerPortal() {
   const searchParams = useSearchParams()
   const captureAttemptRef = useRef<string | null>(null)
@@ -89,6 +103,7 @@ export default function CustomerPortal() {
   const [pricingConfig, setPricingConfig] = useState<any>(null)
   const [pricingLoaded, setPricingLoaded] = useState(false)
   const [downloadsEnabled, setDownloadsEnabled] = useState(false)
+  const [streamAddonTarget, setStreamAddonTarget] = useState(1)
   const [updateModal, setUpdateModal] = useState<{ id?: string; title: string; content: string } | null>(null)
   const [billingMessage, setBillingMessage] = useState('')
   const [capturingPayment, setCapturingPayment] = useState(false)
@@ -99,6 +114,12 @@ export default function CustomerPortal() {
   const [referralCodeInput, setReferralCodeInput] = useState('')
   const [applyingCredit, setApplyingCredit] = useState(false)
   const [paymentHistory, setPaymentHistory] = useState<PaymentHistoryRow[]>([])
+  const [activeMembership, setActiveMembership] = useState<ActiveMembership>({
+    plan: 'yearly',
+    streams: 1,
+    nextDueDate: calculateNextDue('yearly', new Date()).toISOString(),
+    downloads: false,
+  })
   const [customer, setCustomer] = useState<Customer>({
     id: 'demo',
     fullName: 'Demo User',
@@ -160,6 +181,12 @@ export default function CustomerPortal() {
     const { data: refreshed } = await s.from('customers').select('*').eq('email', email).single()
     if (!refreshed) return
     const parsedNotes = parseCustomerNotes(refreshed.notes || '')
+    setActiveMembership({
+      plan: refreshed.subscription_type || customer.plan,
+      streams: Math.min(5, refreshed.streams || customer.streams || 1),
+      nextDueDate: refreshed.next_payment_date || customer.nextDueDate,
+      downloads: parsedNotes.downloads,
+    })
     setCustomer({
       id: refreshed.id,
       fullName: refreshed.name,
@@ -174,6 +201,7 @@ export default function CustomerPortal() {
       terminationScheduledAt: parsedNotes.terminationScheduledAt,
     })
     setDownloadsEnabled(parsedNotes.downloads)
+    setStreamAddonTarget(Math.min(5, Math.max(1, refreshed.streams || customer.streams || 1)))
     setHasSubscription(hasPaidPortalMembership(refreshed))
   }
 
@@ -251,6 +279,12 @@ export default function CustomerPortal() {
         if (!error && customerData) {
           const parsedNotes = parseCustomerNotes(customerData.notes || '')
           const paidMembership = hasPaidPortalMembership(customerData)
+          setActiveMembership({
+            plan: customerData.subscription_type || 'monthly',
+            streams: Math.min(5, customerData.streams || 1),
+            nextDueDate: customerData.next_payment_date || calculateNextDue(customerData.subscription_type || 'monthly', new Date()).toISOString(),
+            downloads: parsedNotes.downloads,
+          })
           setCustomer({
             id: customerData.id,
             fullName: customerData.name,
@@ -265,6 +299,7 @@ export default function CustomerPortal() {
             terminationScheduledAt: parsedNotes.terminationScheduledAt,
           })
           setDownloadsEnabled(parsedNotes.downloads)
+          setStreamAddonTarget(Math.min(5, Math.max(1, customerData.streams || 1)))
           setHasSubscription(paidMembership)
           setAuthState('ready')
           await loadReferralDashboard(sessionData.session?.access_token || null)
@@ -363,6 +398,8 @@ export default function CustomerPortal() {
         setBillingMessage(
           data?.mode === 'downloads_addon'
             ? 'Downloads have been added to your account and Plex access is being updated.'
+            : data?.mode === 'streams_addon'
+              ? 'Extra streams have been added to the current account without changing the plan end date.'
             : resolvedEmail
               ? 'Payment received and your account has been updated.'
               : 'Payment received. If the portal does not refresh automatically, sign in again and your account will sync.'
@@ -385,9 +422,13 @@ export default function CustomerPortal() {
 
   const price = useMemo(() => calculatePrice(customer.plan, customer.streams, pricingConfig, customer.downloads), [customer, pricingConfig])
   const downloadsAddonPrice = useMemo(() => Number(pricingConfig?.downloads_price || 20), [pricingConfig])
+  const extraStreamPrice = useMemo(() => Number(pricingConfig?.stream_yearly_price || 20), [pricingConfig])
   const activeDiscountPercentage = useMemo(() => inferUniformDiscountPercentage(pricingConfig), [pricingConfig])
   const referralCreditApplied = useMemo(() => Math.min(price, Number(referral?.availableCredit || 0)), [price, referral?.availableCredit])
   const payableToday = useMemo(() => Math.max(0, Number((price - referralCreditApplied).toFixed(2))), [price, referralCreditApplied])
+  const streamAddonCount = useMemo(() => Math.max(0, streamAddonTarget - activeMembership.streams), [activeMembership.streams, streamAddonTarget])
+  const streamAddonTotal = useMemo(() => Math.max(0, streamAddonTarget - activeMembership.streams) * extraStreamPrice, [activeMembership.streams, extraStreamPrice, streamAddonTarget])
+  const renewalPreviewDate = useMemo(() => getRenewalPreviewDate(customer.plan, activeMembership.nextDueDate), [activeMembership.nextDueDate, customer.plan])
   const checkoutFee = useMemo(() => (payableToday > 0 ? getTransactionFee(customer.plan) : 0), [customer.plan, payableToday])
   const status = useMemo(() => {
     if (!hasSubscription) return 'Inactive'
@@ -421,6 +462,10 @@ export default function CustomerPortal() {
   const canPurchaseDownloadsAddon = useMemo(() => {
     return hasSubscription && status === 'Active' && !downloadsEnabled && canPay
   }, [canPay, downloadsEnabled, hasSubscription, status])
+
+  const canPurchaseStreamsAddon = useMemo(() => {
+    return hasSubscription && status === 'Active' && streamAddonTarget > activeMembership.streams && canPay
+  }, [activeMembership.streams, canPay, hasSubscription, status, streamAddonTarget])
 
   const planTerminationNotice = useMemo(() => {
     if (!customer.terminateAtPlanEnd) return null
@@ -594,14 +639,14 @@ export default function CustomerPortal() {
   }
 
   return (
-    <main className="page-section py-8">
-      <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-        <div className="space-y-6">
+    <main className="page-section py-5 sm:py-8">
+      <section className="grid gap-4 sm:gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+        <div className="space-y-4 sm:space-y-6">
           <div className="panel-strong panel-lift overflow-hidden p-5 sm:p-7">
             <div className="eyebrow">Account</div>
             <div className="mt-5 flex flex-wrap items-start justify-between gap-4">
               <div>
-                <h1 className="text-3xl font-semibold text-white sm:text-[2.2rem]">Manage your hosting account.</h1>
+                <h1 className="text-2xl font-semibold text-white sm:text-[2.2rem]">Manage your hosting account.</h1>
                 <p className="mt-3 max-w-2xl text-slate-400">
                   Billing, support, and service updates in one clear dashboard.
                 </p>
@@ -692,18 +737,18 @@ export default function CustomerPortal() {
               </div>
             ) : null}
 
-            <div className="mt-8 grid gap-4 sm:grid-cols-3">
+            <div className="mt-6 grid gap-3 sm:mt-8 sm:gap-4 sm:grid-cols-3">
               <div className="panel p-4">
                 <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Plan</div>
-                <div className="mt-2 text-xl font-semibold text-white">{customer.plan.replace('_', ' ')}</div>
+                <div className="mt-2 text-xl font-semibold text-white">{activeMembership.plan.replace('_', ' ')}</div>
               </div>
               <div className="panel p-4">
                 <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Streams</div>
-                <div className="mt-2 text-xl font-semibold text-white">{customer.streams}</div>
+                <div className="mt-2 text-xl font-semibold text-white">{activeMembership.streams}</div>
               </div>
               <div className="panel p-4">
                 <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Next Due</div>
-                <div className="mt-2 text-xl font-semibold text-white">{format(new Date(customer.nextDueDate), 'dd/MM/yyyy')}</div>
+                <div className="mt-2 text-xl font-semibold text-white">{format(new Date(activeMembership.nextDueDate), 'dd/MM/yyyy')}</div>
               </div>
             </div>
 
@@ -717,8 +762,8 @@ export default function CustomerPortal() {
             </div>
           </div>
 
-          <div className="card-solid panel-lift p-5 sm:p-6">
-            <div className="flex items-center justify-between gap-4">
+          <div className="card-solid panel-lift p-4 sm:p-6">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
               <h2 className="card-title">Choose your package</h2>
               <div className="text-sm text-slate-400">Simple package changes and renewals</div>
             </div>
@@ -733,7 +778,6 @@ export default function CustomerPortal() {
                     setCustomer((current) => ({
                       ...current,
                       plan: plan.id,
-                      nextDueDate: calculateNextDue(plan.id, new Date(current.startDate)).toISOString(),
                     }))
                   }
                 >
@@ -747,9 +791,9 @@ export default function CustomerPortal() {
               Movies Only and TV Shows Only still include shared family categories such as kids and selected mixed content.
             </div>
 
-            <div className="mt-6 grid gap-5 sm:grid-cols-2">
+            <div className="mt-5 grid gap-4 sm:mt-6 sm:gap-5 sm:grid-cols-2">
               <div>
-                <label className="label">Streams</label>
+                <label className="label">Renewal streams</label>
                 <select
                   className="input"
                   value={customer.streams}
@@ -762,10 +806,13 @@ export default function CustomerPortal() {
                 >
                   {[1, 2, 3, 4, 5].map((count) => (
                     <option key={count} value={count}>
-                      {count}
+                      {count} total {count === 1 ? 'stream' : 'streams'}
                     </option>
                   ))}
                 </select>
+                <div className="mt-2 text-xs text-slate-400">
+                  This only changes the next 12-month renewal package. Use the extra-stream block below if you want to add streams to the current membership right now.
+                </div>
               </div>
 
               <div className="panel p-4">
@@ -785,9 +832,9 @@ export default function CustomerPortal() {
           </div>
         </div>
 
-        <div className="space-y-6">
-          <div className="card-solid panel-lift p-5 sm:p-6">
-            <div className="flex items-center justify-between gap-4">
+        <div className="space-y-4 sm:space-y-6">
+          <div className="card-solid panel-lift p-4 sm:p-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
               <div>
                 <h2 className="card-title">Member invites</h2>
                 <div className="mt-1 text-sm text-slate-400">Bring in up to 8 linked members. You earn GBP 10.00 when they complete a full-price payment, again on later full-price renewals, and anyone joining through a valid referral gets their own one-time GBP 10.00 signup credit after their first full-price payment too.</div>
@@ -892,7 +939,67 @@ export default function CustomerPortal() {
               <div className="mt-2 text-sm text-slate-400">Package total: GBP {price.toFixed(2)}</div>
               <div className="mt-2 text-sm text-slate-400">Referral credit applied: GBP {referralCreditApplied.toFixed(2)}</div>
               <div className="mt-2 text-sm text-slate-400">Transaction fee: GBP {checkoutFee}</div>
-              <div className="mt-2 text-sm text-slate-400">Next due date: {format(new Date(customer.nextDueDate), 'dd/MM/yyyy')}</div>
+              <div className="mt-2 text-sm text-slate-400">Every package renews for 12 months.</div>
+              <div className="mt-2 text-sm text-slate-400">Plan end after payment: {format(renewalPreviewDate, 'dd/MM/yyyy')}</div>
+            </div>
+
+            <div className="mt-5 rounded-[28px] border border-cyan-400/15 bg-[linear-gradient(135deg,rgba(34,211,238,0.1),rgba(15,23,42,0.22))] p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-xs uppercase tracking-[0.24em] text-cyan-200/80">Extra Streams Add-on</div>
+                  <div className="mt-2 text-xl font-semibold text-white">
+                    {streamAddonCount > 0 ? `Add ${streamAddonCount} extra ${streamAddonCount === 1 ? 'stream' : 'streams'} now for GBP ${streamAddonTotal.toFixed(2)}` : 'No extra streams selected'}
+                  </div>
+                  <div className="mt-2 text-sm text-slate-400">
+                    Extra streams do not extend the membership date. They stay active only until the current plan ends on {format(new Date(activeMembership.nextDueDate), 'dd/MM/yyyy')}.
+                  </div>
+                </div>
+                <div className={`tag ${streamAddonCount > 0 ? 'active' : 'inactive'}`}>
+                  {streamAddonCount > 0 ? `+${streamAddonCount} selected` : 'No add-on'}
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="label">Current live streams</label>
+                  <div className="input flex items-center text-slate-200">{activeMembership.streams} total {activeMembership.streams === 1 ? 'stream' : 'streams'}</div>
+                </div>
+                <div>
+                  <label className="label">Set total streams now</label>
+                  <select
+                    className="input"
+                    value={streamAddonTarget}
+                    onChange={(e) => setStreamAddonTarget(Math.min(5, Math.max(activeMembership.streams, parseInt(e.target.value || String(activeMembership.streams), 10))))}
+                  >
+                    {Array.from({ length: 6 - activeMembership.streams }, (_, index) => activeMembership.streams + index).map((count) => (
+                      <option key={count} value={count}>
+                        {count} total {count === 1 ? 'stream' : 'streams'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {streamAddonCount > 0 ? (
+                <div className="mt-4">
+                  {canPurchaseStreamsAddon ? (
+                    <PayPalButton
+                      amount={streamAddonTotal}
+                      baseAmount={streamAddonTotal}
+                      currency="GBP"
+                      customerEmail={customer.email}
+                      plan={activeMembership.plan}
+                      streams={streamAddonTarget}
+                      downloads={activeMembership.downloads}
+                      mode="streams_addon"
+                    />
+                  ) : (
+                    <div className="rounded-[24px] border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                      Extra streams can only be added while the subscription is active and payable from this account.
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </div>
 
             <div className="mt-5 rounded-[28px] border border-violet-400/15 bg-[linear-gradient(135deg,rgba(139,92,246,0.14),rgba(15,23,42,0.28))] p-5">
@@ -921,8 +1028,8 @@ export default function CustomerPortal() {
                       baseAmount={downloadsAddonPrice}
                       currency="GBP"
                       customerEmail={customer.email}
-                      plan={customer.plan}
-                      streams={customer.streams}
+                      plan={activeMembership.plan}
+                      streams={activeMembership.streams}
                       downloads
                       mode="downloads_addon"
                     />
@@ -991,9 +1098,9 @@ export default function CustomerPortal() {
                     <div key={payment.id} className="rounded-[20px] border border-white/8 bg-black/10 px-4 py-3">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
-                          <div className="text-sm font-semibold text-white">GBP {Number(payment.amount || 0).toFixed(2)}</div>
-                          <div className="mt-1 text-xs text-slate-400">{payment.provider}</div>
-                        </div>
+                      <div className="text-sm font-semibold text-white">GBP {Number(payment.amount || 0).toFixed(2)}</div>
+                      <div className="mt-1 text-xs text-slate-400">{payment.provider}</div>
+                    </div>
                         <div className={`tag ${String(payment.status || '').toLowerCase() === 'completed' ? 'active' : ''}`}>
                           {payment.status}
                         </div>
@@ -1003,6 +1110,11 @@ export default function CustomerPortal() {
                           ? format(new Date(payment.created_at), 'dd/MM/yyyy HH:mm')
                           : 'Unknown date'}
                       </div>
+                      {payment.note ? (
+                        <div className="mt-2 rounded-[16px] border border-white/8 bg-black/10 px-3 py-2 text-xs text-slate-300">
+                          {payment.note}
+                        </div>
+                      ) : null}
                       {payment.capture_id || payment.order_id ? (
                         <div className="mt-2 break-all text-xs text-cyan-200/80">
                           Ref: {payment.capture_id || payment.order_id}

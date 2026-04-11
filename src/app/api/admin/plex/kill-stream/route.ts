@@ -27,13 +27,24 @@ export async function POST(request: Request) {
 
     const body = await request.json().catch(() => ({}))
     const sessionKey = String(body.sessionKey || '').trim()
+    const sessionKeys: string[] = Array.isArray(body.sessionKeys)
+      ? body.sessionKeys
+          .map((value: unknown) => String(value || '').trim())
+          .filter(Boolean)
+      : []
     const reason = String(body.reason || '').trim()
     const email = String(body.email || '').trim().toLowerCase()
     const user = String(body.user || '').trim()
     const title = String(body.title || '').trim()
     const ip = String(body.ip || '').trim()
 
-    if (!sessionKey) return NextResponse.json({ error: 'Session key required' }, { status: 400 })
+    const targetSessionKeys: string[] = Array.from(
+      new Set(sessionKeys.length ? sessionKeys : sessionKey ? [sessionKey] : [])
+    )
+
+    if (!targetSessionKeys.length) {
+      return NextResponse.json({ error: 'Session key required' }, { status: 400 })
+    }
     if (!reason) return NextResponse.json({ error: 'Reason required' }, { status: 400 })
 
     const { data: settings } = await supabase.from('admin_settings').select('*').eq('id', 1).maybeSingle()
@@ -45,7 +56,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Plex token not configured' }, { status: 400 })
     }
 
-    const stopResult = await terminatePlexSessions(plexUrl, plexToken, [sessionKey], reason)
+    const stopResult = await terminatePlexSessions(plexUrl, plexToken, targetSessionKeys, reason)
     if (!stopResult.stopped) {
       return NextResponse.json(
         {
@@ -74,8 +85,9 @@ export async function POST(request: Request) {
     await addAuditLog({
       action: 'customer_stream_killed',
       email: email || null,
-      share_id: sessionKey,
+      share_id: targetSessionKeys[0],
       details: {
+        session_keys: targetSessionKeys,
         user,
         title,
         ip,
@@ -84,7 +96,7 @@ export async function POST(request: Request) {
       },
     })
 
-    return NextResponse.json({ ok: true, stopped: stopResult.stopped, emailed })
+    return NextResponse.json({ ok: true, stopped: stopResult.stopped, emailed, sessionKeys: targetSessionKeys })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Failed to stop stream' }, { status: 500 })
   }

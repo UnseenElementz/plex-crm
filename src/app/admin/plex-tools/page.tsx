@@ -156,8 +156,18 @@ type NoticePickerState = {
 
 type KillStreamState = {
   session: SessionRow
+  sessions: SessionRow[]
   reason: string
 } | null
+
+type OverStreamerGroup = {
+  id: string
+  primary: SessionRow
+  sessions: SessionRow[]
+  activeStreams: number
+  allowedStreams: number
+  uniqueIps: string[]
+}
 
 const LIVE_PLEX_REFRESH_MS = 2000
 
@@ -653,15 +663,19 @@ function PlexToolsInner() {
     setNoticePickerQuery(defaultQuery)
   }
 
-  function openKillStream(session: SessionRow) {
-    const defaultReason = isVideoTranscoding(session)
+  function openKillStream(session: SessionRow, relatedSessions?: SessionRow[]) {
+    const targetSessions = relatedSessions?.length ? relatedSessions : [session]
+    const hasTranscode = targetSessions.some((item) => isVideoTranscoding(item))
+    const hasOverLimit = targetSessions.some((item) => item.over_limit)
+    const hasOverDownloadLimit = targetSessions.some((item) => item.over_download_limit)
+    const defaultReason = hasTranscode
       ? 'Your stream was stopped because it was video transcoding. Please set Plex quality to Original or Maximum before trying again.'
-      : session.over_limit
+      : hasOverLimit
         ? 'Your stream was stopped because your account went over its allowed stream limit.'
-        : session.over_download_limit
+        : hasOverDownloadLimit
           ? 'Your stream was stopped because your account went over the allowed download or playback limit.'
           : 'Your stream was stopped by the host operator. Please contact support if needed.'
-    setKillStreamState({ session, reason: defaultReason })
+    setKillStreamState({ session, sessions: targetSessions, reason: defaultReason })
   }
 
   async function submitKillStream() {
@@ -674,6 +688,9 @@ function PlexToolsInner() {
     }
 
     const busyKey = `kill:${current.session.sessionKey}`
+    const sessionKeys = Array.from(
+      new Set((current.sessions || []).map((item) => String(item.sessionKey || '').trim()).filter(Boolean))
+    )
     setModeratingKey(busyKey)
     try {
       const res = await fetch('/api/admin/plex/kill-stream', {
@@ -681,6 +698,7 @@ function PlexToolsInner() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sessionKey: current.session.sessionKey,
+          sessionKeys,
           reason,
           email: current.session.customer_email,
           user: current.session.user,
@@ -694,7 +712,7 @@ function PlexToolsInner() {
         return
       }
 
-      toast.success(data?.emailed ? 'Stream killed and message sent' : 'Stream killed')
+      toast.success(data?.emailed ? 'Streams killed and message sent' : 'Streams killed')
       setKillStreamState(null)
       await loadSessions()
     } catch (e: any) {
@@ -886,7 +904,52 @@ function PlexToolsInner() {
       .map((item) => item.customer)
   }, [customers, noticePicker, noticePickerQuery])
 
+  const overStreamerGroups = useMemo(() => {
+    const grouped = new Map<string, OverStreamerGroup>()
+    for (const session of sessions) {
+      if (!session.over_limit) continue
+
+      const key =
+        String(session.customer_email || '').trim().toLowerCase() ||
+        String(session.customer_name || '').trim().toLowerCase() ||
+        String(session.user || '').trim().toLowerCase() ||
+        String(session.userId || '').trim().toLowerCase() ||
+        session.sessionKey
+
+      const existing = grouped.get(key)
+      if (existing) {
+        existing.sessions.push(session)
+        existing.activeStreams = Math.max(existing.activeStreams, Number(session.active_streams || 0))
+        existing.allowedStreams = Math.max(existing.allowedStreams, Number(session.allowed_streams || 0))
+        const ip = String(session.ip || '').trim()
+        if (ip && !existing.uniqueIps.includes(ip)) existing.uniqueIps.push(ip)
+        const currentStartedAt = new Date(String(existing.primary.startedAt || 0)).getTime()
+        const incomingStartedAt = new Date(String(session.startedAt || 0)).getTime()
+        if (incomingStartedAt > currentStartedAt) {
+          existing.primary = session
+        }
+      } else {
+        grouped.set(key, {
+          id: key,
+          primary: session,
+          sessions: [session],
+          activeStreams: Math.max(1, Number(session.active_streams || 1)),
+          allowedStreams: Math.max(1, Number(session.allowed_streams || 1)),
+          uniqueIps: String(session.ip || '').trim() ? [String(session.ip || '').trim()] : [],
+        })
+      }
+    }
+
+    return Array.from(grouped.values())
+      .map((group) => ({
+        ...group,
+        sessions: [...group.sessions].sort((left, right) => new Date(String(left.startedAt || 0)).getTime() - new Date(String(right.startedAt || 0)).getTime()),
+      }))
+      .sort((left, right) => new Date(String(right.primary.startedAt || 0)).getTime() - new Date(String(left.primary.startedAt || 0)).getTime())
+  }, [sessions])
+
   const inviteSelectedIds = useMemo(() => Object.entries(inviteLibs).filter(([, v]) => v).map(([k]) => Number(k)), [inviteLibs])
+  const displayedSessionCardCount = sessionViewFilter === 'over_streamers' ? overStreamerGroups.length : filteredSessions.length
 
   async function openManage(r: ShareRow) {
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -1295,15 +1358,106 @@ function PlexToolsInner() {
               ) : null}
             </div>
             <div className="text-xs text-slate-400">
-              Sessions: <span className="text-slate-100 font-semibold">{filteredSessions.length}</span>
+              {sessionViewFilter === 'over_streamers' ? 'Customers' : 'Sessions'}: <span className="text-slate-100 font-semibold">{displayedSessionCardCount}</span>
             </div>
           </div>
           {sessionsError && <div className="mt-3 text-xs text-rose-400">{sessionsError}</div>}
           <div className="mt-4 grid gap-3 xl:grid-cols-2 2xl:grid-cols-3">
-            {!sessionsLoading && filteredSessions.length === 0 ? (
+            {!sessionsLoading && displayedSessionCardCount === 0 ? (
               <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 text-xs text-slate-500">No active sessions right now.</div>
             ) : null}
-            {filteredSessions.map((s) => (
+            {sessionViewFilter === 'over_streamers' ? overStreamerGroups.map((group) => {
+              const primary = group.primary
+              const warningBusyKey = `warn:${primary.sessionKey}`
+              const killBusyKey = `kill:${primary.sessionKey}`
+              const banBusyKey = `ban:${primary.sessionKey}`
+              const singleIp = group.uniqueIps.length === 1 ? group.uniqueIps[0] : ''
+
+              return (
+                <div key={`over-group:${group.id}`} className="group relative overflow-hidden rounded-[24px] border border-rose-400/15 bg-slate-950/90 shadow-[0_24px_64px_rgba(2,6,23,0.52)]">
+                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(244,63,94,0.18),transparent_34%),linear-gradient(180deg,rgba(15,23,42,0.35),rgba(2,6,23,0.92)_42%,rgba(2,6,23,0.98))]" />
+                  <div className="relative p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-xs uppercase tracking-[0.26em] text-rose-200/80">{primary.customer_name || primary.customer_email || primary.user || 'Unknown user'}</div>
+                        <div className="mt-1.5 text-[1.12rem] font-semibold leading-tight text-white sm:text-[1.38rem]">{group.activeStreams}/{group.allowedStreams} live streams on one account</div>
+                        <div className="mt-1 text-sm text-slate-300/90">
+                          {group.sessions.length} live streams are combined here so you can handle the warning once.
+                        </div>
+                      </div>
+                      <div className="shrink-0 rounded-full bg-rose-500/20 px-2 py-1 text-rose-100 backdrop-blur">
+                        Over limit
+                      </div>
+                    </div>
+
+                    <div className="mt-3 space-y-2">
+                      {group.sessions.map((session, index) => (
+                        <div key={`group-session:${session.sessionKey}`} className="rounded-[18px] border border-white/8 bg-white/[0.03] p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Stream {index + 1}</div>
+                              <div className="mt-1 truncate text-sm font-semibold text-white">{session.primaryTitle || session.title}</div>
+                              {session.secondaryTitle ? <div className="mt-1 truncate text-xs text-slate-400">{session.secondaryTitle}</div> : null}
+                            </div>
+                            <div className="text-right text-xs text-slate-400">
+                              <div>{session.player || session.device || '-'}</div>
+                              <div className="mt-1">{formatKbps(session.bandwidthKbps)}</div>
+                            </div>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {buildSessionMediaTags(session).map((tag) => (
+                              <span key={`${session.sessionKey}:${tag}`} className="rounded-full border border-white/8 bg-white/[0.04] px-2 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-slate-300">
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-3 rounded-[18px] border border-white/8 bg-black/20 p-2.5 text-xs text-slate-300">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span>{singleIp || `${group.uniqueIps.length} different IPs active`}</span>
+                        <span className="text-slate-400">{group.sessions.map((session) => session.player || session.device || 'Device').join(' • ')}</span>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap justify-end gap-1.5">
+                      <button
+                        className="btn-xs-outline border-amber-500/30 px-2 py-1 text-amber-200 hover:bg-amber-500/10"
+                        onClick={() => moderateSession('warn', primary)}
+                        disabled={moderatingKey === warningBusyKey}
+                      >
+                        {moderatingKey === warningBusyKey ? '...' : `Warn ${Math.min(Number(primary.warning_count || 0) + 1, 3)}/3`}
+                      </button>
+                      <button
+                        className="btn-xs-outline border-orange-500/30 px-2 py-1 text-orange-200 hover:bg-orange-500/10"
+                        onClick={() => openKillStream(primary, group.sessions)}
+                        disabled={moderatingKey === killBusyKey}
+                      >
+                        {moderatingKey === killBusyKey ? '...' : 'Kill all'}
+                      </button>
+                      <button
+                        className="btn-xs-outline border-rose-500/30 px-2 py-1 text-rose-200 hover:bg-rose-500/10"
+                        onClick={() => moderateSession('ban', primary)}
+                        disabled={moderatingKey === banBusyKey}
+                      >
+                        {moderatingKey === banBusyKey ? '...' : 'Ban'}
+                      </button>
+                      {singleIp ? (
+                        <button
+                          className="btn-xs-outline px-2 py-1"
+                          onClick={() => blockIp(singleIp)}
+                          disabled={Boolean(primary.ip_blocked) || blockingIp === singleIp}
+                        >
+                          {primary.ip_blocked ? 'IP Set' : blockingIp === singleIp ? '...' : 'Block IP'}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              )
+            }) : filteredSessions.map((s) => (
               <div key={`card:${s.sessionKey}`} className="group relative overflow-hidden rounded-[24px] border border-white/10 bg-slate-950/90 shadow-[0_24px_64px_rgba(2,6,23,0.52)]">
                 {buildPlexArtworkUrl(s.artPath || s.thumbPath) ? (
                   <div className="absolute inset-0 opacity-40">

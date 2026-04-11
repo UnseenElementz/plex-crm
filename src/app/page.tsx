@@ -110,7 +110,7 @@ export default function Home() {
   const layer = { transform: `translateY(${-(parallaxY * 0.08)}px)` }
 
   return (
-    <main className="relative min-h-[calc(100vh-5.5rem)] overflow-hidden">
+    <main className="relative min-h-[calc(100svh-4.5rem)] overflow-hidden sm:min-h-[calc(100vh-5.5rem)]">
       <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(56,189,248,0.2),transparent_22%),radial-gradient(circle_at_78%_14%,rgba(168,85,247,0.22),transparent_24%),radial-gradient(circle_at_50%_58%,rgba(37,99,235,0.16),transparent_30%),linear-gradient(180deg,rgba(1,4,17,0.98),rgba(3,8,24,0.96)_48%,rgba(2,5,17,0.98))]" />
         {resolvedHero ? (
@@ -153,8 +153,8 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="page-section relative z-10 flex min-h-[calc(100vh-5.5rem)] items-center py-4 sm:py-6">
-      <section className="panel-lift relative w-full overflow-hidden rounded-[36px] border border-cyan-400/15 bg-[linear-gradient(180deg,rgba(3,8,23,0.72),rgba(4,9,24,0.62))] px-4 py-5 shadow-[0_30px_120px_rgba(8,145,178,0.16)] backdrop-blur-[14px] sm:px-6 sm:py-6 lg:px-8 lg:py-7">
+      <div className="page-section relative z-10 flex min-h-[calc(100svh-4.5rem)] items-start py-3 sm:min-h-[calc(100vh-5.5rem)] sm:items-center sm:py-6">
+      <section className="panel-lift relative w-full overflow-hidden rounded-[24px] border border-cyan-400/15 bg-[linear-gradient(180deg,rgba(3,8,23,0.72),rgba(4,9,24,0.62))] px-3 py-4 shadow-[0_30px_120px_rgba(8,145,178,0.16)] backdrop-blur-[14px] sm:rounded-[36px] sm:px-6 sm:py-6 lg:px-8 lg:py-7">
 
         <div className="grid gap-6 xl:grid-cols-[0.78fr_1.22fr] xl:items-center">
           <div className="relative z-10 space-y-4 xl:pr-3">
@@ -167,7 +167,7 @@ export default function Home() {
               <div className="gradient-text text-xs font-medium uppercase tracking-[0.32em] text-cyan-300/90 sm:text-[0.85rem]">
                 {companyName}
               </div>
-              <h1 className="mt-3 max-w-2xl text-[1.9rem] font-semibold leading-[1.02] tracking-[-0.04em] text-white sm:text-[2.2rem] lg:text-[2.55rem] xl:text-[2.75rem]">
+              <h1 className="mt-3 max-w-2xl text-[1.65rem] font-semibold leading-[1.02] tracking-[-0.04em] text-white sm:text-[2.2rem] lg:text-[2.55rem] xl:text-[2.75rem]">
                 Private media hosting for invited members.
               </h1>
               <p className="mt-3 max-w-lg text-sm leading-6 text-slate-300 sm:text-[15px]">
@@ -243,7 +243,7 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="relative z-10 mt-5 grid gap-3 md:grid-cols-3">
+        <div className="relative z-10 mt-4 grid gap-3 md:grid-cols-3">
           {cards.map((card, index) => {
             const Icon = card.icon
             return (

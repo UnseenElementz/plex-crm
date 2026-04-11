@@ -166,8 +166,8 @@ export default function CustomerLoginPage() {
   }
 
   return (
-    <main className="page-section customer-auth-shell flex min-h-screen items-center justify-center py-10">
-      <div className="glass customer-auth-card w-full max-w-md rounded-[32px] p-6">
+    <main className="page-section customer-auth-shell flex min-h-[calc(100svh-4.5rem)] items-start justify-center py-4 sm:min-h-screen sm:items-center sm:py-10">
+      <div className="glass customer-auth-card w-full max-w-md rounded-[24px] p-4 sm:rounded-[32px] sm:p-6">
         <div className="text-center mb-6">
           <h1 className="text-2xl font-bold mb-2 text-white">Member Login</h1>
           <p className="text-slate-400">Existing customers sign in here. New access now happens through private member invites only.</p>

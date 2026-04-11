@@ -666,6 +666,14 @@ export default function AdminEmailPage() {
   const selectedCount = useMemo(() => Object.keys(selected).length, [selected])
   const selectedInbox = useMemo(() => inbox.find((mail) => mail.id === selectedInboxId) || null, [inbox, selectedInboxId])
   const selectedInboxSections = useMemo(() => splitThreadSections(selectedInbox?.text || selectedInbox?.preview || ''), [selectedInbox])
+  const selectedInboxCustomer = useMemo(() => {
+    const candidates = [
+      String(selectedInbox?.matchedCustomerEmail || '').trim().toLowerCase(),
+      String(selectedInbox?.fromEmail || '').trim().toLowerCase(),
+    ].filter(Boolean)
+    if (!candidates.length) return null
+    return customers.find((customer) => candidates.includes(String(customer.email || '').trim().toLowerCase())) || null
+  }, [customers, selectedInbox])
   const selectAllCustomers = useMemo(() => filteredCustomers.length > 0 && filteredCustomers.every((customer) => selected[customer.email]), [filteredCustomers, selected])
   const unreadServiceAverage = useMemo(() => {
     if (!inbox.length) return '0.0'
@@ -675,8 +683,8 @@ export default function AdminEmailPage() {
   const priorityCount = useMemo(() => inbox.filter((mail) => Number(mail.serviceScore || 0) >= 4).length, [inbox])
 
   return (
-    <main className="pb-10 pt-2">
-      <section className="mail-hero relative overflow-hidden rounded-[34px] border border-cyan-400/16 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_28%),radial-gradient(circle_at_82%_22%,rgba(96,165,250,0.16),transparent_26%),linear-gradient(180deg,rgba(6,12,28,0.92),rgba(6,10,24,0.96))] p-5 shadow-[0_30px_120px_rgba(8,15,42,0.55)] sm:p-7">
+    <main className="pb-8 pt-1 sm:pb-10 sm:pt-2">
+      <section className="mail-hero relative overflow-hidden rounded-[24px] border border-cyan-400/16 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_28%),radial-gradient(circle_at_82%_22%,rgba(96,165,250,0.16),transparent_26%),linear-gradient(180deg,rgba(6,12,28,0.92),rgba(6,10,24,0.96))] p-4 shadow-[0_30px_120px_rgba(8,15,42,0.55)] sm:rounded-[34px] sm:p-7">
         <div className="absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/60 to-transparent" />
         <div className="absolute -left-24 top-10 h-56 w-56 rounded-full bg-cyan-400/10 blur-3xl" />
         <div className="absolute right-0 top-0 h-64 w-64 rounded-full bg-blue-400/10 blur-3xl" />
@@ -687,7 +695,7 @@ export default function AdminEmailPage() {
               24/7 Ticket Desk
             </div>
             <div className="max-w-3xl">
-              <h2 className="text-3xl font-semibold tracking-[-0.04em] text-white sm:text-[2.5rem]">
+              <h2 className="text-2xl font-semibold tracking-[-0.04em] text-white sm:text-[2.5rem]">
                 One live queue, one clear thread stage, one fast reply dock.
               </h2>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
@@ -766,7 +774,7 @@ export default function AdminEmailPage() {
           </div>
         </div>
       </section>
-      <div className="mt-6 grid gap-6 2xl:grid-cols-[1.1fr_1.35fr_1fr]">
+      <div className="mt-4 grid gap-4 sm:mt-6 sm:gap-6 2xl:grid-cols-[1.1fr_1.35fr_1fr]">
         <section className="ticket-panel">
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/8 p-5">
             <div>
@@ -843,7 +851,7 @@ export default function AdminEmailPage() {
           </div>
         </section>
 
-        <section className="ticket-panel min-h-[42rem]">
+        <section className="ticket-panel 2xl:min-h-[42rem]">
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/8 p-5">
             <div>
               <div className="text-[11px] uppercase tracking-[0.24em] text-cyan-200">Thread stage</div>
@@ -858,95 +866,98 @@ export default function AdminEmailPage() {
             <div className="flex min-h-[28rem] items-center justify-center p-6 text-sm text-slate-500">Select a live ticket to open the thread stage.</div>
           ) : (
             <div className="space-y-5 p-5">
-              <div className="grid gap-4 2xl:grid-cols-[minmax(0,1.2fr)_minmax(16rem,0.9fr)]">
-                <div className="rounded-[26px] border border-cyan-400/14 bg-[linear-gradient(180deg,rgba(11,20,44,0.94),rgba(7,12,26,0.96))] p-5 shadow-[0_16px_60px_rgba(8,15,42,0.34)]">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Customer record</div>
-                      <div className="mt-4 flex items-start gap-3">
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-cyan-400/18 bg-cyan-400/10 text-sm font-semibold uppercase tracking-[0.16em] text-cyan-100">
-                          {(selectedInbox.matchedCustomerName || selectedInbox.fromName || selectedInbox.fromEmail || '?').trim().charAt(0) || '?'}
+              <div className="rounded-[30px] border border-cyan-400/14 bg-[linear-gradient(180deg,rgba(8,18,40,0.96),rgba(5,10,24,0.98))] p-5 shadow-[0_24px_90px_rgba(8,15,42,0.34)]">
+                <div className="flex flex-col gap-4 border-b border-white/8 pb-5">
+                  <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                    <div className="flex min-w-0 flex-1 items-start gap-4">
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] border border-cyan-400/18 bg-cyan-400/10 text-sm font-semibold uppercase tracking-[0.16em] text-cyan-100">
+                        {(selectedInbox.matchedCustomerName || selectedInbox.fromName || selectedInbox.fromEmail || '?').trim().charAt(0) || '?'}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Ticket detail</div>
+                          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-cyan-100">{buildTicketCode(selectedInbox.uid)}</span>
+                          <span className={`rounded-full border px-3 py-1 text-[11px] uppercase tracking-[0.18em] ${getTicketTier(selectedInbox.serviceScore).classes}`}>
+                            {getTicketTier(selectedInbox.serviceScore).label}
+                          </span>
+                          <span className={`rounded-full border px-3 py-1 text-[11px] uppercase tracking-[0.18em] ${getTicketState(selectedInbox, replyContext).classes}`}>
+                            {getTicketState(selectedInbox, replyContext).label}
+                          </span>
                         </div>
-                        <div className="min-w-0">
-                          <div className="text-lg font-semibold leading-tight text-white break-words">
-                            {selectedInbox.matchedCustomerName || selectedInbox.fromName || 'Unknown customer'}
-                          </div>
-                          <div className="mt-1 text-sm leading-6 text-slate-300 break-all">
-                            {selectedInbox.matchedCustomerEmail || selectedInbox.fromEmail}
-                          </div>
+                        <div className="mt-3 text-[1.65rem] font-semibold leading-tight text-white break-words">
+                          {selectedInbox.matchedCustomerName || selectedInbox.fromName || 'Unknown customer'}
+                        </div>
+                        <div className="mt-2 text-sm text-slate-300 break-all">
+                          {selectedInbox.matchedCustomerEmail || selectedInbox.fromEmail}
                         </div>
                       </div>
                     </div>
-                    <span className="rounded-full border border-cyan-400/18 bg-cyan-400/10 px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-cyan-100">
-                      {selectedInbox.matchedCustomerEmail ? 'Matched CRM' : 'Inbox only'}
-                    </span>
-                  </div>
-                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-[20px] border border-white/8 bg-black/15 p-4">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Reply address</div>
-                      <div className="mt-2 text-sm leading-6 text-slate-200 break-all">{selectedInbox.fromEmail}</div>
-                    </div>
-                    <div className="rounded-[20px] border border-white/8 bg-black/15 p-4">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Display name</div>
-                      <div className="mt-2 text-sm leading-6 text-slate-200 break-words">{selectedInbox.fromName || 'Not provided'}</div>
+                    <div className="flex flex-wrap gap-2 xl:justify-end">
+                      <button className="btn-xs" onClick={() => startReplyDraft(selectedInbox)}>
+                        <Reply size={13} />
+                        Open reply lane
+                      </button>
+                      <button className="btn-xs-outline" onClick={() => void markInboxItemRead(selectedInbox.uid)} disabled={inboxActionUid === selectedInbox.uid}>
+                        {inboxActionUid === selectedInbox.uid ? 'Saving...' : 'Clear ticket'}
+                      </button>
                     </div>
                   </div>
-                </div>
-                <div className="rounded-[26px] border border-white/8 bg-white/5 p-5">
-                  <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Queue telemetry</div>
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2 2xl:grid-cols-1">
-                    <div className="rounded-[20px] border border-white/8 bg-black/15 p-4">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Priority</div>
-                      <div className="mt-2">
-                        <span className={`inline-flex rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] ${getTicketTier(selectedInbox.serviceScore).classes}`}>
-                          {getTicketTier(selectedInbox.serviceScore).label}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="rounded-[20px] border border-white/8 bg-black/15 p-4">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">State</div>
-                      <div className="mt-2">
-                        <span className={`inline-flex rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] ${getTicketState(selectedInbox, replyContext).classes}`}>
-                          {getTicketState(selectedInbox, replyContext).label}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="rounded-[20px] border border-white/8 bg-black/15 p-4 sm:col-span-2 2xl:col-span-1">
+
+                  <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-4">
+                    <div className="rounded-[22px] border border-white/8 bg-black/15 p-4">
                       <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Arrived</div>
                       <div className="mt-2 text-sm leading-6 text-slate-200">{formatInboxDate(selectedInbox.date)}</div>
                       <div className="mt-1 text-[11px] uppercase tracking-[0.18em] text-cyan-200">{formatRelativeTime(selectedInbox.date)}</div>
                     </div>
+                    <div className="rounded-[22px] border border-white/8 bg-black/15 p-4">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Reply address</div>
+                      <div className="mt-2 text-sm leading-6 text-slate-200 break-all">{selectedInbox.fromEmail}</div>
+                    </div>
+                    <div className="rounded-[22px] border border-white/8 bg-black/15 p-4">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">CRM status</div>
+                      <div className="mt-2 text-sm leading-6 text-slate-200">{selectedInbox.matchedCustomerEmail ? 'Matched customer' : 'Inbox only sender'}</div>
+                      <div className="mt-1 text-[11px] uppercase tracking-[0.18em] text-slate-500">{selectedInboxCustomer ? getCustomerStatus(selectedInboxCustomer) : 'Unknown plan state'}</div>
+                    </div>
+                    <div className="rounded-[22px] border border-white/8 bg-black/15 p-4">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Plan snapshot</div>
+                      <div className="mt-2 text-sm leading-6 text-slate-200">{selectedInboxCustomer?.plan || 'No plan'}</div>
+                      <div className="mt-1 text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                        {selectedInboxCustomer?.streams ? `${selectedInboxCustomer.streams} stream${selectedInboxCustomer.streams === 1 ? '' : 's'}` : 'Streams not loaded'}
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div className="rounded-[30px] border border-white/8 bg-[linear-gradient(180deg,rgba(6,14,32,0.84),rgba(4,8,18,0.96))] p-5 shadow-[0_24px_80px_rgba(8,15,42,0.32)]">
-                <div className="flex flex-col gap-4 border-b border-white/8 pb-5 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0 flex-1">
+
+                <div className="mt-5 space-y-4">
+                  <div className="rounded-[24px] border border-white/8 bg-[linear-gradient(180deg,rgba(6,14,32,0.84),rgba(4,8,18,0.96))] p-5 shadow-[0_24px_80px_rgba(8,15,42,0.28)]">
                     <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Subject</div>
                     <div className="mt-2 text-xl font-semibold leading-tight text-white break-words">{selectedInbox.subject || '(No subject)'}</div>
                     <div className="mt-3 flex flex-wrap gap-2">
-                      <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-cyan-100">{buildTicketCode(selectedInbox.uid)}</span>
-                      <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-400">{formatRelativeTime(selectedInbox.date)}</span>
+                      <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                        {selectedInbox.matchedCustomerName ? 'Known customer' : 'New sender'}
+                      </span>
+                      <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                        {replyContext?.uid === selectedInbox.uid ? 'Reply armed in lane' : 'Ready to reply'}
+                      </span>
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2 sm:justify-end">
-                    <button className="btn-xs" onClick={() => startReplyDraft(selectedInbox)}>
-                      <Reply size={13} />
-                      Open reply lane
-                    </button>
-                    <button className="btn-xs-outline" onClick={() => void markInboxItemRead(selectedInbox.uid)} disabled={inboxActionUid === selectedInbox.uid}>
-                      {inboxActionUid === selectedInbox.uid ? 'Saving...' : 'Clear ticket'}
-                    </button>
+
+                  <div className="rounded-[24px] border border-cyan-400/12 bg-[linear-gradient(180deg,rgba(10,22,42,0.84),rgba(7,14,28,0.92))] p-5">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-cyan-200">Latest message</div>
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">{buildTicketCode(selectedInbox.uid)}</div>
+                    </div>
+                    <div className="rounded-[20px] border border-white/8 bg-black/15 p-4 text-[15px] leading-7 text-slate-200 whitespace-pre-wrap break-words">
+                      {selectedInboxSections.latest || 'No plain text body found.'}
+                    </div>
                   </div>
-                </div>
-                <div className="mt-5 space-y-4">
-                  <div className="rounded-[24px] border border-cyan-400/12 bg-[linear-gradient(180deg,rgba(10,22,42,0.84),rgba(7,14,28,0.92))] p-5 text-[15px] leading-7 text-slate-200 whitespace-pre-wrap break-words">
-                    {selectedInboxSections.latest || 'No plain text body found.'}
-                  </div>
+
                   {selectedInboxSections.quoted ? (
-                    <div className="rounded-[22px] border border-white/8 bg-black/15 p-4">
+                    <div className="rounded-[24px] border border-white/8 bg-black/15 p-5">
                       <div className="mb-3 text-[11px] uppercase tracking-[0.18em] text-slate-500">Earlier thread</div>
-                      <div className="text-sm leading-7 text-slate-400 whitespace-pre-wrap break-words">{selectedInboxSections.quoted}</div>
+                      <div className="max-h-[18rem] overflow-y-auto rounded-[20px] border border-white/8 bg-[rgba(6,12,28,0.72)] p-4 text-sm leading-7 text-slate-400 whitespace-pre-wrap break-words">
+                        {selectedInboxSections.quoted}
+                      </div>
                     </div>
                   ) : null}
                 </div>

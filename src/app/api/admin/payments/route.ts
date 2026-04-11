@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createClient } from '@supabase/supabase-js'
 import { listPayPalLedgerEntries } from '@/lib/paymentLedger'
+import { backfillPayPalLedgerFromOrder } from '@/lib/paypalOrders'
 
 function svc() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string
@@ -34,7 +35,7 @@ export async function GET() {
       return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
     }
 
-    const [paymentsRes, customersRes, ledgerEntries] = await Promise.all([
+    const [paymentsRes, customersRes, initialLedgerEntries] = await Promise.all([
       supabase.from('payments').select('*').order('payment_date', { ascending: false }),
       supabase.from('customers').select('id,name,email'),
       listPayPalLedgerEntries().catch(() => []),
@@ -58,9 +59,75 @@ export async function GET() {
       if (customer.email) customersByEmail.set(customer.email, customer)
     }
 
-    const ledgerByPaymentId = new Map<string, (typeof ledgerEntries)[number]>()
-    const ledgerByCaptureId = new Map<string, (typeof ledgerEntries)[number]>()
-    const ledgerByOrderId = new Map<string, (typeof ledgerEntries)[number]>()
+    const ledgerByPaymentId = new Map<string, (typeof initialLedgerEntries)[number]>()
+    const ledgerByCaptureId = new Map<string, (typeof initialLedgerEntries)[number]>()
+    const ledgerByOrderId = new Map<string, (typeof initialLedgerEntries)[number]>()
+    for (const entry of initialLedgerEntries || []) {
+      const paymentId = String(entry?.paymentId || '').trim()
+      if (paymentId && !ledgerByPaymentId.has(paymentId)) {
+        ledgerByPaymentId.set(paymentId, entry)
+      }
+      const captureId = String(entry?.captureId || '').trim()
+      if (captureId && !ledgerByCaptureId.has(captureId)) {
+        ledgerByCaptureId.set(captureId, entry)
+      }
+      const orderId = String(entry?.orderId || '').trim()
+      if (orderId && !ledgerByOrderId.has(orderId)) {
+        ledgerByOrderId.set(orderId, entry)
+      }
+    }
+
+    const paymentBackfillTargets = (paymentsRes.data || []).filter((row: any) => {
+      const paymentId = String(row?.id || '').trim()
+      const orderId = String(row?.order_id || '').trim()
+      if (!orderId) return false
+      const existingLedger =
+        ledgerByPaymentId.get(paymentId) ||
+        ledgerByCaptureId.get(String(row?.capture_id || '').trim()) ||
+        ledgerByOrderId.get(orderId) ||
+        null
+      return !existingLedger?.note
+    })
+
+    const ledgerBackfillTargets = (initialLedgerEntries || []).filter((entry) => {
+      const orderId = String(entry?.orderId || '').trim()
+      return Boolean(orderId && !String(entry?.note || '').trim())
+    })
+
+    if (paymentBackfillTargets.length || ledgerBackfillTargets.length) {
+      await Promise.all(
+        [
+          ...paymentBackfillTargets.map((row: any) =>
+            backfillPayPalLedgerFromOrder({
+              paymentId: String(row?.id || '').trim(),
+              customerId: String(row?.customer_id || '').trim(),
+              customerEmail: customersById.get(String(row?.customer_id || '').trim())?.email || null,
+              customerName: customersById.get(String(row?.customer_id || '').trim())?.name || null,
+              orderId: String(row?.order_id || '').trim(),
+              captureId: String(row?.capture_id || '').trim(),
+            }).catch(() => null)
+          ),
+          ...ledgerBackfillTargets.map((entry) =>
+          backfillPayPalLedgerFromOrder({
+            paymentId: String(entry?.paymentId || '').trim(),
+            customerId: String(entry?.customerId || '').trim(),
+            customerEmail: String(entry?.customerEmail || '').trim() || null,
+            customerName: String(entry?.customerName || '').trim() || null,
+            orderId: String(entry?.orderId || '').trim(),
+            captureId: String(entry?.captureId || '').trim(),
+          }).catch(() => null)
+        ),
+        ]
+      )
+    }
+
+    const ledgerEntries =
+      paymentBackfillTargets.length || ledgerBackfillTargets.length
+        ? await listPayPalLedgerEntries().catch(() => initialLedgerEntries)
+        : initialLedgerEntries
+    ledgerByPaymentId.clear()
+    ledgerByCaptureId.clear()
+    ledgerByOrderId.clear()
     for (const entry of ledgerEntries || []) {
       const paymentId = String(entry?.paymentId || '').trim()
       if (paymentId && !ledgerByPaymentId.has(paymentId)) {
@@ -89,6 +156,8 @@ export async function GET() {
       const type =
         String(ledger?.mode || '').trim() === 'downloads_addon' || provider.toLowerCase().includes('downloads add-on')
           ? 'downloads_addon'
+          : String(ledger?.mode || '').trim() === 'streams_addon' || provider.toLowerCase().includes('streams add-on')
+            ? 'streams_addon'
           : 'hosting'
 
       return {
@@ -151,7 +220,12 @@ export async function GET() {
         status: entry?.refundId ? 'refunded' : String(entry?.status || 'completed').trim() || 'completed',
         created_at: entry?.createdAt || entry?.capturedAt || null,
         note: entry?.note || null,
-        type: String(entry?.mode || '').trim() === 'downloads_addon' ? 'downloads_addon' : 'hosting',
+        type:
+          String(entry?.mode || '').trim() === 'downloads_addon'
+            ? 'downloads_addon'
+            : String(entry?.mode || '').trim() === 'streams_addon'
+              ? 'streams_addon'
+              : 'hosting',
         order_id: orderId || null,
         capture_id: captureId || null,
         refund_id: entry?.refundId || null,

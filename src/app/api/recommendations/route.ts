@@ -3,6 +3,27 @@ import { getStatus } from '@/lib/pricing'
 import { sendCustomEmail } from '@/lib/email'
 import { createServiceClient, getRequester } from '@/lib/serverSupabase'
 
+function normalizeRecommendationStatus(status: string) {
+  const clean = String(status || '').trim().toLowerCase()
+  if (clean === 'completed') return 'done'
+  if (clean === 'done') return 'done'
+  if (clean === 'in-progress') return 'in-progress'
+  return 'pending'
+}
+
+function isWorkingComment(comment: any) {
+  const author = String(comment?.author_email || '').trim().toLowerCase()
+  const content = String(comment?.content || '').trim().toLowerCase()
+  return author === 'system@streamzrus.local' && content.startsWith("we're on it")
+}
+
+function getDisplayStatus(status: string, comments: any[]) {
+  const normalized = normalizeRecommendationStatus(status)
+  if (normalized === 'done') return 'done'
+  if (normalized === 'in-progress') return 'in-progress'
+  return comments.some((comment) => isWorkingComment(comment)) ? 'in-progress' : 'pending'
+}
+
 function ensureActiveCustomer(nextDue: any, subscriptionStatus: any): boolean {
   if (String(subscriptionStatus || '').toLowerCase() === 'inactive') return false
   if (!nextDue) return false
@@ -89,7 +110,6 @@ export async function GET(req: Request){
       }
       query = query.eq('submitter_email', filterEmail)
     }
-    if (status) query = query.eq('status', status)
     if (kind) query = query.eq('kind', kind)
 
     const sortField = field === 'updated_at' && !supportsUpdatedAt ? 'created_at' : field
@@ -133,6 +153,7 @@ export async function GET(req: Request){
 
       return {
         ...item,
+        status: getDisplayStatus(item.status, comments),
         submitter_email: exactEmailVisible ? item.submitter_email : anonymizeEmail(item.submitter_email),
         comments_count: comments.length,
         likes_count: likes.length,
@@ -143,7 +164,11 @@ export async function GET(req: Request){
       }
     })
 
-    return NextResponse.json({ items })
+    const filteredItems = status
+      ? items.filter((item: any) => item.status === normalizeRecommendationStatus(status))
+      : items
+
+    return NextResponse.json({ items: filteredItems })
   }catch(e:any){ return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 }) }
 }
 

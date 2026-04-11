@@ -3,6 +3,7 @@ import paypal from '@paypal/checkout-server-sdk'
 import { calculatePrice, type Plan } from '@/lib/pricing'
 import { createClient } from '@supabase/supabase-js'
 import { getCommunityCheckoutEligibility } from '@/lib/communityGate'
+import { parseCustomerNotes } from '@/lib/customerNotes'
 import { buildCheckoutReference, buildPayPalCustomId, type PayPalCheckoutMode } from '@/lib/payments'
 import { getReferralDiscountSnapshot } from '@/lib/referrals'
 export const runtime = 'nodejs'
@@ -60,6 +61,30 @@ export async function POST(request: Request) {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY as string
     let { amount, currency = 'GBP', plan, streams, downloads, customerEmail } = body || {}
+    const serviceClient =
+      supabaseUrl && supabaseServiceKey
+        ? createClient(supabaseUrl, supabaseServiceKey, {
+            auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+          })
+        : null
+    let currentCustomer: {
+      streams?: number | null
+      notes?: string | null
+      next_payment_date?: string | null
+      subscription_status?: string | null
+    } | null = null
+    if (normalizedEmail && serviceClient) {
+      try {
+        const result = await serviceClient
+          .from('customers')
+          .select('streams,notes,next_payment_date,subscription_status')
+          .eq('email', normalizedEmail)
+          .maybeSingle()
+        currentCustomer = result.data || null
+      } catch {
+        currentCustomer = null
+      }
+    }
     if (plan && typeof plan === 'string') {
       const p = plan as Plan
       const s = typeof streams === 'number' ? streams : 1
@@ -67,7 +92,23 @@ export async function POST(request: Request) {
       amount =
         mode === 'downloads_addon'
           ? Number(cfg?.downloads_price) || 20
+          : mode === 'streams_addon'
+            ? Math.max(0, Math.max(1, Number(streams || 1)) - Math.max(1, Number(currentCustomer?.streams || 1))) * (Number(cfg?.stream_yearly_price) || 20)
           : calculatePrice(p, s, cfg, downloads)
+    }
+
+    const currentNotes = parseCustomerNotes(currentCustomer?.notes || '')
+
+    if (mode === 'downloads_addon' && currentNotes.downloads) {
+      return NextResponse.json({ error: 'Downloads are already active on this account. Use the extra-stream add-on if you need more access without changing the plan date.' }, { status: 400 })
+    }
+
+    if (mode === 'streams_addon') {
+      const currentStreams = Math.max(1, Number(currentCustomer?.streams || 1))
+      const requestedStreams = Math.max(1, Number(streams || 1))
+      if (requestedStreams <= currentStreams) {
+        return NextResponse.json({ error: 'Choose a higher total stream count before paying for an extra stream add-on.' }, { status: 400 })
+      }
     }
 
     const referralDiscount =
@@ -85,8 +126,8 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: message, capacityReached: checkoutStatus.reason === 'capacity_reached' }, { status: 403 })
       }
 
-      if (supabaseUrl && supabaseServiceKey) {
-        const s = createClient(supabaseUrl, supabaseServiceKey)
+      if (serviceClient) {
+        const s = serviceClient
         let paymentLock = false
 
         try {

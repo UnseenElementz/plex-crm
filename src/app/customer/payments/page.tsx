@@ -31,6 +31,23 @@ function formatPaymentDate(value: string | null) {
   return format(date, 'dd/MM/yyyy HH:mm')
 }
 
+function getPurchaseLabel(note?: string | null) {
+  const clean = String(note || '').trim()
+  if (!clean) return 'Recorded payment'
+  return clean.split('|')[0]?.trim() || clean
+}
+
+function getPurchaseDetail(note?: string | null) {
+  const clean = String(note || '').trim()
+  if (!clean || !clean.includes('|')) return ''
+  return clean
+    .split('|')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .slice(1)
+    .join(' | ')
+}
+
 export default function CustomerPaymentsPage() {
   const [rows, setRows] = useState<Payment[]>([])
   const [loading, setLoading] = useState(true)
@@ -158,6 +175,13 @@ export default function CustomerPaymentsPage() {
                       ) : null}
                     </div>
                     <div className="mt-1 text-sm text-slate-400">{row.provider}</div>
+                    <div className="mt-3 rounded-[18px] border border-cyan-400/12 bg-cyan-500/10 px-3 py-2">
+                      <div className="text-[10px] uppercase tracking-[0.18em] text-cyan-200/70">Purchase</div>
+                      <div className="mt-1 text-sm text-white">{getPurchaseLabel(row.note)}</div>
+                      {getPurchaseDetail(row.note) ? (
+                        <div className="mt-1 text-xs text-cyan-100/75">{getPurchaseDetail(row.note)}</div>
+                      ) : null}
+                    </div>
                     {row.note ? (
                       <div className="mt-3 rounded-[18px] border border-white/8 bg-black/10 px-3 py-2 text-sm text-slate-300">
                         {row.note}

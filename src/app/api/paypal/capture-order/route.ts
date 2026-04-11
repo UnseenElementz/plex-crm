@@ -3,7 +3,7 @@ import paypal from '@paypal/checkout-server-sdk'
 import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { getCommunityCheckoutEligibility } from '@/lib/communityGate'
-import { applyDownloadsAddonPurchase, applySuccessfulPayment, parsePayPalCustomId } from '@/lib/payments'
+import { applyDownloadsAddonPurchase, applyStreamsAddonPurchase, applySuccessfulPayment, buildPaymentHistoryNote, parsePayPalCustomId, type PayPalCheckoutMode } from '@/lib/payments'
 import { recordPayPalLedgerEntry } from '@/lib/paymentLedger'
 import { type Plan } from '@/lib/pricing'
 const sanitize = (v?: string) => (v || '').trim().replace(/^['"]|['"]$/g, '')
@@ -166,7 +166,7 @@ export async function POST(request: Request) {
     
     const orderPurchaseUnit = res.result?.purchase_units?.[0] || {}
     const parsedCustomId = parsePayPalCustomId(orderPurchaseUnit?.custom_id)
-    const resolvedMode = parsedCustomId?.mode || 'renewal'
+    const resolvedMode: PayPalCheckoutMode = parsedCustomId?.mode || 'renewal'
     const resolvedEmail = String(parsedCustomId?.email || customerEmail || '').trim().toLowerCase()
     const resolvedPlan = (parsedCustomId?.plan || requestedPlan || 'yearly') as Plan
     const resolvedStreams = Math.max(1, Number(parsedCustomId?.streams || requestedStreams || 1))
@@ -180,7 +180,11 @@ export async function POST(request: Request) {
       0
     )
 
-    let paymentResult: Awaited<ReturnType<typeof applySuccessfulPayment>> | Awaited<ReturnType<typeof applyDownloadsAddonPurchase>> | null = null
+    let paymentResult:
+      | Awaited<ReturnType<typeof applySuccessfulPayment>>
+      | Awaited<ReturnType<typeof applyDownloadsAddonPurchase>>
+      | Awaited<ReturnType<typeof applyStreamsAddonPurchase>>
+      | null = null
     if (resolvedEmail) {
       try {
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string
@@ -189,21 +193,30 @@ export async function POST(request: Request) {
           throw new Error('Payment was captured, but local billing services are not configured.')
         }
 
-        paymentResult = resolvedMode === 'downloads_addon'
-          ? await applyDownloadsAddonPurchase({
-              customerEmail: resolvedEmail,
-              amount,
-              paymentOrderId: orderId,
-            })
-          : await applySuccessfulPayment({
-              customerEmail: resolvedEmail,
-              plan: resolvedPlan,
-              streams: resolvedStreams,
-              downloads: resolvedDownloads,
-              amount,
-              creditUsed: resolvedCreditUsed,
-              paymentOrderId: orderId,
-            })
+        if (resolvedMode === 'downloads_addon') {
+          paymentResult = await applyDownloadsAddonPurchase({
+            customerEmail: resolvedEmail,
+            amount,
+            paymentOrderId: orderId,
+          })
+        } else if (resolvedMode === 'streams_addon') {
+          paymentResult = await applyStreamsAddonPurchase({
+            customerEmail: resolvedEmail,
+            streams: resolvedStreams,
+            amount,
+            paymentOrderId: orderId,
+          })
+        } else {
+          paymentResult = await applySuccessfulPayment({
+            customerEmail: resolvedEmail,
+            plan: resolvedPlan,
+            streams: resolvedStreams,
+            downloads: resolvedDownloads,
+            amount,
+            creditUsed: resolvedCreditUsed,
+            paymentOrderId: orderId,
+          })
+        }
 
         const capture = extractCapture(res.result)
         if (capture?.id) {
@@ -213,13 +226,25 @@ export async function POST(request: Request) {
             customerEmail: resolvedEmail,
             amount,
             currency: String(capture?.amount?.currency_code || orderPurchaseUnit?.amount?.currency_code || 'GBP').trim() || 'GBP',
-            paymentMethod: resolvedMode === 'downloads_addon' ? 'PayPal - Downloads Add-on' : 'PayPal',
+            paymentMethod:
+              resolvedMode === 'downloads_addon'
+                ? 'PayPal - Downloads Add-on'
+                : resolvedMode === 'streams_addon'
+                  ? 'PayPal - Streams Add-on'
+                  : 'PayPal',
             status: 'completed',
             createdAt: String(paymentResult?.paymentDate || capture?.create_time || new Date().toISOString()),
             mode: resolvedMode,
             plan: resolvedPlan,
             streams: resolvedStreams,
             downloads: resolvedDownloads,
+            note: buildPaymentHistoryNote({
+              mode: resolvedMode,
+              plan: resolvedPlan,
+              streams: resolvedStreams,
+              downloads: resolvedDownloads,
+              nextDue: paymentResult?.nextDue || null,
+            }),
             orderId,
             captureId: String(capture.id || '').trim(),
             captureStatus: String(capture.status || res.result?.status || 'COMPLETED'),

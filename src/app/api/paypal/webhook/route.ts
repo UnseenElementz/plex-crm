@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import paypal from '@paypal/checkout-server-sdk'
-import { applyDownloadsAddonPurchase, applySuccessfulPayment, parsePayPalCustomId } from '@/lib/payments'
+import { applyDownloadsAddonPurchase, applyStreamsAddonPurchase, applySuccessfulPayment, buildPaymentHistoryNote, parsePayPalCustomId, type PayPalCheckoutMode } from '@/lib/payments'
 import { recordPayPalLedgerEntry } from '@/lib/paymentLedger'
 import { type Plan } from '@/lib/pricing'
 
@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     const amount = Number(capture?.amount?.value || 0)
 
     let resolvedEmail = payerEmail
-    let resolvedMode = 'renewal'
+    let resolvedMode: PayPalCheckoutMode = 'renewal'
     let resolvedPlan = 'yearly' as Plan
     let resolvedStreams = 1
     let resolvedDownloads = false
@@ -55,21 +55,29 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'customer email missing' }, { status: 400 })
     }
 
-    const paymentResult = resolvedMode === 'downloads_addon'
-      ? await applyDownloadsAddonPurchase({
-          customerEmail: resolvedEmail,
-          amount,
-          paymentOrderId: orderId,
-        })
-      : await applySuccessfulPayment({
-          customerEmail: resolvedEmail,
-          plan: resolvedPlan,
-          streams: resolvedStreams,
-          downloads: resolvedDownloads,
-          amount,
-          creditUsed: resolvedCreditUsed,
-          paymentOrderId: orderId,
-        })
+    const paymentResult =
+      resolvedMode === 'downloads_addon'
+        ? await applyDownloadsAddonPurchase({
+            customerEmail: resolvedEmail,
+            amount,
+            paymentOrderId: orderId,
+          })
+        : resolvedMode === 'streams_addon'
+          ? await applyStreamsAddonPurchase({
+              customerEmail: resolvedEmail,
+              streams: resolvedStreams,
+              amount,
+              paymentOrderId: orderId,
+            })
+          : await applySuccessfulPayment({
+              customerEmail: resolvedEmail,
+              plan: resolvedPlan,
+              streams: resolvedStreams,
+              downloads: resolvedDownloads,
+              amount,
+              creditUsed: resolvedCreditUsed,
+              paymentOrderId: orderId,
+            })
 
     const captureId = String(capture?.id || '').trim()
     if (captureId) {
@@ -79,13 +87,25 @@ export async function POST(request: Request) {
         customerEmail: resolvedEmail,
         amount,
         currency: String(capture?.amount?.currency_code || 'GBP').trim() || 'GBP',
-        paymentMethod: resolvedMode === 'downloads_addon' ? 'PayPal - Downloads Add-on' : 'PayPal',
+        paymentMethod:
+          resolvedMode === 'downloads_addon'
+            ? 'PayPal - Downloads Add-on'
+            : resolvedMode === 'streams_addon'
+              ? 'PayPal - Streams Add-on'
+              : 'PayPal',
         status: 'completed',
         createdAt: String(paymentResult?.paymentDate || capture?.create_time || new Date().toISOString()),
         mode: resolvedMode,
         plan: resolvedPlan,
         streams: resolvedStreams,
         downloads: resolvedDownloads,
+        note: buildPaymentHistoryNote({
+          mode: resolvedMode,
+          plan: resolvedPlan,
+          streams: resolvedStreams,
+          downloads: resolvedDownloads,
+          nextDue: paymentResult?.nextDue || null,
+        }),
         orderId,
         captureId,
         captureStatus: String(capture?.status || 'COMPLETED'),

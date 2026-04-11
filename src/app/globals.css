@@ -110,7 +110,7 @@
   }
 
   .page-section {
-    @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8;
+    @apply mx-auto w-full max-w-7xl px-3 sm:px-6 lg:px-8;
   }
 
   .glass {
@@ -551,7 +551,6 @@
 
   .cosmos-universe {
     transform-origin: 50% 48%;
-    will-change: transform, opacity, filter;
     animation: cosmosUniverseBreath 22s ease-in-out infinite;
   }
 
@@ -560,7 +559,6 @@
     background-position: center;
     background-repeat: no-repeat;
     background-size: cover;
-    will-change: transform, opacity;
   }
 
   .cosmos-universe__image {
@@ -586,7 +584,6 @@
       radial-gradient(circle at 50% 58%, rgba(96, 165, 250, 0.24), transparent 30%);
     opacity: 0.96;
     transform-origin: 50% 58%;
-    will-change: transform, opacity, filter;
     animation: cosmosCorePulse 16s ease-in-out infinite;
   }
 
@@ -654,7 +651,6 @@
       linear-gradient(180deg, rgba(103, 232, 249, 0.04), transparent 70%);
     filter: blur(18px);
     opacity: 0.88;
-    will-change: transform, opacity, filter;
     animation: cosmosHorizonBreath 18s ease-in-out infinite;
   }
 
@@ -1139,7 +1135,6 @@
     opacity: 0.92;
     filter: saturate(1.08) brightness(0.96) contrast(1.03);
     transform-origin: 54% 54%;
-    will-change: transform, filter, opacity;
     animation: universeBreath 18s ease-in-out infinite;
   }
 
@@ -1149,7 +1144,6 @@
       radial-gradient(circle at 54% 54%, rgba(255, 255, 255, 0.18), transparent 10%),
       radial-gradient(circle at 54% 54%, rgba(96, 165, 250, 0.22), transparent 24%);
     opacity: 0.96;
-    will-change: opacity, transform, filter;
     animation: universeVeilPulse 18s ease-in-out infinite;
   }
 
@@ -1161,7 +1155,6 @@
       radial-gradient(circle at 54% 54%, transparent 0 25%, rgba(56, 189, 248, 0.12) 25.6%, transparent 27.1%);
     filter: blur(0.2px);
     transform-origin: 54% 54%;
-    will-change: transform, opacity, filter;
     animation: universeHaloPulse 18s ease-in-out infinite;
   }
 
@@ -1729,5 +1722,79 @@ html[data-browser="edge"] .time-waster-scene__flare {
     width: 16rem;
     height: 16rem;
     opacity: 0.24;
+  }
+}
+
+@media (max-width: 399px) {
+  .page-section {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+
+  .panel,
+  .panel-strong,
+  .metallic-card,
+  .card-solid,
+  .glass,
+  .glass-strong,
+  .ticket-panel,
+  .customer-auth-card {
+    border-radius: 20px;
+  }
+
+  .hero-title {
+    font-size: 2.2rem;
+    line-height: 1;
+  }
+
+  .btn,
+  .btn-outline,
+  .btn-ghost,
+  .cta-btn,
+  .cta-outline {
+    min-height: 2.75rem;
+    padding: 0.75rem 1rem;
+    border-radius: 1rem;
+  }
+
+  .btn-xs,
+  .btn-xs-outline {
+    min-height: 2.4rem;
+    padding: 0.65rem 0.8rem;
+  }
+
+  .input {
+    padding: 0.8rem 0.95rem;
+    border-radius: 1rem;
+  }
+
+  .ticket-panel,
+  .ticket-side-card,
+  .ticket-stat-card,
+  .ticket-card,
+  .customer-auth-card {
+    padding: 0.9rem;
+  }
+
+  .ticket-list-scroll {
+    max-height: none;
+    padding: 0 0.9rem 0.9rem;
+  }
+
+  .chrono-card {
+    display: none;
+  }
+
+  .customer-auth-shell {
+    min-height: calc(100svh - 5rem);
+    align-items: flex-start;
+    padding-top: 0.5rem;
+    padding-bottom: 0.75rem;
+  }
+
+  .customer-auth-shell::before {
+    inset: auto 0 2% 0;
+    height: 10rem;
+    opacity: 0.48;
   }
 }

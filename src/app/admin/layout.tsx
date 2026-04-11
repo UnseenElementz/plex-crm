@@ -19,12 +19,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   ]
 
   return (
-    <div className="min-h-screen pb-8">
-      <div className="page-section pt-4">
-        <nav className="glass sticky top-4 z-40 rounded-[28px] px-4 py-4">
+    <div className="min-h-screen pb-6 sm:pb-8">
+      <div className="page-section pt-3 sm:pt-4">
+        <nav className="glass sticky top-3 z-40 rounded-[24px] px-3 py-3 sm:top-4 sm:rounded-[28px] sm:px-4 sm:py-4">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
             <div className="lg:mr-4">
-              <Link href="/admin" className="text-sm font-semibold uppercase tracking-[0.32em] text-cyan-200">
+              <Link href="/admin" className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200 sm:text-sm sm:tracking-[0.32em]">
                 Hosting Command
               </Link>
               <div className="mt-1 text-xs text-slate-500">Live operations and customer control</div>
@@ -37,7 +37,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   <Link
                     key={item.href}
                     href={item.href}
-                    className={`rounded-2xl px-3 py-2.5 text-sm whitespace-nowrap ${
+                    className={`rounded-xl px-3 py-2 text-xs whitespace-nowrap sm:rounded-2xl sm:py-2.5 sm:text-sm ${
                       active ? 'border border-cyan-400/25 bg-cyan-400/12 text-cyan-100' : 'text-slate-400 hover:text-slate-100'
                     }`}
                   >
@@ -51,7 +51,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </nav>
       </div>
 
-      <main className="page-section pt-6">
+      <main className="page-section pt-4 sm:pt-6">
         {children}
       </main>
       <GlobalPulse />

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createClient } from '@supabase/supabase-js'
 import { fetchInboxMessages, type MailboxConfig } from '@/lib/mailInbox'
-import { getSecurityOverview } from '@/lib/moderation'
+import { listPayPalLedgerEntries } from '@/lib/paymentLedger'
 import { scanPlexSessions } from '@/lib/plexSessionMonitor'
 import { getRequester } from '@/lib/serverSupabase'
 
@@ -10,7 +10,7 @@ const ADMIN_PULSE_CACHE_MS = 2000
 
 type PulseAlert = {
   id: string
-  kind: 'chat' | 'mail' | 'plex' | 'site' | 'checkout'
+  kind: 'chat' | 'mail' | 'plex' | 'site' | 'checkout' | 'purchase'
   level: 'info' | 'warn' | 'critical'
   title: string
   body: string
@@ -18,8 +18,93 @@ type PulseAlert = {
   createdAt: string | null
 }
 
+type PulseHistoryEvent = {
+  id: string
+  kind: 'visit' | 'checkout' | 'purchase'
+  title: string
+  body: string
+  href: string
+  createdAt: string | null
+}
+
+type PulsePurchaseRow = {
+  id: string
+  customerName: string
+  customerEmail: string | null
+  amount: number
+  title: string
+  body: string
+  createdAt: string | null
+  status: string
+}
+
 function isVideoTranscode(value: unknown) {
   return String(value || '').trim().toLowerCase().includes('transcode')
+}
+
+function normalizeSource(value: unknown) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function isCheckoutSource(source: string) {
+  return source.includes('paypal-checkout')
+}
+
+function isIgnoredPulseSource(source: string) {
+  return !source || source === 'admin-shell' || source.endsWith('-banned') || source.endsWith('-inactive')
+}
+
+function getVisitSourceLabel(source: string) {
+  switch (source) {
+    case 'customer-portal':
+    case 'customer-shell':
+      return 'Customer portal'
+    case 'customer-login':
+      return 'Customer login'
+    case 'customer-payments':
+      return 'Payments page'
+    case 'customer-register':
+      return 'Registration page'
+    case 'customer-paypal-checkout':
+      return 'PayPal checkout'
+    default:
+      return source.replace(/^customer-/, '').replace(/-/g, ' ') || 'Website'
+  }
+}
+
+function getPurchaseTitle(method: string) {
+  const normalized = String(method || '').trim().toLowerCase()
+  if (normalized.includes('downloads add-on')) return 'Downloads add-on purchased'
+  if (normalized.includes('streams add-on')) return 'Extra streams purchased'
+  return 'New membership payment'
+}
+
+function getPurchaseTitleFromLedger(input: {
+  paymentMethod?: string | null
+  note?: string | null
+  mode?: string | null
+}) {
+  const note = String(input.note || '').trim()
+  if (note) {
+    return note.split('|')[0]?.trim() || getPurchaseTitle(input.paymentMethod || '')
+  }
+  const mode = String(input.mode || '').trim().toLowerCase()
+  if (mode === 'downloads_addon') return 'Downloads add-on purchased'
+  if (mode === 'streams_addon') return 'Extra streams purchased'
+  return getPurchaseTitle(input.paymentMethod || '')
+}
+
+function getPurchaseBody(input: {
+  customerName?: string | null
+  customerEmail?: string | null
+  amount?: number
+  note?: string | null
+}) {
+  const customer = String(input.customerName || input.customerEmail || 'Customer').trim()
+  const amount = Number(input.amount || 0)
+  const note = String(input.note || '').trim()
+  if (note) return `${customer} • ${note}`
+  return `${customer} paid GBP ${amount.toFixed(2)}`
 }
 
 function svc() {
@@ -62,6 +147,11 @@ function isFresh(value: string | null | undefined, maxAgeMs: number) {
   const time = new Date(value).getTime()
   if (Number.isNaN(time)) return false
   return Date.now() - time <= maxAgeMs
+}
+
+function toTimestamp(value: unknown) {
+  const time = new Date(String(value || '')).getTime()
+  return Number.isNaN(time) ? 0 : time
 }
 
 async function loadUnreadMail(supabase: ReturnType<typeof svc>, settings: any) {
@@ -150,24 +240,169 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
     }
 
+    const { searchParams } = new URL(request.url)
+    const seenAtMs = Number(searchParams.get('seenAt') || 0)
+    const now = Date.now()
+    const history24hCutoff = new Date(now - 24 * 60 * 60 * 1000).toISOString()
+    const history7dCutoff = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString()
+
     const settingsPromise = supabase.from('admin_settings').select('*').eq('id', 1).maybeSingle()
     const conversationsPromise = supabase
       .from('conversations')
       .select('id,status,updated_at,metadata')
       .order('updated_at', { ascending: false })
       .limit(40)
-    const securityPromise = getSecurityOverview().catch(() => null)
+    const customersPromise = supabase.from('customers').select('id,name,email')
+    const paymentsPromise = supabase
+      .from('payments')
+      .select('id,customer_id,amount,currency,payment_date,payment_method,status')
+      .order('payment_date', { ascending: false })
+      .limit(12)
+    const paymentHistoryPromise = supabase
+      .from('payments')
+      .select('id,customer_id,amount,currency,payment_date,payment_method,status')
+      .gte('payment_date', history7dCutoff)
+      .order('payment_date', { ascending: false })
+      .limit(200)
+    const ledgerEntriesPromise = listPayPalLedgerEntries().catch(() => [])
+    const auditHistoryPromise = supabase
+      .from('plex_audit_logs')
+      .select('id,email,created_at,details')
+      .eq('action', 'ip_seen')
+      .gte('created_at', history7dCutoff)
+      .order('created_at', { ascending: false })
+      .limit(800)
     const plexPromise = scanPlexSessions().catch(() => null)
 
-    const [{ data: settings }, { data: conversations }] = await Promise.all([settingsPromise, conversationsPromise])
-    const [mail, security, plex] = await Promise.all([
+    const [
+      { data: settings },
+      { data: conversations },
+      { data: customers },
+      { data: payments },
+      { data: paymentHistoryRows },
+      ledgerEntries,
+      { data: auditHistoryRows },
+    ] = await Promise.all([
+      settingsPromise,
+      conversationsPromise,
+      customersPromise,
+      paymentsPromise,
+      paymentHistoryPromise,
+      ledgerEntriesPromise,
+      auditHistoryPromise,
+    ])
+    const [mail, plex] = await Promise.all([
       loadUnreadMail(supabase, settings || null),
-      securityPromise,
       plexPromise,
     ])
 
     const waitingChats = (conversations || []).filter((row: any) => row.status === 'waiting')
     const activeChats = (conversations || []).filter((row: any) => row.status === 'active')
+    const customersById = new Map<string, { name: string; email: string }>()
+    const customersByEmail = new Map<string, { name: string; email: string }>()
+    for (const row of customers || []) {
+      const customerId = String((row as any)?.id || '').trim()
+      const customerEmail = String((row as any)?.email || '').trim().toLowerCase()
+      const customerName = String((row as any)?.name || '').trim()
+      if (!customerId) continue
+      const entry = {
+        name: customerName,
+        email: customerEmail,
+      }
+      customersById.set(customerId, entry)
+      if (customerEmail) customersByEmail.set(customerEmail, entry)
+    }
+
+    const ledgerByPaymentId = new Map<string, any>()
+    const ledgerByCaptureId = new Map<string, any>()
+    const ledgerByOrderId = new Map<string, any>()
+    for (const entry of Array.isArray(ledgerEntries) ? ledgerEntries : []) {
+      const paymentId = String((entry as any)?.paymentId || '').trim()
+      const captureId = String((entry as any)?.captureId || '').trim()
+      const orderId = String((entry as any)?.orderId || '').trim()
+      if (paymentId && !ledgerByPaymentId.has(paymentId)) ledgerByPaymentId.set(paymentId, entry)
+      if (captureId && !ledgerByCaptureId.has(captureId)) ledgerByCaptureId.set(captureId, entry)
+      if (orderId && !ledgerByOrderId.has(orderId)) ledgerByOrderId.set(orderId, entry)
+    }
+
+    const normalizedPurchaseRowsMap = new Map<string, PulsePurchaseRow>()
+    const seenPurchaseKeys = new Set<string>()
+
+    for (const row of Array.isArray(paymentHistoryRows) ? paymentHistoryRows : []) {
+      const paymentId = String((row as any)?.id || '').trim()
+      const customer = customersById.get(String((row as any)?.customer_id || '').trim())
+      const ledger =
+        ledgerByPaymentId.get(paymentId) ||
+        ledgerByCaptureId.get(String((row as any)?.capture_id || '').trim()) ||
+        ledgerByOrderId.get(String((row as any)?.order_id || '').trim()) ||
+        null
+      const status = String((ledger as any)?.refundId ? 'refunded' : (row as any)?.status || (ledger as any)?.status || 'completed').trim().toLowerCase()
+      const createdAt = String((ledger as any)?.createdAt || (row as any)?.payment_date || '').trim() || null
+      const amount = Number((row as any)?.amount || (ledger as any)?.amount || 0)
+      const title = getPurchaseTitleFromLedger({
+        paymentMethod: String((ledger as any)?.paymentMethod || (row as any)?.payment_method || ''),
+        note: String((ledger as any)?.note || ''),
+        mode: String((ledger as any)?.mode || ''),
+      })
+      const purchaseRow: PulsePurchaseRow = {
+        id: paymentId || `payment:${String((row as any)?.customer_id || '')}:${createdAt || Math.random()}`,
+        customerName: customer?.name || String((ledger as any)?.customerName || customer?.email || 'Customer').trim(),
+        customerEmail: customer?.email || String((ledger as any)?.customerEmail || '').trim().toLowerCase() || null,
+        amount,
+        title,
+        body: getPurchaseBody({
+          customerName: customer?.name || String((ledger as any)?.customerName || '').trim(),
+          customerEmail: customer?.email || String((ledger as any)?.customerEmail || '').trim().toLowerCase() || null,
+          amount,
+          note: String((ledger as any)?.note || ''),
+        }),
+        createdAt,
+        status,
+      }
+      normalizedPurchaseRowsMap.set(purchaseRow.id, purchaseRow)
+      if (paymentId) seenPurchaseKeys.add(`payment:${paymentId}`)
+      const captureId = String((ledger as any)?.captureId || '').trim()
+      const orderId = String((ledger as any)?.orderId || '').trim()
+      if (captureId) seenPurchaseKeys.add(`capture:${captureId}`)
+      if (orderId) seenPurchaseKeys.add(`order:${orderId}`)
+    }
+
+    for (const entry of Array.isArray(ledgerEntries) ? ledgerEntries : []) {
+      const paymentId = String((entry as any)?.paymentId || '').trim()
+      const captureId = String((entry as any)?.captureId || '').trim()
+      const orderId = String((entry as any)?.orderId || '').trim()
+      if ((paymentId && seenPurchaseKeys.has(`payment:${paymentId}`)) || (captureId && seenPurchaseKeys.has(`capture:${captureId}`)) || (orderId && seenPurchaseKeys.has(`order:${orderId}`))) {
+        continue
+      }
+
+      const customerEmail = String((entry as any)?.customerEmail || '').trim().toLowerCase()
+      const customer = customersByEmail.get(customerEmail)
+      const amount = Number((entry as any)?.amount || 0)
+      const title = getPurchaseTitleFromLedger({
+        paymentMethod: String((entry as any)?.paymentMethod || ''),
+        note: String((entry as any)?.note || ''),
+        mode: String((entry as any)?.mode || ''),
+      })
+      normalizedPurchaseRowsMap.set(`ledger:${captureId || orderId || paymentId || crypto.randomUUID()}`, {
+        id: `ledger:${captureId || orderId || paymentId || crypto.randomUUID()}`,
+        customerName: customer?.name || String((entry as any)?.customerName || customerEmail || 'Customer').trim(),
+        customerEmail: customer?.email || customerEmail || null,
+        amount,
+        title,
+        body: getPurchaseBody({
+          customerName: customer?.name || String((entry as any)?.customerName || '').trim(),
+          customerEmail: customer?.email || customerEmail || null,
+          amount,
+          note: String((entry as any)?.note || ''),
+        }),
+        createdAt: String((entry as any)?.createdAt || (entry as any)?.capturedAt || '').trim() || null,
+        status: String((entry as any)?.refundId ? 'refunded' : (entry as any)?.status || 'completed').trim().toLowerCase(),
+      })
+    }
+
+    const normalizedPurchases = Array.from(normalizedPurchaseRowsMap.values())
+      .filter((row) => row.status === 'completed')
+      .sort((a, b) => toTimestamp(b.createdAt) - toTimestamp(a.createdAt))
 
     const visitorMap = new Map<
       string,
@@ -180,46 +415,90 @@ export async function GET(request: Request) {
       }
     >()
 
-    for (const event of security?.recentIpEvents || []) {
-      const email = String(event?.email || '').trim().toLowerCase()
-      const source = String(event?.source || '').trim().toLowerCase()
-      const createdAt = String(event?.created_at || '').trim()
-      if (!email || source === 'plex-session' || !isFresh(createdAt, 6 * 60 * 1000)) continue
-      if (visitorMap.has(email)) continue
-      visitorMap.set(email, {
-        id: `visitor:${email}`,
-        name: String(event?.name || email).trim(),
-        email,
-        source: source || 'site',
-        seenAt: createdAt,
-      })
+    const visitor24h = new Set<string>()
+    const visitor7d = new Set<string>()
+    const sinceSeenVisitors = new Set<string>()
+    const checkoutEventsRaw: Array<{ id: string; email: string; name: string; createdAt: string; source: string; details: Record<string, unknown> }> = []
+    const recentVisitHistoryMap = new Map<string, PulseHistoryEvent>()
+
+    for (const row of auditHistoryRows || []) {
+      const email = String((row as any)?.email || '').trim().toLowerCase()
+      const createdAt = String((row as any)?.created_at || '').trim()
+      const details = (((row as any)?.details || {}) as Record<string, unknown>) || {}
+      const source = normalizeSource(details.source)
+      if (!email || !createdAt || isIgnoredPulseSource(source)) continue
+
+      const customer = customersByEmail.get(email)
+      const name = customer?.name || String(details.name || email).trim() || email
+      const createdAtMs = new Date(createdAt).getTime()
+      const uniqueVisitKey = email
+
+      visitor7d.add(uniqueVisitKey)
+      if (createdAt >= history24hCutoff) visitor24h.add(uniqueVisitKey)
+      if (seenAtMs > 0 && createdAtMs > seenAtMs) sinceSeenVisitors.add(uniqueVisitKey)
+
+      if (isFresh(createdAt, 6 * 60 * 1000) && !visitorMap.has(email)) {
+        visitorMap.set(email, {
+          id: `visitor:${email}`,
+          name,
+          email,
+          source: source || 'site',
+          seenAt: createdAt,
+        })
+      }
+
+      if (isCheckoutSource(source)) {
+        checkoutEventsRaw.push({
+          id: String((row as any)?.id || `${email}:${createdAt}`),
+          email,
+          name,
+          createdAt,
+          source,
+          details,
+        })
+        continue
+      }
+
+      if (!recentVisitHistoryMap.has(email)) {
+        recentVisitHistoryMap.set(email, {
+          id: `visit:${email}:${createdAt}`,
+          kind: 'visit' as const,
+          title: 'Website visit',
+          body: `${name} opened ${getVisitSourceLabel(source)}.`,
+          href: '/admin',
+          createdAt,
+        })
+      }
     }
 
     const onlineUsers = Array.from(visitorMap.values()).slice(0, 6)
     const plexItems = Array.isArray(plex?.items) ? plex.items : []
-    const websiteEvents = Array.isArray(security?.recentIpEvents)
-      ? security.recentIpEvents.filter((event: any) => {
-          const source = String(event?.source || '').trim().toLowerCase()
-          const createdAt = String(event?.created_at || '').trim()
-          return Boolean(source) && source !== 'plex-session' && isFresh(createdAt, 6 * 60 * 1000)
-        })
-      : []
-    const checkoutEvents = websiteEvents.filter((event: any) =>
-      String(event?.source || '').trim().toLowerCase().includes('paypal-checkout')
-    )
+    const checkoutEvents = checkoutEventsRaw.filter((event) => isFresh(event.createdAt, 20 * 60 * 1000))
+    const purchaseEvents = normalizedPurchases.filter((row) => isFresh(row.createdAt, 20 * 60 * 1000))
     const plexAlerts = plexItems
       .filter((item: any) => item.over_limit || item.over_download_limit || isVideoTranscode(item.videoDecision))
       .slice(0, 6)
 
     const alerts: PulseAlert[] = [
-      ...checkoutEvents.slice(0, 3).map((event: any) => ({
-        id: `checkout:${String(event?.email || '').trim().toLowerCase()}:${String(event?.created_at || '')}`,
+      ...purchaseEvents.slice(0, 4).map((payment) => {
+        return {
+          id: `purchase:${String(payment.id || '')}`,
+          kind: 'purchase' as const,
+          level: 'info' as const,
+          title: payment.title,
+          body: payment.body,
+          href: '/admin/payments',
+          createdAt: payment.createdAt,
+        }
+      }),
+      ...checkoutEvents.slice(0, 3).map((event) => ({
+        id: `checkout:${event.email}:${event.createdAt}`,
         kind: 'checkout' as const,
         level: 'info' as const,
         title: 'Customer opened PayPal checkout',
-        body: String(event?.name || event?.email || 'Checkout activity').trim(),
+        body: String(event.name || event.email || 'Checkout activity').trim(),
         href: '/admin/payments',
-        createdAt: String(event?.created_at || ''),
+        createdAt: event.createdAt,
       })),
       ...waitingChats.slice(0, 3).map((conversation: any) => ({
         id: `chat:${conversation.id}:${conversation.updated_at}`,
@@ -264,6 +543,61 @@ export async function GET(request: Request) {
       })),
     ].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
 
+    const purchase24h = normalizedPurchases.filter((row) => toTimestamp(row.createdAt) >= toTimestamp(history24hCutoff))
+    const purchase7d = normalizedPurchases.filter((row) => toTimestamp(row.createdAt) >= toTimestamp(history7dCutoff))
+
+    const checkout24h = checkoutEventsRaw.filter((event) => toTimestamp(event.createdAt) >= toTimestamp(history24hCutoff))
+
+    const latestPurchases24h: PulseHistoryEvent[] = purchase24h.slice(0, 5).map((payment) => {
+      return {
+        id: `latest-purchase:${String(payment.id || '')}`,
+        kind: 'purchase' as const,
+        title: payment.title,
+        body: payment.body,
+        href: '/admin/payments',
+        createdAt: payment.createdAt,
+      }
+    })
+
+    const latestVisits24h: PulseHistoryEvent[] = Array.from(recentVisitHistoryMap.values())
+      .filter((event) => toTimestamp(event.createdAt) >= toTimestamp(history24hCutoff))
+      .sort((a, b) => toTimestamp(b.createdAt) - toTimestamp(a.createdAt))
+      .slice(0, 5)
+
+    const historyEvents: PulseHistoryEvent[] = [
+      ...purchase7d.slice(0, 10).map((payment) => {
+        return {
+          id: `history-purchase:${String(payment.id || '')}`,
+          kind: 'purchase' as const,
+          title: payment.title,
+          body: payment.body,
+          href: '/admin/payments',
+          createdAt: payment.createdAt,
+        }
+      }),
+      ...checkoutEventsRaw.slice(0, 10).map((event) => ({
+        id: `history-checkout:${event.id}`,
+        kind: 'checkout' as const,
+        title: 'Checkout started',
+        body: `${event.name || event.email} opened ${getVisitSourceLabel(event.source)}.`,
+        href: '/admin/payments',
+        createdAt: event.createdAt,
+      })),
+      ...Array.from(recentVisitHistoryMap.values()).slice(0, 14),
+    ]
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+      .slice(0, 10)
+
+    const sinceSeenPurchases = seenAtMs > 0
+      ? purchase7d.filter((row) => toTimestamp(row.createdAt) > seenAtMs).length
+      : 0
+    const sinceSeenCheckouts = seenAtMs > 0
+      ? checkoutEventsRaw.filter((event) => new Date(event.createdAt).getTime() > seenAtMs).length
+      : 0
+    const sinceSeenWaitingChats = seenAtMs > 0
+      ? waitingChats.filter((conversation: any) => new Date(String(conversation?.updated_at || 0)).getTime() > seenAtMs).length
+      : 0
+
     const payload = {
       role: 'admin',
       counts: {
@@ -271,11 +605,28 @@ export async function GET(request: Request) {
         waitingChats: waitingChats.length,
         activeChats: activeChats.length,
         unreadMail: mail.length,
+        recentPurchases: purchaseEvents.length,
         checkoutStarts: checkoutEvents.length,
         activeStreams: Number(plex?.summary?.activeSessions || 0),
         flaggedStreams:
           Number(plex?.summary?.overLimitSessions || 0) + Number(plex?.summary?.overDownloadSessions || 0),
         transcoding: Number(plex?.summary?.transcodingSessions || 0),
+      },
+      history: {
+        visitors24h: visitor24h.size,
+        visitors7d: visitor7d.size,
+        purchases24h: purchase24h.length,
+        purchases7d: purchase7d.length,
+        checkout24h: checkout24h.length,
+        latestPurchases24h,
+        latestVisits24h,
+        recentEvents: historyEvents,
+        sinceSeen: {
+          visitors: sinceSeenVisitors.size,
+          purchases: sinceSeenPurchases,
+          checkoutStarts: sinceSeenCheckouts,
+          waitingChats: sinceSeenWaitingChats,
+        },
       },
       onlineUsers,
       alerts,

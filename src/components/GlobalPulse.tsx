@@ -21,10 +21,48 @@ type AdminPulse = {
     waitingChats: number
     activeChats: number
     unreadMail: number
+    recentPurchases: number
     checkoutStarts: number
     activeStreams: number
     flaggedStreams: number
     transcoding: number
+  }
+  history: {
+    visitors24h: number
+    visitors7d: number
+    purchases24h: number
+    purchases7d: number
+    checkout24h: number
+    latestPurchases24h: Array<{
+      id: string
+      kind: 'purchase'
+      title: string
+      body: string
+      href: string
+      createdAt: string | null
+    }>
+    latestVisits24h: Array<{
+      id: string
+      kind: 'visit'
+      title: string
+      body: string
+      href: string
+      createdAt: string | null
+    }>
+    recentEvents: Array<{
+      id: string
+      kind: 'visit' | 'checkout' | 'purchase'
+      title: string
+      body: string
+      href: string
+      createdAt: string | null
+    }>
+    sinceSeen: {
+      visitors: number
+      purchases: number
+      checkoutStarts: number
+      waitingChats: number
+    }
   }
   onlineUsers: Array<{
     id: string
@@ -35,7 +73,7 @@ type AdminPulse = {
   }>
   alerts: Array<{
     id: string
-    kind: 'chat' | 'mail' | 'plex' | 'site' | 'checkout'
+    kind: 'chat' | 'mail' | 'plex' | 'site' | 'checkout' | 'purchase'
     level: 'info' | 'warn' | 'critical'
     title: string
     body: string
@@ -74,6 +112,7 @@ type PulseSummary = AdminPulse | CustomerPulse
 const ADMIN_PULSE_REFRESH_MS = 2000
 const CUSTOMER_PULSE_REFRESH_MS = 1500
 const PULSE_SOUND_COOLDOWN_MS = 900
+const PULSE_PRESENCE_HEARTBEAT_MS = 45000
 
 function normalizeEmail(value: unknown) {
   return String(value || '').trim().toLowerCase()
@@ -117,11 +156,59 @@ function formatAge(value: string | null | undefined) {
   return `${hours}h ago`
 }
 
+function formatPulseSource(source: string | null | undefined) {
+  const clean = String(source || '').trim()
+  if (!clean) return 'Website'
+  return clean.replace(/^customer-/, '').replace(/^admin-/, '').replace(/-/g, ' ')
+}
+
 function canPlayAdminAlertSound(alert: AdminPulse['alerts'][number] | null | undefined) {
   if (!alert) return false
-  if (alert.kind === 'chat' || alert.kind === 'mail') return true
+  if (alert.kind === 'chat' || alert.kind === 'mail' || alert.kind === 'purchase') return true
   if (alert.kind !== 'plex') return false
   return alert.level === 'critical'
+}
+
+function getSeenAdminPulseAtKey(email: string) {
+  return `pulse_admin_seen_at:${normalizeEmail(email)}`
+}
+
+function getSeenAdminPulseAt(email: string) {
+  try {
+    return Number(window.localStorage.getItem(getSeenAdminPulseAtKey(email)) || 0)
+  } catch {
+    return 0
+  }
+}
+
+function saveSeenAdminPulseAt(email: string, value: number) {
+  try {
+    window.localStorage.setItem(getSeenAdminPulseAtKey(email), String(value))
+  } catch {}
+}
+
+function getClearedAdminPulseAtKey(email: string) {
+  return `pulse_admin_cleared_at:${normalizeEmail(email)}`
+}
+
+function getClearedAdminPulseAt(email: string) {
+  try {
+    return Number(window.localStorage.getItem(getClearedAdminPulseAtKey(email)) || 0)
+  } catch {
+    return 0
+  }
+}
+
+function saveClearedAdminPulseAt(email: string, value: number) {
+  try {
+    window.localStorage.setItem(getClearedAdminPulseAtKey(email), String(value))
+  } catch {}
+}
+
+function toTimestamp(value: string | null | undefined) {
+  if (!value) return 0
+  const time = new Date(value).getTime()
+  return Number.isNaN(time) ? 0 : time
 }
 
 function canPlayCustomerAlertSound(kind: 'chat' | 'update') {
@@ -134,11 +221,13 @@ export default function GlobalPulse() {
   const [summary, setSummary] = useState<PulseSummary | null>(null)
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [adminClearedAt, setAdminClearedAt] = useState(0)
   const notifiedIdsRef = useRef<Set<string>>(new Set())
   const seededRef = useRef(false)
   const audioReadyRef = useRef(false)
   const audioContextRef = useRef<AudioContext | null>(null)
   const lastSoundAtRef = useRef(0)
+  const lastPresenceTrackedAtRef = useRef(0)
   const isAdminRoute = pathname.startsWith('/admin')
   const isCustomerRoute = pathname.startsWith('/customer')
 
@@ -278,6 +367,14 @@ export default function GlobalPulse() {
   }, [isAdminRoute, isCustomerRoute, pathname])
 
   useEffect(() => {
+    if (identity?.role === 'admin' && typeof window !== 'undefined') {
+      setAdminClearedAt(getClearedAdminPulseAt(identity.email))
+      return
+    }
+    setAdminClearedAt(0)
+  }, [identity])
+
+  useEffect(() => {
     if (!identity) {
       setLoading(false)
       return
@@ -291,8 +388,16 @@ export default function GlobalPulse() {
       try {
         const supabase = getSupabase()
         const token = (await supabase?.auth.getSession().catch(() => ({ data: { session: null } })))?.data.session?.access_token
+        const seenAt =
+          currentIdentity.role === 'admin' && typeof window !== 'undefined'
+            ? getSeenAdminPulseAt(currentIdentity.email)
+            : 0
+        const endpoint =
+          currentIdentity.role === 'admin'
+            ? `/api/live-pulse/admin?seenAt=${encodeURIComponent(String(seenAt))}`
+            : '/api/live-pulse/customer'
 
-        const res = await fetch(`/api/live-pulse/${currentIdentity.role}`, {
+        const res = await fetch(endpoint, {
           cache: 'no-store',
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         })
@@ -313,6 +418,27 @@ export default function GlobalPulse() {
         if (!seededRef.current) {
           notifiedIdsRef.current = new Set(nextIds)
           seededRef.current = true
+          if (currentIdentity.role === 'admin' && typeof window !== 'undefined') {
+            const sinceSeen = data.history?.sinceSeen || {
+              visitors: 0,
+              purchases: 0,
+              checkoutStarts: 0,
+              waitingChats: 0,
+            }
+            const summaryBits = [
+              sinceSeen.visitors ? `${sinceSeen.visitors} visited` : '',
+              sinceSeen.purchases ? `${sinceSeen.purchases} new ${sinceSeen.purchases === 1 ? 'purchase' : 'purchases'}` : '',
+              sinceSeen.checkoutStarts ? `${sinceSeen.checkoutStarts} checkout ${sinceSeen.checkoutStarts === 1 ? 'start' : 'starts'}` : '',
+              sinceSeen.waitingChats ? `${sinceSeen.waitingChats} waiting ${sinceSeen.waitingChats === 1 ? 'chat' : 'chats'}` : '',
+            ].filter(Boolean)
+
+            if (summaryBits.length) {
+              toast(`Live pulse: ${summaryBits.join(' | ')}`)
+              if (sinceSeen.purchases || sinceSeen.waitingChats) {
+                playPulseSound()
+              }
+            }
+          }
         } else {
           for (const id of nextIds) {
             if (!id || notifiedIdsRef.current.has(id)) continue
@@ -347,6 +473,9 @@ export default function GlobalPulse() {
     }
 
     async function trackPresence() {
+      const now = Date.now()
+      if (now - lastPresenceTrackedAtRef.current < PULSE_PRESENCE_HEARTBEAT_MS) return
+      lastPresenceTrackedAtRef.current = now
       try {
         await fetch('/api/security/ip-log', {
           method: 'POST',
@@ -403,16 +532,61 @@ export default function GlobalPulse() {
     )
   }, [open, summary])
 
+  function clearAdminPulseFeed() {
+    if (!identity || !summary || summary.role !== 'admin') return
+    const now = Date.now()
+    saveSeenAdminPulseAt(identity.email, now)
+    saveClearedAdminPulseAt(identity.email, now)
+    setAdminClearedAt(now)
+    setSummary({
+      ...summary,
+      history: {
+        ...summary.history,
+        sinceSeen: {
+          visitors: 0,
+          purchases: 0,
+          checkoutStarts: 0,
+          waitingChats: 0,
+        },
+      },
+    })
+    toast('Pulse feed cleared')
+  }
+
+  const adminSummary = summary?.role === 'admin' ? summary : null
+  const customerSummary = summary?.role === 'customer' ? summary : null
+
+  const visibleAdminHistory = useMemo(() => {
+    if (!adminSummary) {
+      return {
+        latestPurchases24h: [] as AdminPulse['history']['latestPurchases24h'],
+        latestVisits24h: [] as AdminPulse['history']['latestVisits24h'],
+        recentEvents: [] as AdminPulse['history']['recentEvents'],
+      }
+    }
+
+    const keepVisible = (createdAt: string | null) => {
+      if (!adminClearedAt) return true
+      return toTimestamp(createdAt) > adminClearedAt
+    }
+
+    return {
+      latestPurchases24h: adminSummary.history.latestPurchases24h.filter((event) => keepVisible(event.createdAt)),
+      latestVisits24h: adminSummary.history.latestVisits24h.filter((event) => keepVisible(event.createdAt)),
+      recentEvents: adminSummary.history.recentEvents.filter((event) => keepVisible(event.createdAt)),
+    }
+  }, [adminClearedAt, adminSummary])
+
   const shouldRenderShell = isAdminRoute || isCustomerRoute
   if (!identity || !summary) {
     if (!shouldRenderShell) return null
     return (
-      <div className="pointer-events-none fixed bottom-5 left-4 z-50 sm:left-5">
+      <div className="pointer-events-none fixed bottom-[max(0.85rem,env(safe-area-inset-bottom))] right-3 z-[80] sm:right-5">
         <div className="pointer-events-auto">
           <button
             type="button"
             onClick={() => setOpen((value) => !value)}
-            className="glass-strong flex max-w-[calc(100vw-2rem)] items-center gap-3 rounded-full border px-3.5 py-3 text-left shadow-[0_18px_60px_rgba(8,145,178,0.24)]"
+            className="glass-strong flex max-w-[calc(100vw-1.5rem)] items-center gap-3 rounded-full border px-3.5 py-3 text-left shadow-[0_18px_60px_rgba(8,145,178,0.24)]"
           >
             <span className="relative flex h-9 w-9 items-center justify-center rounded-full border border-cyan-400/22 bg-cyan-400/10 text-cyan-200">
               <Bell size={16} />
@@ -435,22 +609,20 @@ export default function GlobalPulse() {
     )
   }
 
-  const adminSummary = summary?.role === 'admin' ? summary : null
-  const customerSummary = summary?.role === 'customer' ? summary : null
   const totalBadges = adminSummary
-    ? adminSummary.counts.onlineNow + adminSummary.counts.waitingChats + adminSummary.counts.unreadMail + adminSummary.counts.checkoutStarts + adminSummary.counts.flaggedStreams + adminSummary.counts.transcoding
+    ? adminSummary.counts.onlineNow + adminSummary.counts.waitingChats + adminSummary.counts.unreadMail + adminSummary.counts.recentPurchases + adminSummary.counts.checkoutStarts + adminSummary.counts.flaggedStreams + adminSummary.counts.transcoding + adminSummary.history.sinceSeen.visitors + adminSummary.history.sinceSeen.purchases + adminSummary.history.sinceSeen.checkoutStarts + adminSummary.history.sinceSeen.waitingChats
     : customerSummary
       ? customerUnseen.chats + (customerUnseen.update ? 1 : 0)
       : 0
 
   return (
-    <div className="pointer-events-none fixed bottom-5 left-4 z-50 sm:left-5">
+    <div className="pointer-events-none fixed bottom-[max(0.85rem,env(safe-area-inset-bottom))] right-3 z-[80] sm:right-5">
       <div className="pointer-events-auto">
         <button
           type="button"
           onClick={() => setOpen((value) => !value)}
           className={`glass-strong flex items-center gap-3 rounded-full border px-3.5 py-3 text-left shadow-[0_18px_60px_rgba(8,145,178,0.24)] ${
-            open ? 'w-[22rem] sm:w-[25rem]' : 'max-w-[calc(100vw-2rem)]'
+            open ? 'w-[22rem] max-w-[calc(100vw-1.5rem)] sm:w-[25rem]' : 'max-w-[calc(100vw-1.5rem)]'
           }`}
         >
           <span className="relative flex h-9 w-9 items-center justify-center rounded-full border border-cyan-400/22 bg-cyan-400/10 text-cyan-200">
@@ -463,7 +635,7 @@ export default function GlobalPulse() {
             </div>
             <div className="mt-0.5 truncate text-sm font-semibold text-white">
               {identity.role === 'admin'
-                ? `${adminSummary?.counts.onlineNow || 0} on site, ${adminSummary?.counts.checkoutStarts || 0} checkout, ${adminSummary?.counts.flaggedStreams || 0} flagged`
+                ? `${adminSummary?.counts.onlineNow || 0} live now | ${adminSummary?.history.visitors24h || 0} visited 24h | ${adminSummary?.history.purchases24h || 0} purchases 24h`
                 : customerSummary?.support.availability === 'off'
                   ? 'Support messages stay queued while offline'
                   : `${customerUnseen.chats} chat replies, ${customerUnseen.update ? 1 : 0} service notice`}
@@ -475,13 +647,17 @@ export default function GlobalPulse() {
         </button>
 
         {open ? (
-          <div className="glass-strong mt-3 w-[22rem] overflow-hidden rounded-[28px] border border-cyan-400/16 p-4 shadow-[0_28px_90px_rgba(2,132,199,0.24)] sm:w-[25rem]">
+          <div className="glass-strong mt-3 max-h-[min(78vh,42rem)] w-[22rem] max-w-[calc(100vw-1.5rem)] overflow-y-auto overflow-x-hidden rounded-[28px] border border-cyan-400/16 p-4 shadow-[0_28px_90px_rgba(2,132,199,0.24)] sm:w-[25rem]">
             {adminSummary ? (
               <div className="space-y-4">
-                <div className="grid grid-cols-5 gap-2">
+                <div className="grid grid-cols-6 gap-2">
                   <div className="rounded-[20px] border border-white/8 bg-white/[0.04] p-3">
                     <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Online</div>
                     <div className="mt-2 text-lg font-semibold text-white">{adminSummary.counts.onlineNow}</div>
+                  </div>
+                  <div className="rounded-[20px] border border-white/8 bg-white/[0.04] p-3">
+                    <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Buys</div>
+                    <div className="mt-2 text-lg font-semibold text-white">{adminSummary.counts.recentPurchases}</div>
                   </div>
                   <div className="rounded-[20px] border border-white/8 bg-white/[0.04] p-3">
                     <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Checkout</div>
@@ -501,6 +677,110 @@ export default function GlobalPulse() {
                   </div>
                 </div>
 
+                <div className="rounded-[24px] border border-cyan-400/16 bg-[linear-gradient(135deg,rgba(34,211,238,0.1),rgba(8,15,40,0.3))] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[11px] uppercase tracking-[0.24em] text-cyan-200/80">Since you were away</div>
+                    <button className="btn-xs-outline" onClick={clearAdminPulseFeed}>
+                      Clear all
+                    </button>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <div className="rounded-[18px] border border-white/8 bg-black/10 px-3 py-2.5">
+                      <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Visitors</div>
+                      <div className="mt-1 text-lg font-semibold text-white">{adminSummary.history.sinceSeen.visitors}</div>
+                    </div>
+                    <div className="rounded-[18px] border border-white/8 bg-black/10 px-3 py-2.5">
+                      <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Purchases</div>
+                      <div className="mt-1 text-lg font-semibold text-white">{adminSummary.history.sinceSeen.purchases}</div>
+                    </div>
+                    <div className="rounded-[18px] border border-white/8 bg-black/10 px-3 py-2.5">
+                      <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Checkout</div>
+                      <div className="mt-1 text-lg font-semibold text-white">{adminSummary.history.sinceSeen.checkoutStarts}</div>
+                    </div>
+                    <div className="rounded-[18px] border border-white/8 bg-black/10 px-3 py-2.5">
+                      <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Waiting chat</div>
+                      <div className="mt-1 text-lg font-semibold text-white">{adminSummary.history.sinceSeen.waitingChats}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-slate-500">
+                    <Bell size={12} className="text-cyan-300" />
+                    Site history
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="rounded-[20px] border border-white/8 bg-white/[0.04] p-3">
+                      <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">24h visitors</div>
+                      <div className="mt-2 text-lg font-semibold text-white">{adminSummary.history.visitors24h}</div>
+                    </div>
+                    <div className="rounded-[20px] border border-white/8 bg-white/[0.04] p-3">
+                      <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">24h buys</div>
+                      <div className="mt-2 text-lg font-semibold text-white">{adminSummary.history.purchases24h}</div>
+                    </div>
+                    <div className="rounded-[20px] border border-white/8 bg-white/[0.04] p-3">
+                      <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">7d visitors</div>
+                      <div className="mt-2 text-lg font-semibold text-white">{adminSummary.history.visitors7d}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-slate-500">
+                    <Mail size={12} className="text-cyan-300" />
+                    Purchases in the last 24h
+                  </div>
+                  <div className="space-y-2">
+                    {visibleAdminHistory.latestPurchases24h.length === 0 ? (
+                      <div className="rounded-[22px] border border-white/8 bg-white/[0.03] px-3 py-3 text-sm text-slate-400">
+                        No uncleared purchases in the last 24 hours.
+                      </div>
+                    ) : (
+                      visibleAdminHistory.latestPurchases24h.map((event) => (
+                        <Link
+                          key={event.id}
+                          href={event.href}
+                          className="flex items-center justify-between gap-3 rounded-[22px] border border-white/8 bg-white/[0.03] px-3 py-3 hover:border-cyan-400/25 hover:bg-cyan-400/[0.06]"
+                        >
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold text-white">{event.title}</div>
+                            <div className="mt-1 truncate text-xs text-slate-400">{previewText(event.body, 64)}</div>
+                          </div>
+                          <div className="text-xs text-slate-500">{formatAge(event.createdAt)}</div>
+                        </Link>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-slate-500">
+                    <Users size={12} className="text-cyan-300" />
+                    Visits in the last 24h
+                  </div>
+                  <div className="space-y-2">
+                    {visibleAdminHistory.latestVisits24h.length === 0 ? (
+                      <div className="rounded-[22px] border border-white/8 bg-white/[0.03] px-3 py-3 text-sm text-slate-400">
+                        No uncleared website visits in the last 24 hours.
+                      </div>
+                    ) : (
+                      visibleAdminHistory.latestVisits24h.map((event) => (
+                        <Link
+                          key={event.id}
+                          href={event.href}
+                          className="flex items-center justify-between gap-3 rounded-[22px] border border-white/8 bg-white/[0.03] px-3 py-3 hover:border-cyan-400/25 hover:bg-cyan-400/[0.06]"
+                        >
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold text-white">{event.title}</div>
+                            <div className="mt-1 truncate text-xs text-slate-400">{previewText(event.body, 64)}</div>
+                          </div>
+                          <div className="text-xs text-slate-500">{formatAge(event.createdAt)}</div>
+                        </Link>
+                      ))
+                    )}
+                  </div>
+                </div>
+
                 <div>
                   <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-slate-500">
                     <Users size={12} className="text-cyan-300" />
@@ -516,7 +796,7 @@ export default function GlobalPulse() {
                         <div key={user.id} className="flex items-center justify-between rounded-[22px] border border-white/8 bg-white/[0.03] px-3 py-3">
                           <div className="min-w-0">
                             <div className="truncate text-sm font-semibold text-white">{user.name || user.email}</div>
-                            <div className="mt-1 text-xs text-slate-400">{user.source.replace(/-/g, ' ')}</div>
+                            <div className="mt-1 text-xs capitalize text-slate-400">{formatPulseSource(user.source)}</div>
                           </div>
                           <div className="text-xs text-slate-500">{formatAge(user.seenAt)}</div>
                         </div>
@@ -547,6 +827,37 @@ export default function GlobalPulse() {
                             <div className="mt-1 truncate text-xs text-slate-400">{previewText(alert.body, 60)}</div>
                           </div>
                           <ChevronRight size={15} className="shrink-0 text-slate-500" />
+                        </Link>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-slate-500">
+                    <Wifi size={12} className="text-cyan-300" />
+                    Recent performance trail
+                  </div>
+                  <div className="space-y-2">
+                    {visibleAdminHistory.recentEvents.length === 0 ? (
+                      <div className="rounded-[22px] border border-white/8 bg-white/[0.03] px-3 py-3 text-sm text-slate-400">
+                        No uncleared website trail right now.
+                      </div>
+                    ) : (
+                      visibleAdminHistory.recentEvents.map((event) => (
+                        <Link
+                          key={event.id}
+                          href={event.href}
+                          className="flex items-center justify-between gap-3 rounded-[22px] border border-white/8 bg-white/[0.03] px-3 py-3 hover:border-cyan-400/25 hover:bg-cyan-400/[0.06]"
+                        >
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold text-white">{event.title}</div>
+                            <div className="mt-1 truncate text-xs text-slate-400">{previewText(event.body, 64)}</div>
+                          </div>
+                          <div className="shrink-0 text-right text-[11px] text-slate-500">
+                            <div className="uppercase tracking-[0.18em]">{event.kind}</div>
+                            <div className="mt-1">{formatAge(event.createdAt)}</div>
+                          </div>
                         </Link>
                       ))
                     )}

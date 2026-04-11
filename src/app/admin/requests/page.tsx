@@ -33,6 +33,11 @@ const statusTone: Record<string, string> = {
   done: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200',
 }
 
+const statusActionCopy: Record<'in-progress' | 'done', string> = {
+  'in-progress': "We're on it.",
+  done: 'Complete. This is now finished.',
+}
+
 export default function AdminRequestsPage() {
   const [items, setItems] = useState<Recommendation[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -105,15 +110,16 @@ export default function AdminRequestsPage() {
     return () => window.clearInterval(interval)
   }, [selectedId])
 
-  async function updateStatus(status: Recommendation['status']) {
+  async function updateStatus(status: Recommendation['status'], fallbackNote?: string) {
     if (!selected) return
     setBusy(true)
     setMessage('')
     try {
+      const resolvedNote = note.trim() || (status === 'pending' ? '' : String(fallbackNote || '').trim())
       const res = await fetch('/api/admin/recommendations', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: selected.id, status, note: note.trim() }),
+        body: JSON.stringify({ id: selected.id, status, note: resolvedNote }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -161,11 +167,11 @@ export default function AdminRequestsPage() {
   })
 
   return (
-    <main className="page-section py-8">
+    <main className="page-section py-5 sm:py-8">
       <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
           <div className="eyebrow">Request Desk</div>
-          <h1 className="mt-3 text-3xl font-semibold text-white">Customer requests and issue reports</h1>
+          <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">Customer requests and issue reports</h1>
           <p className="mt-2 max-w-3xl text-sm text-slate-400">
             A live queue with replies, status changes, and customer feedback in the same workflow.
           </p>
@@ -211,13 +217,13 @@ export default function AdminRequestsPage() {
         </div>
       ) : null}
 
-      <section className="grid gap-6 xl:grid-cols-[0.78fr_1.22fr]">
-        <div className="panel min-h-[70vh] overflow-hidden p-0">
-          <div className="border-b border-white/8 px-5 py-4 text-sm text-slate-400">
+      <section className="grid gap-4 sm:gap-6 xl:grid-cols-[0.78fr_1.22fr]">
+        <div className="panel overflow-hidden p-0 xl:min-h-[70vh]">
+          <div className="border-b border-white/8 px-4 py-3 text-sm text-slate-400 sm:px-5 sm:py-4">
             {loading ? 'Loading queue...' : `${visibleItems.length} items in view`}
           </div>
 
-          <div className="max-h-[72vh] overflow-y-auto p-3">
+          <div className="p-3 xl:max-h-[72vh] xl:overflow-y-auto">
             {loading ? (
               <div className="space-y-3">
                 {[1, 2, 3, 4].map((value) => <div key={value} className="h-28 rounded-[24px] bg-white/[0.03] animate-pulse" />)}
@@ -263,7 +269,7 @@ export default function AdminRequestsPage() {
           </div>
         </div>
 
-        <div className="panel min-h-[70vh] p-6">
+        <div className="panel p-4 sm:p-6 xl:min-h-[70vh]">
           {!selected ? (
             <div className="flex h-full items-center justify-center text-sm text-slate-400">Choose a request to review.</div>
           ) : (
@@ -273,7 +279,7 @@ export default function AdminRequestsPage() {
                   <div className={`inline-flex rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] ${statusTone[selected.status]}`}>
                     {selected.status === 'in-progress' ? 'In progress' : selected.status === 'done' ? 'Complete' : 'Queued'}
                   </div>
-                  <h2 className="mt-4 text-2xl font-semibold text-white">{selected.title}</h2>
+                  <h2 className="mt-3 text-xl font-semibold text-white sm:mt-4 sm:text-2xl">{selected.title}</h2>
                   <div className="mt-2 text-sm text-slate-400">{selected.submitter_email}</div>
                 </div>
 
@@ -291,7 +297,7 @@ export default function AdminRequestsPage() {
                 </div>
               </div>
 
-              <div className="mt-5 grid gap-4 lg:grid-cols-[0.32fr_0.68fr]">
+              <div className="mt-4 grid gap-4 lg:grid-cols-[0.34fr_0.66fr]">
                 <div className="overflow-hidden rounded-[28px] border border-white/8 bg-white/[0.03]">
                   {selected.image ? (
                     <img
@@ -310,36 +316,55 @@ export default function AdminRequestsPage() {
                 </div>
 
                 <div className="space-y-4">
-                  <div className="rounded-[28px] border border-white/8 bg-white/[0.03] p-5">
-                    <div className="text-sm font-semibold text-white">Customer note</div>
-                    <div className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-300">{selected.description}</div>
+                  <div className="rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(8,16,36,0.88),rgba(5,10,22,0.94))] p-5 shadow-[0_18px_55px_rgba(8,15,42,0.24)]">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="text-sm font-semibold text-white">Request brief</div>
+                      <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                        {selected.kind === 'issue' ? 'Issue report' : 'Customer request'}
+                      </div>
+                    </div>
+                    <div className="mt-4 whitespace-pre-wrap text-sm leading-6 text-slate-300">{selected.description}</div>
                   </div>
 
-                  <div className="rounded-[28px] border border-cyan-400/12 bg-cyan-400/[0.05] p-5">
-                    <div className="text-sm font-semibold text-white">Reply and update</div>
+                  <div className="rounded-[28px] border border-cyan-400/12 bg-[linear-gradient(180deg,rgba(8,24,44,0.82),rgba(5,14,28,0.92))] p-5 shadow-[0_18px_60px_rgba(8,145,178,0.14)]">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-white">Update customer</div>
+                        <div className="mt-1 text-sm text-slate-400">
+                          Keep the note tight. If you leave it blank, the default status update goes out automatically.
+                        </div>
+                      </div>
+                      <div className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-cyan-100">
+                        Thread + email
+                      </div>
+                    </div>
                     <textarea
-                      className="input mt-3 min-h-[140px]"
+                      className="input mt-3 min-h-[112px] sm:min-h-[140px]"
                       placeholder="Add a progress note for the customer. This will also appear in their request thread."
                       value={note}
                       onChange={(e) => setNote(e.target.value)}
                     />
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <button className="btn" onClick={() => void updateStatus('in-progress')} disabled={busy}>
-                        {busy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                        Start work
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <button className="btn justify-between px-4 py-3" onClick={() => void updateStatus('in-progress', statusActionCopy['in-progress'])} disabled={busy}>
+                        <span className="inline-flex items-center gap-2">
+                          {busy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                          We&apos;re on it
+                        </span>
+                        <span className="text-[11px] uppercase tracking-[0.18em] text-slate-950/70">In progress</span>
                       </button>
-                      <button className="btn-outline" onClick={() => void updateStatus('done')} disabled={busy}>
-                        Mark complete
+                      <button className="btn-outline justify-between border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-emerald-100 hover:bg-emerald-400/16" onClick={() => void updateStatus('done', statusActionCopy.done)} disabled={busy}>
+                        <span>Complete</span>
+                        <span className="text-[11px] uppercase tracking-[0.18em] text-emerald-200/80">Done</span>
                       </button>
-                      <button className="btn-xs-outline" onClick={() => void updateStatus('pending')} disabled={busy}>
-                        Return to queue
-                      </button>
+                    </div>
+                    <div className="mt-3 text-xs text-slate-500">
+                      One button tells them you are on it. One button closes it out.
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div className="mt-6 flex-1 rounded-[28px] border border-white/8 bg-white/[0.03] p-5">
+              <div className="mt-5 flex-1 rounded-[24px] border border-white/8 bg-white/[0.03] p-4 sm:mt-6 sm:rounded-[28px] sm:p-5">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div className="text-sm font-semibold text-white">Activity thread</div>
                   <button className="btn-xs-outline" onClick={() => selected?.id && void fetchThread(selected.id)} disabled={threadLoading}>

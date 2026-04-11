@@ -63,8 +63,8 @@ export default function ForgotPasswordPage(){
   }
 
   return (
-    <main className="p-6 flex items-center justify-center min-h-[80vh]">
-      <div className="glass p-6 rounded-2xl w-full max-w-md">
+    <main className="page-section customer-auth-shell flex min-h-[calc(100svh-4.5rem)] items-start justify-center py-4 sm:min-h-[80vh] sm:items-center sm:py-8">
+      <div className="glass customer-auth-card w-full max-w-md rounded-[24px] p-4 sm:rounded-2xl sm:p-6">
         <div className="text-center mb-6">
           <Link href="/" className="text-2xl font-bold gradient-text mb-2 block">
             {companyName}

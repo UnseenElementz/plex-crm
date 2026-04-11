@@ -154,17 +154,17 @@ export default function Header() {
   }, [now])
 
   return (
-    <header className="page-section pt-4">
-      <div className="glass flex flex-wrap items-center justify-between gap-4 rounded-[28px] px-4 py-3 sm:px-5">
-        <div className="flex items-center gap-4">
-          <Link href="/" prefetch={false} className="text-lg font-semibold tracking-[0.18em] text-slate-50 uppercase">
+    <header className="page-section pt-3 sm:pt-4">
+      <div className="glass flex flex-wrap items-center justify-between gap-3 rounded-[24px] px-3 py-2.5 sm:rounded-[28px] sm:px-5 sm:py-3">
+        <div className="flex items-center gap-3 sm:gap-4">
+          <Link href="/" prefetch={false} className="text-base font-semibold tracking-[0.14em] text-slate-50 uppercase sm:text-lg sm:tracking-[0.18em]">
             {companyName}
           </Link>
           <div className="hidden h-8 w-px bg-white/10 sm:block" />
           <div className="hidden text-xs uppercase tracking-[0.28em] text-slate-500 sm:block">Invite-Only Media Hosting</div>
         </div>
 
-        <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
+        <div className="flex flex-1 flex-wrap items-center justify-end gap-1.5 sm:gap-2">
           <div className="chrono-card">
             <div className="chrono-time">{timeLabel}</div>
             <div className="chrono-date">{dateLabel}</div>
@@ -176,7 +176,7 @@ export default function Header() {
                 key={item.href}
                 href={item.href}
                 prefetch={false}
-                className={`rounded-2xl px-3 py-2 text-sm ${activeLink ? 'bg-cyan-400/12 text-cyan-200 border border-cyan-400/25' : 'text-slate-400 hover:text-slate-100'}`}
+                className={`rounded-xl px-2.5 py-2 text-xs sm:rounded-2xl sm:px-3 sm:text-sm ${activeLink ? 'bg-cyan-400/12 text-cyan-200 border border-cyan-400/25' : 'text-slate-400 hover:text-slate-100'}`}
               >
                 {item.label}
               </Link>
@@ -194,17 +194,17 @@ export default function Header() {
                 </div>
               ) : null}
               <form onSubmit={handleLogout}>
-                <button className="btn-outline px-4 py-2" type="submit">
+                <button className="btn-outline px-3 py-2 sm:px-4" type="submit">
                   Logout
                 </button>
               </form>
             </>
           ) : (
             <>
-              <Link className="btn-outline px-4 py-2" href="/customer/login" prefetch={false}>
+              <Link className="btn-outline px-3 py-2 sm:px-4" href="/customer/login" prefetch={false}>
                 Customer Login
               </Link>
-              <Link className="btn px-4 py-2" href="/login" prefetch={false}>
+              <Link className="btn px-3 py-2 sm:px-4" href="/login" prefetch={false}>
                 Admin Login
               </Link>
             </>

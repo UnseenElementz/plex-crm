@@ -16,7 +16,7 @@ type TransactionRow = {
   status: string
   created_at: string | null
   note?: string | null
-  type: 'hosting' | 'downloads_addon'
+  type: 'hosting' | 'downloads_addon' | 'streams_addon'
   order_id: string | null
   capture_id: string | null
   refund_id: string | null
@@ -47,6 +47,42 @@ function formatDate(value: string | null) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return 'Unknown date'
   return date.toLocaleString('en-GB')
+}
+
+function getPurchaseLabel(row: TransactionRow) {
+  const note = String(row.note || '').trim()
+  if (note) {
+    return note.split('|')[0]?.trim() || note
+  }
+  if (row.type === 'downloads_addon') return 'Downloads add-on'
+  if (row.type === 'streams_addon') return 'Streams add-on'
+  return 'Hosting renewal'
+}
+
+function getPurchaseDetails(row: TransactionRow) {
+  const note = String(row.note || '').trim()
+  if (note.includes('|')) {
+    const detail = note
+      .split('|')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .slice(1)
+      .join(' | ')
+    if (detail) return detail
+  }
+  if (row.type === 'downloads_addon') return 'Downloads unlocked on the current plan'
+  if (row.type === 'streams_addon') return 'Extra stream add-on applied'
+  return '12-month hosting package'
+}
+
+function getTypeBadge(row: TransactionRow) {
+  if (row.type === 'downloads_addon') return 'downloads'
+  if (row.type === 'streams_addon') {
+    const detail = getPurchaseDetails(row)
+    const match = detail.match(/(\d+)\s+total\s+streams?/i)
+    return match ? `${match[1]} streams` : 'streams'
+  }
+  return '12-month renewal'
 }
 
 export default function AdminPaymentsPage() {
@@ -371,7 +407,7 @@ export default function AdminPaymentsPage() {
                       {row.refund_id ? 'refunded' : row.status}
                     </span>
                     <span className="rounded-full border border-cyan-400/18 bg-cyan-400/10 px-2.5 py-1 text-[11px] uppercase tracking-[0.18em] text-cyan-200">
-                      {row.type === 'downloads_addon' ? 'downloads add-on' : 'hosting'}
+                      {getTypeBadge(row)}
                     </span>
                     {row.source === 'ledger' ? (
                       <span className="rounded-full border border-amber-400/18 bg-amber-400/10 px-2.5 py-1 text-[11px] uppercase tracking-[0.18em] text-amber-200">
@@ -394,6 +430,11 @@ export default function AdminPaymentsPage() {
                     <div className="rounded-[18px] border border-white/8 bg-black/10 px-3 py-2">
                       <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Payment date</div>
                       <div className="mt-1 text-sm text-slate-200">{formatDate(row.created_at)}</div>
+                    </div>
+                    <div className="rounded-[18px] border border-cyan-400/12 bg-cyan-500/10 px-3 py-2">
+                      <div className="text-[10px] uppercase tracking-[0.18em] text-cyan-200/70">Purchase</div>
+                      <div className="mt-1 text-sm text-white">{getPurchaseLabel(row)}</div>
+                      <div className="mt-1 text-xs leading-5 text-cyan-100/75">{getPurchaseDetails(row)}</div>
                     </div>
                     <div className="rounded-[18px] border border-white/8 bg-black/10 px-3 py-2">
                       <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Incoming amount</div>

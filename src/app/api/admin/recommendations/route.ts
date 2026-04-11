@@ -3,20 +3,50 @@ import { cookies } from 'next/headers'
 import { sendCustomEmail } from '@/lib/email'
 import { createServiceClient } from '@/lib/serverSupabase'
 
+function normalizeUiStatus(status: string) {
+  const clean = String(status || '').trim().toLowerCase()
+  if (clean === 'completed') return 'done'
+  if (clean === 'in-progress') return 'in-progress'
+  if (clean === 'done') return 'done'
+  return 'pending'
+}
+
+function normalizeStoredStatus(status: string) {
+  const clean = String(status || '').trim().toLowerCase()
+  if (clean === 'completed') return 'done'
+  if (clean === 'done') return 'done'
+  if (clean === 'in-progress') return 'in-progress'
+  return 'pending'
+}
+
+function isWorkingComment(comment: any) {
+  const author = String(comment?.author_email || '').trim().toLowerCase()
+  const content = String(comment?.content || '').trim().toLowerCase()
+  return author === 'system@streamzrus.local' && content.startsWith("we're on it")
+}
+
+function getDisplayStatus(status: string, comments: any[]) {
+  const normalized = normalizeStoredStatus(status)
+  if (normalized === 'done') return 'done'
+  if (normalized === 'in-progress') return 'in-progress'
+  return comments.some((comment) => isWorkingComment(comment)) ? 'in-progress' : 'pending'
+}
+
 function formatStatusLabel(status: string) {
-  if (status === 'in-progress') return 'in progress'
-  if (status === 'done') return 'completed'
+  if (normalizeUiStatus(status) === 'in-progress') return 'in progress'
+  if (normalizeUiStatus(status) === 'done') return 'completed'
   return 'queued'
 }
 
 function formatStatusComment(status: string, kind: string) {
-  if (status === 'done') {
+  const normalized = normalizeUiStatus(status)
+  if (normalized === 'done') {
     return kind === 'issue'
-      ? 'Status updated to complete. The reported issue has been resolved.'
-      : 'Status updated to complete. This request has now been added.'
+      ? 'Complete. The reported issue has been resolved.'
+      : 'Complete. This request has now been added.'
   }
-  if (status === 'in-progress') {
-    return 'Status updated to in progress. The team is now reviewing this.'
+  if (normalized === 'in-progress') {
+    return "We're on it. The team is now working through this."
   }
   return 'Status updated to queued.'
 }
@@ -28,13 +58,14 @@ function buildStatusEmail(input: {
   status: string
   note?: string
 }) {
+  const normalized = normalizeUiStatus(input.status)
   const headline =
-    input.status === 'done'
+    normalized === 'done'
       ? input.kind === 'issue'
         ? 'Your reported issue has been resolved.'
         : 'Your request has been completed.'
-      : input.status === 'in-progress'
-        ? 'Your request is now being worked on.'
+      : normalized === 'in-progress'
+        ? "We're on it."
         : 'Your request is still in the queue.'
 
   return {
@@ -114,6 +145,7 @@ async function enrichItems(s: ReturnType<typeof createServiceClient>, rows: any[
     const latestComment = comments[comments.length - 1]
     return {
       ...item,
+      status: getDisplayStatus(item.status, comments),
       comments_count: comments.length,
       likes_count: likeMap.get(String(item.id)) || 0,
       latest_comment_preview: latestComment ? String(latestComment.content || '').replace(/\s+/g, ' ').trim().slice(0, 180) : '',
@@ -157,7 +189,7 @@ export async function PUT(req: Request) {
   try {
     const { id, status, note } = await req.json()
     const cleanId = String(id || '').trim()
-    const cleanStatus = String(status || '').trim()
+    const cleanStatus = normalizeUiStatus(status)
     const cleanNote = String(note || '').trim()
 
     if (!cleanId) return NextResponse.json({ error: 'ID required' }, { status: 400 })
@@ -168,10 +200,17 @@ export async function PUT(req: Request) {
     const { data: existing, error: existingErr } = await s.from('recommendations').select('*').eq('id', cleanId).single()
     if (existingErr || !existing) return NextResponse.json({ error: existingErr?.message || 'Request not found' }, { status: 404 })
 
-    const nextStatus = cleanStatus || existing.status || 'pending'
+    const existingUiStatus = normalizeStoredStatus(existing.status)
+    const nextStatus = cleanStatus || existingUiStatus || 'pending'
     const now = new Date().toISOString()
     const supportsUpdatedAt = await recommendationsHaveUpdatedAt(s)
-    const updatePayload: any = { status: nextStatus }
+    const nextStoredStatus =
+      nextStatus === 'in-progress'
+        ? existingUiStatus === 'done'
+          ? 'pending'
+          : normalizeStoredStatus(existing.status)
+        : nextStatus
+    const updatePayload: any = { status: nextStoredStatus }
     if (supportsUpdatedAt) updatePayload.updated_at = now
     const { data: rec, error: updateErr } = await s
       .from('recommendations')
@@ -183,7 +222,7 @@ export async function PUT(req: Request) {
     if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 })
 
     const commentPayloads: any[] = []
-    if (existing.status !== nextStatus) {
+    if (existingUiStatus !== nextStatus) {
       commentPayloads.push({
         id: crypto.randomUUID(),
         recommendation_id: cleanId,

@@ -304,10 +304,18 @@ export async function scanPlexSessions() {
 
   const latestResource = dashboard.resources[dashboard.resources.length - 1] || null
   const latestBandwidth = dashboard.bandwidth[dashboard.bandwidth.length - 1] || null
+  const overLimitCustomers = new Set(
+    finalItems
+      .filter((item) => item.over_limit)
+      .map((item) =>
+        String(item.customer_email || item.customer_name || item.user || item.userId || item.sessionKey || '').trim().toLowerCase()
+      )
+      .filter(Boolean)
+  )
   const summary = {
     activeSessions: finalItems.length,
     transcodingSessions: finalItems.filter((item) => isVideoTranscodingSession(item)).length,
-    overLimitSessions: finalItems.filter((item) => item.over_limit).length,
+    overLimitSessions: overLimitCustomers.size,
     activeDownloads: finalItems.filter((item) => item.isDownload).length,
     overDownloadSessions: finalItems.filter((item) => item.over_download_limit).length,
     remoteSessions: finalItems.filter((item) => item.location === 'wan').length,

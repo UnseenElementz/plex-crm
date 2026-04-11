@@ -7,19 +7,20 @@ import { type PayPalCheckoutMode } from '@/lib/payments'
 function buildHostingReference(plan?: Plan, servers?: number, downloads?: boolean) {
   const safePlan = plan || 'yearly'
   const safeServers = Math.max(1, Number(servers || 1))
-  const duration = safePlan === 'monthly' ? '1 Month' : '1 Year'
+  const duration = safePlan === 'monthly' ? '1 Month' : '12 Months'
   const packageLabel =
     safePlan === 'movies_only'
-      ? 'Movie Hosting'
+      ? 'Movies Only'
       : safePlan === 'tv_only'
-        ? 'TV Hosting'
-        : 'Hosting'
-  const serverLabel = `${safeServers} ${safeServers === 1 ? 'Server' : 'Servers'}`
+        ? 'TV Shows Only'
+        : 'Full Access'
+  const serverLabel = `${safeServers} ${safeServers === 1 ? 'Stream' : 'Streams'}`
   return `${duration} ${packageLabel} - ${serverLabel}${downloads ? ' + Downloads' : ''}`
 }
 
 function buildReference(mode?: PayPalCheckoutMode, plan?: Plan, servers?: number, downloads?: boolean) {
   if (mode === 'downloads_addon') return 'Downloads Add-on'
+  if (mode === 'streams_addon') return `Extra Stream Add-on - ${Math.max(1, Number(servers || 1))} Total ${Math.max(1, Number(servers || 1)) === 1 ? 'Stream' : 'Streams'}`
   return buildHostingReference(plan, servers, downloads)
 }
 
@@ -133,7 +134,9 @@ export default function PayPalButton({
         <div className="mt-2 text-xs text-slate-400">
           {mode === 'downloads_addon'
             ? 'This payment only adds downloads to the current account. It does not change the renewal date or package.'
-            : 'Payment records use hosting wording only and update your account automatically once PayPal confirms the order.'}
+            : mode === 'streams_addon'
+              ? 'This payment only adds extra streams to the current account. It does not change the renewal date or package.'
+              : 'This renews the membership package and updates the account automatically once PayPal confirms the order.'}
         </div>
       </div>
 
